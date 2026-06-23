@@ -10,15 +10,25 @@ let package = Package(
         .target(
             name: "CoveyKit",
             swiftSettings: [.swiftLanguageMode(.v5)]
-       ),
+        ),
+        .target(
+            name: "CoveydCore",
+            dependencies: ["CoveyKit"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
         .executableTarget(
             name: "coveyd",
             swiftSettings: [.swiftLanguageMode(.v5)]
-       ),
+        ),
         .testTarget(
             name: "CoveyKitTests",
             dependencies: ["CoveyKit"],
             swiftSettings: [.swiftLanguageMode(.v5)]
-       )
+        ),
+        .testTarget(
+            name: "CoveydCoreTests",
+            dependencies: ["CoveydCore"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        )
     ]
 )
