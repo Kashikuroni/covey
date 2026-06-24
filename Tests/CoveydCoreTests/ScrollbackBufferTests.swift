@@ -2,9 +2,6 @@ import XCTest
 @testable import CoveydCore
 
 final class ScrollbackBufferTests: XCTestCase {
-    private func bytes(_ s: String) -> [UInt8] {
-        Array(s.utf8)
-    }
     private func assertSince(
         _ buffer: ScrollbackBuffer,
         from seq: Int,
