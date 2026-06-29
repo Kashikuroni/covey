@@ -1,45 +1,48 @@
 /// A bounded ring buffer of raw PTY output, addressed by an absolute byte
-/// sequence number (`seq`). A late-attaching client can backfill via `since`.
+/// sequence number (`seq`). Eviction is O(1): bytes are overwritten in place.
 public final class ScrollbackBuffer {
     /// `seq` of the oldest byte still available.
-    public private(set) var headSeq: Int = 0
+    public private(set) var headSeq = 0
     /// `seq` one past the last byte ever appended.
-    public private(set) var tailSeq: Int = 0
-    
-    private var storage: [UInt8] = []
-    private let limit: Int
-    
+    public private(set) var tailSeq = 0
+
+    private var storage: [UInt8]
+    private var count = 0
+    private let capacity: Int
+
     public init(limit: Int) {
-        self.limit = max(1, limit)
+        capacity = max(1, limit)
+        storage = [UInt8](repeating: 0, count: capacity)
     }
-    
-    /// Appends bytes and returns their seq range `[from, to]`.
+
     @discardableResult
     public func append(_ bytes: [UInt8]) -> (from: Int, to: Int) {
         let from = tailSeq
-        storage.append(contentsOf: bytes)
-        tailSeq += bytes.count
-        if storage.count > limit {
-            let drop = storage.count - limit
-            storage.removeFirst(drop)
-            headSeq += drop
+        // Write every byte at its absolute position (seq % capacity). If the chunk is
+        // larger than capacity, earlier bytes are simply overwritten — only the last
+        // `capacity` survive, at the correct positions. O(bytes.count), no array shift.
+        for byte in bytes {
+            storage[tailSeq % capacity] = byte
+            tailSeq += 1
         }
+        count = min(count + bytes.count, capacity)
+        headSeq = tailSeq - count
         return (from, tailSeq)
     }
-    
-    /// Returns bytes starting at `seq`. If `seq` was already evicted, returns
-    /// the available tail and sets `gapped = true` (history was lost).
-    public func since(_ seq: Int) -> (
-        bytes: [UInt8],
-        fromSeq: Int,
-        gapped: Bool
-    ) {
+
+    public func since(_ seq: Int) -> (bytes: [UInt8], fromSeq: Int, gapped: Bool) {
         let gapped = seq < headSeq
         let effective = max(seq, headSeq)
-        if effective >= tailSeq {
-            return ([], tailSeq, gapped)
+        if effective >= tailSeq { return ([], tailSeq, gapped) }
+        let length = tailSeq - effective
+        var out = [UInt8]()
+        out.reserveCapacity(length)
+        var idx = effective % capacity
+        for _ in 0..<length {
+            out.append(storage[idx])
+            idx += 1
+            if idx == capacity { idx = 0 }
         }
-        let offset = effective - headSeq
-        return (Array(storage[offset...]), effective, gapped)
+        return (out, effective, gapped)
     }
 }

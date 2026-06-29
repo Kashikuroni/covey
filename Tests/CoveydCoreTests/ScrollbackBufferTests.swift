@@ -63,4 +63,17 @@ final class ScrollbackBufferTests: XCTestCase {
         b.append(bytes("xy"))
         assertSince(b, from: 10, equals: "", fromSeq: 2, gapped: false)
     }
+    
+    func testSinceReadsAcrossRingWrap() {
+        let b = ScrollbackBuffer(limit: 4)
+        b.append(bytes("ab"))
+        b.append(bytes("cd"))
+        b.append(bytes("ef")) // ring now holds "cdef", head=2, tail=6
+        XCTAssertEqual(b.headSeq, 2)
+        XCTAssertEqual(b.tailSeq, 6)
+        let got = b.since(2)
+        XCTAssertEqual(got.bytes, bytes("cdef"))
+        XCTAssertEqual(got.fromSeq, 2)
+        XCTAssertFalse(got.gapped)
+    }
 }
