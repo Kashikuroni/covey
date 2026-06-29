@@ -7,13 +7,13 @@ public enum PTYError: Error {
 
 /// Owns one child process running in its own PTY: spawn via forkpty, read output
 /// through a DispatchSource, write input, resize, kill. Byte-transparent.
-///
-/// SKELETON: action methods are not implemented yet (they trap at runtime).
 public final class PTYProcess {
-    /// Called with each output chunk and the seq of its first byte.
-    public var onOutput: (([UInt8], Int) -> Void)?///
-    /// Called once with the child's exit code.
-    public var onExit: ((Int32) -> Void)?
+    /// Output handler, invoked on the internal queue with each chunk and the
+    /// seq of its first byte. Assign it via `setOutputHandler`.
+    private var onOutput: (([UInt8], Int) -> Void)?
+    /// Exit handler, invoked once on the internal queue with the exit code.
+    /// Assign it via `setExitHandler`.
+    private var onExit: ((Int32) -> Void)?
     
     private let buffer: ScrollbackBuffer
     private let queue = DispatchQueue(label: "covey.pty")
@@ -24,6 +24,17 @@ public final class PTYProcess {
     
     public init(scrollbackLimit: Int = 1_000_000) {
         self.buffer = ScrollbackBuffer(limit: scrollbackLimit)
+    }
+    
+    /// Sets the output handler on the internal queue, so it is never written
+    /// concurrently with the read loop that invokes it.
+    public func setOutputHandler(_ handler: (([UInt8], Int) -> Void)?) {
+        queue.async { [weak self] in self?.onOutput = handler }
+    }
+    
+    /// Sets the exit handler on the internal queue (same reasoning).
+    public func setExitHandler(_ handler: ((Int32) -> Void)?) {
+        queue.async { [weak self] in self?.onExit = handler }
     }
     
     public func spawn(
@@ -68,8 +79,19 @@ public final class PTYProcess {
         queue.async { [weak self] in
             guard let self, self.masterFD >= 0 else { return }
             bytes.withUnsafeBytes { raw in
-                guard let base = raw.baseAddress else {return}
-                _ = Darwin.write(self.masterFD, base, raw.count)
+                guard var base = raw.baseAddress else {return}
+                var remaining = raw.count
+                while remaining > 0 {
+                    let n = Darwin.write(self.masterFD, base, remaining)
+                    if n > 0 {
+                        base = base.advanced(by: n)
+                        remaining -= n
+                    } else if n < 0 && errno == EINTR {
+                        continue // interrupted by a signal - retry
+                    } else {
+                        break // EOF or fatal error (e.g. EPIPE: child gone)
+                    }
+                }
             }
         }
     }
@@ -118,7 +140,7 @@ public final class PTYProcess {
             let range = buffer.append(chunk)
             onOutput?(chunk, range.from)
         } else {
-            reap()  // EOF (n == 0) or EIO after the cild exits (n < 0)
+            reap()  // EOF (n == 0) or EIO after the child exits (n < 0)
         }
     }
     

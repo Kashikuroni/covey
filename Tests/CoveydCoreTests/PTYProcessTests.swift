@@ -6,7 +6,7 @@ final class PTYProcessTests: XCTestCase {
         let exp = expectation(description: "output contains \(needle)")
         exp.assertForOverFulfill = false
         var collected = [UInt8]()
-        p.onOutput = { chunk, _ in
+        p.setOutputHandler { chunk, _ in
             collected += chunk
             if String(
                 decoding: collected,
@@ -22,7 +22,7 @@ final class PTYProcessTests: XCTestCase {
         let outExp = expectOutput(p, contains: "hello")
         let exitExp = expectation(description: "exit")
         var code: Int32 = -999
-        p.onExit = { code = $0; exitExp.fulfill()}
+        p.setExitHandler { code = $0; exitExp.fulfill()}
         try p.spawn(argv: ["/bin/echo", "hello"], cols: 80, rows: 24)
         wait(for: [outExp, exitExp], timeout: 5)
         XCTAssertEqual(code, 0)
@@ -32,7 +32,7 @@ final class PTYProcessTests: XCTestCase {
         let p = PTYProcess()
         let echoExp = expectOutput(p, contains: "ping")
         let exitExp = expectation(description: "exit")
-        p.onExit = { _ in exitExp.fulfill()}
+        p.setExitHandler { _ in exitExp.fulfill()}
         try p.spawn(argv: ["/bin/cat"], cols: 80, rows: 24)
         p.write(bytes("ping\n"))
         wait(for: [echoExp], timeout: 5)
@@ -44,7 +44,7 @@ final class PTYProcessTests: XCTestCase {
         let p = PTYProcess()
         let exitExp = expectation(description: "exit")
         var code: Int32 = -1
-        p.onExit = { code = $0; exitExp.fulfill()}
+        p.setExitHandler { code = $0; exitExp.fulfill()}
         try p.spawn(argv: ["/nonexistent/binary"], cols: 80, rows: 24)
         wait(for: [exitExp], timeout: 5)
         XCTAssertEqual(code, 127)

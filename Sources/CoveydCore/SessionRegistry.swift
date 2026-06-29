@@ -6,9 +6,8 @@ public enum RegistryError: Error, Equatable {
     case notFound(String)
 }
 
-/// In-memory registryy of live sessions: name -> (Session, PTYProcess).
-/// A process exit removes its entry automatically and notifies vie `onExit`.
-/// SKELETON: action methods are no implemented yet (they trap at runtime).
+/// In-memory registry of live sessions: name -> (Session, PTYProcess).
+/// A process exit removes its entry automatically and notifies via `onExit`.
 public final class SessionRegistry {
     /// Called when a session's process exits: (name, exit code).
     public var onExit: ((String, Int32) -> Void)?
@@ -36,7 +35,7 @@ public final class SessionRegistry {
             created: clock(), git: nil, worktreeRepo: nil
         )
         let proc = PTYProcess()
-        proc.onExit = { [weak self] code in self?.handleExit(id, code)}
+        proc.setExitHandler { [weak self] code in self?.handleExit(id, code)}
         do {
             try proc.spawn(argv: argv, cwd: dir, cols: 80, rows: 24)
         } catch {
@@ -72,7 +71,7 @@ public final class SessionRegistry {
         lock.lock()
         let proc = entries[name]?.process
         lock.unlock()
-        proc?.onOutput = handler
+        proc?.setOutputHandler(handler)
     }
 
     public func write(name: String, bytes: [UInt8]) {

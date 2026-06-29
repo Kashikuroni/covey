@@ -1,7 +1,7 @@
-///A bounded ring buffer of raw PTY output, addressed by an absolute byte
-/// sequence number (`seq`). A late-attaching client can backfill vie `since`.
+/// A bounded ring buffer of raw PTY output, addressed by an absolute byte
+/// sequence number (`seq`). A late-attaching client can backfill via `since`.
 public final class ScrollbackBuffer {
-    /// `seq` of the oldest byte still availbale.
+    /// `seq` of the oldest byte still available.
     public private(set) var headSeq: Int = 0
     /// `seq` one past the last byte ever appended.
     public private(set) var tailSeq: Int = 0

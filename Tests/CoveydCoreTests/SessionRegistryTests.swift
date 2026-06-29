@@ -11,7 +11,7 @@ final class SessionRegistryTests: XCTestCase {
         XCTAssertEqual(reg.list().map(\.name), [s.name])
         reg.kill(name: s.name)
     }
-
+    
     func testDuplicateNameThrows() throws {
         let reg = SessionRegistry()
         _ = try reg.create(dir: "/usr", agent: "sh", argv: ["/bin/cat"], name: "dup")
@@ -22,7 +22,7 @@ final class SessionRegistryTests: XCTestCase {
         }
         reg.kill(name: "dup")
     }
-
+    
     func testKillRemovesFromList() throws {
         let reg = SessionRegistry()
         let exitExp = expectation(description: "exit")
@@ -32,7 +32,7 @@ final class SessionRegistryTests: XCTestCase {
         wait(for: [exitExp], timeout: 5)
         XCTAssertTrue(reg.list().isEmpty)
     }
-
+    
     func testTwoSessionsIndependentOutput() throws {
         let reg = SessionRegistry()
         let s1 = try reg.create(dir: "/usr", agent: "sh", argv: ["/bin/cat"])
@@ -55,4 +55,5 @@ final class SessionRegistryTests: XCTestCase {
         XCTAssertFalse(String(decoding: b1, as: UTF8.self).contains("two"))
         reg.kill(name: s1.name)
         reg.kill(name: s2.name)
-    }}
+    }
+}
