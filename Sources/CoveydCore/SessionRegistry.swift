@@ -11,6 +11,8 @@ public enum RegistryError: Error, Equatable {
 public final class SessionRegistry {
     /// Called when a session's process exits: (name, exit code).
     public var onExit: ((String, Int32) -> Void)?
+    public var onSessionAdded: ((Session) -> Void)?
+    public var onSessionRemoved: ((String) -> Void)?
     private var entries: [String: (session: Session, process: PTYProcess)] = [:]
     private let lock = NSLock()
     private let clock: () -> Int64
@@ -21,7 +23,10 @@ public final class SessionRegistry {
     }
     
     public func create (
-        dir: String, agent: String, argv: [String], name: String? = nil
+        dir: String,
+        agent: String,
+        argv: [String],
+        name: String? = nil
     ) throws -> Session {
         lock.lock()
         counter += 1
@@ -44,6 +49,7 @@ public final class SessionRegistry {
         }
         entries[id] = (session, proc)
         lock.unlock()
+        onSessionAdded?(session)
         return session
     }
     
@@ -86,6 +92,29 @@ public final class SessionRegistry {
         let proc = entries[name]?.process
         lock.unlock()
         proc?.resize(cols: cols, rows: rows)
+    }
+    
+    public func rename(name: String, newName: String) throws {
+        lock.lock()
+        guard var entry = entries[name] else {
+            lock.unlock(); throw RegistryError.notFound(name)
+        }
+        if entries[newName] != nil {
+            lock.unlock(); throw RegistryError.duplicateName(newName)
+        }
+        entry.session.name = newName
+        entries[name] = nil
+        entries[newName] = entry
+        lock.unlock()
+        onSessionRemoved?(name)
+        onSessionAdded?(entry.session)
+    }
+    
+    public func backfill(name: String, since seq: Int) -> (bytes: [UInt8], fromSeq: Int, gapped: Bool)? {
+        lock.lock()
+        let proc = entries[name]?.process
+        lock.unlock()
+        return proc?.backfill(since: seq)
     }
     
     private func handleExit(_ id: String, _ code: Int32) {

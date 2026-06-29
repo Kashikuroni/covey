@@ -56,4 +56,49 @@ final class SessionRegistryTests: XCTestCase {
         reg.kill(name: s1.name)
         reg.kill(name: s2.name)
     }
+    
+    func testCreateFiresSessionAdded() throws {
+            let reg = SessionRegistry(clock: { 1 })
+            let added = expectation(description: "added")
+            reg.onSessionAdded = { _ in added.fulfill() }
+            let s = try reg.create(dir: "/usr", agent: "sh", argv: ["/bin/cat"])
+            wait(for: [added], timeout: 5)
+            reg.kill(name: s.name)
+        }
+
+    func testRenameMovesEntryAndFiresEvents() throws {
+        let reg = SessionRegistry()
+        let removed = expectation(description: "removed")
+        let added = expectation(description: "added")
+        let s = try reg.create(dir: "/usr", agent: "sh", argv: ["/bin/cat"], name: "old")
+        reg.onSessionRemoved = { name in if name == "old" { removed.fulfill() } }
+        reg.onSessionAdded = { sess in if sess.name == "new" { added.fulfill() } }
+        try reg.rename(name: "old", newName: "new")
+        wait(for: [removed, added], timeout: 5)
+        XCTAssertNil(reg.get(name: "old"))
+        XCTAssertEqual(reg.get(name: "new")?.name, "new")
+        reg.kill(name: "new")
+    }
+
+    func testRenameUnknownThrowsNotFound() throws {
+        let reg = SessionRegistry()
+        XCTAssertThrowsError(try reg.rename(name: "ghost", newName: "x")) {
+            XCTAssertEqual($0 as? RegistryError, .notFound("ghost"))
+        }
+    }
+
+    func testRenameToTakenThrowsDuplicate() throws {
+        let reg = SessionRegistry()
+        _ = try reg.create(dir: "/usr", agent: "sh", argv: ["/bin/cat"], name: "a")
+        _ = try reg.create(dir: "/usr", agent: "sh", argv: ["/bin/cat"], name: "b")
+        XCTAssertThrowsError(try reg.rename(name: "a", newName: "b")) {
+            XCTAssertEqual($0 as? RegistryError, .duplicateName("b"))
+        }
+        reg.kill(name: "a"); reg.kill(name: "b")
+    }
+
+    func testBackfillReturnsNilForUnknown() throws {
+        let reg = SessionRegistry()
+        XCTAssertNil(reg.backfill(name: "ghost", since: 0))
+    }
 }
