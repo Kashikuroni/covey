@@ -18,6 +18,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "coveyd",
+            dependencies: ["CoveydCore"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
