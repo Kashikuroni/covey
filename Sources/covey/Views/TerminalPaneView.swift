@@ -25,6 +25,9 @@ struct TerminalPaneView: View {
             Text(session.name).fontWeight(.semibold)
             Text(session.dir).foregroundStyle(.secondary).lineLimit(1)
             Spacer()
+            if isClaudeAgent(session.agent) {
+                UsageChip(usage: model.usage, plan: model.plan, error: model.usageError)
+            }
             Text(session.agent).foregroundStyle(.secondary).font(.caption)
         }
         .padding(.horizontal, 10)
