@@ -217,4 +217,83 @@ final class AppModelChromeTests: XCTestCase {
         model.modal = nil
         await model.kill(name)
     }
+
+    @MainActor
+    func testNotesPersistAndCounters() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let path = "\(NSTemporaryDirectory())covey-notes-\(UInt32.random(in: 0..<UInt32.max)).json"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = StateStore(path: path, debounce: 0.05)
+        let client = IPCClient(path: daemon.path); try client.connect()
+        let model = AppModel(client: client,
+                             makeClient: { let c = IPCClient(path: daemon.path); try c.connect(); return c },
+                             store: store)
+        await model.start()
+        model.setNote(session: "s1", text: "- [ ] a\n- [x] b")
+        model.setProjectNote(dir: "/w", text: "- [ ] p")
+        model.setProjectName(dir: "/w", name: "Web")
+        store.flush()
+        let back = store.load()
+        XCTAssertEqual(back.notes["s1"], "- [ ] a\n- [x] b")
+        XCTAssertEqual(back.projectNotes["/w"], "- [ ] p")
+        XCTAssertEqual(back.projectNames["/w"], "Web")
+        XCTAssertEqual(model.displayName(forDir: "/w"), "Web")
+        model.setNote(session: "s1", text: "")
+        model.setProjectName(dir: "/w", name: "")
+        store.flush()
+        XCTAssertNil(store.load().notes["s1"], "empty note drops the key")
+        XCTAssertNil(store.load().projectNames["/w"], "empty name drops the override")
+    }
+
+    @MainActor
+    func testNoteToggleFlowAndEditing() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        await model.create(dir: "/a", agent: "/bin/cat")
+        _ = await eventually { model.sessions.count == 1 }
+        let name = model.sessions[0].name
+        await model.select(name)
+        model.apply(.toggleSessionNote)
+        XCTAssertEqual(model.noteTarget, .session(name))
+        XCTAssertEqual(model.inputMode, .note)
+        XCTAssertTrue(model.showInspector, "opening a note reveals the inspector")
+        model.apply(.toggleSessionNote)
+        XCTAssertNil(model.noteTarget, "second t closes")
+        XCTAssertEqual(model.inputMode, .normal)
+        model.apply(.toggleProjectNote)
+        XCTAssertEqual(model.noteTarget, .project("/a"))
+        model.setNoteText("- [ ] one\n- [ ] two")
+        model.apply(.noteToggleTask)
+        XCTAssertEqual(taskCounts(model.noteText()).done, 1)
+        model.apply(.noteCursor(down: true))
+        model.apply(.noteVisual)
+        model.apply(.noteCursor(down: false))
+        model.apply(.noteDelete)
+        XCTAssertEqual(taskCounts(model.noteText()).total, 0, "visual delete removes both")
+        model.setNoteText("- [ ] x")
+        model.apply(.noteArmClear)
+        model.apply(.noteCursor(down: true))   // any non-y key disarms, does nothing else
+        XCTAssertEqual(model.noteText(), "- [ ] x")
+        model.apply(.noteArmClear)
+        model.apply(.noteYank)                 // armed + y wipes
+        XCTAssertEqual(model.noteText(), "")
+        model.apply(.noteEscape)
+        XCTAssertNil(model.noteTarget)
+        await model.kill(name)
+    }
+
+    @MainActor
+    func testRenameProjectModal() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        await model.create(dir: "/a", agent: "/bin/cat")
+        _ = await eventually { model.sessions.count == 1 }
+        await model.select(model.sessions[0].name)
+        model.apply(.renameProject)
+        XCTAssertEqual(model.modal, .renameProject("/a"))
+        model.modal = nil
+        await model.kill(model.sessions[0].name)
+    }
 }

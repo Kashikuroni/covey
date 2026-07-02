@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 import CoveyKit
@@ -12,6 +13,18 @@ public final class AppModel {
         case newSession
         case kill(String)
         case rename(String)
+        case renameProject(String)
+    }
+
+    public enum NoteTarget: Equatable {
+        case session(String), project(String)
+    }
+
+    public struct NoteUIState: Equatable {
+        public var cursor = 0
+        public var visualAnchor: Int?
+        public var editing = false
+        public var clearArmed = false
     }
 
     public enum Focus { case sessions, terminal, inspector }
@@ -55,6 +68,11 @@ public final class AppModel {
     /// Commands for the mounted terminal view (focus/scroll); set by the
     /// representable like `onTerminalOutput`.
     public var onTerminalCommand: ((TerminalCommand) -> Void)?
+    public private(set) var noteTarget: NoteTarget?
+    public private(set) var noteState = NoteUIState()
+    public private(set) var notes: [String: String] = [:]
+    public private(set) var projectNotes: [String: String] = [:]
+    public private(set) var projectNames: [String: String] = [:]
 
     /// Bytes for the currently attached session's terminal view. The terminal
     /// view mounts asynchronously after `selected` changes, so output (notably
@@ -104,6 +122,9 @@ public final class AppModel {
         showInspector = persisted.showInspector ?? false
         sbWidth = persisted.sbWidth ?? 360
         vimMode = persisted.vimMode ?? true
+        notes = persisted.notes
+        projectNotes = persisted.projectNotes
+        projectNames = persisted.projectNames
         do {
             let (list, statuses, lost) = try await client.list()
             sessions = list.sorted { $0.created < $1.created }
@@ -315,6 +336,54 @@ public final class AppModel {
 
     public func clearNewSessionPrefill() { newSessionPrefillDir = nil }
 
+    public func setNote(session: String, text: String) {
+        if text.isEmpty { notes[session] = nil } else { notes[session] = text }
+        persist()
+    }
+
+    public func setProjectNote(dir: String, text: String) {
+        if text.isEmpty { projectNotes[dir] = nil } else { projectNotes[dir] = text }
+        persist()
+    }
+
+    public func setProjectName(dir: String, name: String) {
+        if name.isEmpty { projectNames[dir] = nil } else { projectNames[dir] = name }
+        persist()
+    }
+
+    public func displayName(forDir dir: String) -> String {
+        projectNames[dir] ?? dir
+    }
+
+    public func noteText() -> String {
+        switch noteTarget {
+        case .session(let name): return notes[name] ?? ""
+        case .project(let dir): return projectNotes[dir] ?? ""
+        case nil: return ""
+        }
+    }
+
+    public func setNoteText(_ text: String) {
+        switch noteTarget {
+        case .session(let name): setNote(session: name, text: text)
+        case .project(let dir): setProjectNote(dir: dir, text: text)
+        case nil: break
+        }
+    }
+
+    public func noteTitle() -> String {
+        switch noteTarget {
+        case .session(let name): return name
+        case .project(let dir): return displayName(forDir: dir)
+        case nil: return ""
+        }
+    }
+
+    public func setNoteEditing(_ on: Bool) {
+        noteState.editing = on
+        inputMode = on ? .normal : .note   // edit: NSTextView owns keys
+    }
+
     func apply(_ action: KeyAction) {
         switch action {
         case .selectNext: step(by: 1)
@@ -370,7 +439,93 @@ public final class AppModel {
             onTerminalCommand?(.scrollToBottom)
         case .showHelp:
             inputMode = .help
+        case .toggleSessionNote:
+            toggleNote(target: selected.map { .session($0) })
+        case .toggleProjectNote:
+            let dir = sessions.first(where: { $0.name == selected })?.dir
+            toggleNote(target: dir.map { .project($0) })
+        case .noteCursor(let down):
+            if disarmClearIfNeeded() { return }
+            let total = taskCounts(noteText()).total
+            guard total > 0 else { return }
+            let next = noteState.cursor + (down ? 1 : -1)
+            noteState.cursor = min(total - 1, max(0, next))
+        case .noteToggleTask:
+            if disarmClearIfNeeded() { return }
+            for ord in selectionOrdinals() { setNoteText(toggleTask(noteText(), ordinal: ord)) }
+        case .noteVisual:
+            if disarmClearIfNeeded() { return }
+            noteState.visualAnchor = noteState.visualAnchor == nil ? noteState.cursor : nil
+        case .noteYank:
+            if noteState.clearArmed {
+                noteState.clearArmed = false
+                setNoteText("")
+                noteState.cursor = 0
+                noteState.visualAnchor = nil
+                return
+            }
+            let list = selectedAsNumbered(noteText(), ordinals: selectionOrdinals())
+            if !list.isEmpty {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(list, forType: .string)
+            }
+            noteState.visualAnchor = nil
+        case .noteDelete:
+            if disarmClearIfNeeded() { return }
+            setNoteText(removeTasks(noteText(), ordinals: Set(selectionOrdinals())))
+            noteState.visualAnchor = nil
+            clampNoteCursor()
+        case .noteEdit:
+            if disarmClearIfNeeded() { return }
+            setNoteEditing(true)
+        case .noteArmClear:
+            noteState.clearArmed = true
+        case .noteDefocus:
+            inputMode = .normal
+        case .noteEscape:
+            if noteState.clearArmed { noteState.clearArmed = false; return }
+            if noteState.visualAnchor != nil { noteState.visualAnchor = nil; return }
+            noteTarget = nil
+            inputMode = .normal
+        case .renameProject:
+            inputMode = .normal
+            if let dir = sessions.first(where: { $0.name == selected })?.dir {
+                modal = .renameProject(dir)
+            }
         }
+    }
+
+    private func toggleNote(target: NoteTarget?) {
+        guard let target else { return }
+        if noteTarget == target {
+            noteTarget = nil
+            inputMode = .normal
+            return
+        }
+        noteTarget = target
+        noteState = NoteUIState()
+        inputMode = .note
+        if !showInspector { setShowInspector(true) }
+    }
+
+    private func selectionOrdinals() -> [Int] {
+        if let anchor = noteState.visualAnchor {
+            let lo = min(anchor, noteState.cursor)
+            let hi = max(anchor, noteState.cursor)
+            return Array(lo...hi)
+        }
+        return [noteState.cursor]
+    }
+
+    private func clampNoteCursor() {
+        let total = taskCounts(noteText()).total
+        noteState.cursor = max(0, min(noteState.cursor, total - 1))
+    }
+
+    /// TUI semantics: while clear is armed, any key other than `y` only disarms.
+    private func disarmClearIfNeeded() -> Bool {
+        if noteState.clearArmed { noteState.clearArmed = false; return true }
+        return false
     }
 
     private func step(by delta: Int) {
@@ -429,6 +584,9 @@ public final class AppModel {
         persisted.showInspector = showInspector
         persisted.sbWidth = sbWidth
         persisted.vimMode = vimMode
+        persisted.notes = notes
+        persisted.projectNotes = projectNotes
+        persisted.projectNames = projectNames
         store.save(persisted)
     }
 
