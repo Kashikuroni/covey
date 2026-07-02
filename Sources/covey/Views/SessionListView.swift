@@ -43,7 +43,7 @@ struct SessionListView: View {
             ForEach(groups, id: \.dir) { group in
                 let rows = group.sessions.filter { fuzzyMatch(model.filter, $0.name) }
                 if !rows.isEmpty {
-                    Section(group.dir) {
+                    Section {
                         ForEach(rows, id: \.name) { session in
                             row(session)
                                 .tag(session.name)
@@ -55,6 +55,15 @@ struct SessionListView: View {
                         .onMove { from, to in
                             guard !filtering else { return }
                             model.moveSession(inDir: group.dir, from: from, to: to)
+                        }
+                    } header: {
+                        HStack(spacing: 6) {
+                            Text(model.displayName(forDir: group.dir))
+                            let pc = taskCounts(model.projectNotes[group.dir] ?? "")
+                            if pc.total > 0 {
+                                Text("\(pc.done)/\(pc.total)")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
@@ -93,6 +102,11 @@ struct SessionListView: View {
             Circle().fill(statusColor(model.statusByName[session.name] ?? .idle))
                 .frame(width: 8, height: 8)
             Text(session.name)
+            let counts = taskCounts(model.notes[session.name] ?? "")
+            if counts.total > 0 {
+                Text("\(counts.done)/\(counts.total)")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
             Spacer()
             Text(session.agent).foregroundStyle(.secondary).font(.caption)
         }

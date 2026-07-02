@@ -26,6 +26,8 @@ struct StatusBar: View {
         case .leader: return "esc close · backspace back"
         case .selectSession: return "1-9 jump · esc cancel"
         case .help: return "any key closes"
+        case .note:
+            return "space toggle · e edit · d delete · V select · y yank · esc close"
         case .normal:
             return model.vimMode
                 ? "n new · enter attach · d kill · space menu · / filter · ? help"
@@ -39,6 +41,7 @@ struct StatusBar: View {
         case .leader: return "LEADER"
         case .selectSession: return "SELECT"
         case .help: return "HELP"
+        case .note: return "NOTE"
         }
     }
 

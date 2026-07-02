@@ -16,6 +16,7 @@ struct ContentView: View {
             case .newSession: NewSessionSheet(model: model)
             case .kill(let name): KillSheet(model: model, name: name)
             case .rename(let name): RenameSheet(model: model, name: name)
+            case .renameProject(let dir): RenameProjectSheet(model: model, dir: dir)
             }
         }
         .overlay(alignment: .bottom) { toastBar }
@@ -76,7 +77,7 @@ struct ContentView: View {
                     .onTapGesture { model.setFocus(.terminal) }
                 if model.showInspector {
                     rightDivider(total: geo.size.width)
-                    InspectorView()
+                    InspectorView(model: model)
                         .frame(width: CGFloat(model.sbWidth))
                         .contentShape(Rectangle())
                         .onTapGesture { model.setFocus(.inspector) }

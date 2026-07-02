@@ -7,6 +7,7 @@ extension AppModel.Modal: Identifiable {
         case .newSession: return "new"
         case .kill(let name): return "kill-\(name)"
         case .rename(let name): return "rename-\(name)"
+        case .renameProject(let dir): return "rename-project-\(dir)"
         }
     }
 }
@@ -51,6 +52,32 @@ struct NewSessionSheet: View {
             if let prefill = model.newSessionPrefillDir { dir = prefill }
             model.clearNewSessionPrefill()
         }
+    }
+}
+
+struct RenameProjectSheet: View {
+    let model: AppModel
+    let dir: String
+    @State private var name = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Rename project").font(.headline)
+            Text(dir).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            TextField("Display name (empty resets)", text: $name)
+            HStack {
+                Spacer()
+                Button("Cancel") { model.modal = nil }
+                Button("Rename") {
+                    model.setProjectName(dir: dir, name: name)
+                    model.modal = nil
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 380)
+        .onAppear { name = model.projectNames[dir] ?? "" }
     }
 }
 
