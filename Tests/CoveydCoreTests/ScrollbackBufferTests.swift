@@ -76,5 +76,16 @@ final class ScrollbackBufferTests: XCTestCase {
         XCTAssertEqual(got.fromSeq, 2)
         XCTAssertFalse(got.gapped)
     }
-    
+
+    func testOversizeAppendReturnsOnlySurvivingRange() {
+        let buf = ScrollbackBuffer(limit: 8)
+        let range = buf.append(Array("0123456789AB".utf8))   // 12 bytes, 8-byte ring
+        XCTAssertEqual(range.to - range.from, 8, "range covers only surviving bytes")
+        XCTAssertEqual(range.from, buf.headSeq)
+        let (bytes, from, gapped) = buf.since(range.from)
+        XCTAssertFalse(gapped, "an append's own range must not come back gapped")
+        XCTAssertEqual(from, range.from)
+        XCTAssertEqual(String(decoding: bytes, as: UTF8.self), "456789AB")
+    }
+
 }

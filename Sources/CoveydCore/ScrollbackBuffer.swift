@@ -17,15 +17,22 @@ public final class ScrollbackBuffer {
 
     @discardableResult
     public func append(_ bytes: [UInt8]) -> (from: Int, to: Int) {
+        // A chunk larger than the ring keeps only its tail. Advance tailSeq past
+        // the dropped prefix first, so the returned range (and the seq handed to
+        // output consumers) never starts inside evicted bytes.
+        var chunk = bytes[...]
+        if chunk.count > capacity {
+            tailSeq += chunk.count - capacity
+            chunk = chunk.suffix(capacity)
+        }
         let from = tailSeq
-        // Write every byte at its absolute position (seq % capacity). If the chunk is
-        // larger than capacity, earlier bytes are simply overwritten — only the last
-        // `capacity` survive, at the correct positions. O(bytes.count), no array shift.
-        for byte in bytes {
+        // Write every byte at its absolute position (seq % capacity).
+        // O(chunk.count), no array shift.
+        for byte in chunk {
             storage[tailSeq % capacity] = byte
             tailSeq += 1
         }
-        count = min(count + bytes.count, capacity)
+        count = min(count + chunk.count, capacity)
         headSeq = tailSeq - count
         return (from, tailSeq)
     }
