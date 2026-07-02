@@ -23,6 +23,9 @@ public final class AppModel {
     public private(set) var themeRaw: String = "dark"
     public private(set) var splitPct: Int = 38
     public private(set) var recents: [RecentSession] = []
+    public private(set) var usage: Usage?
+    public private(set) var plan: String?
+    public private(set) var usageError: String?
 
     /// Bytes for the currently attached session's terminal view. The terminal
     /// view mounts asynchronously after `selected` changes, so output (notably
@@ -43,13 +46,20 @@ public final class AppModel {
     private let store: StateStore
     private var persisted = PersistedState()   // last known full state (keeps schema-only fields)
     private var eventLoop: Task<Void, Never>?
+    private let fetchAccount: () async -> Account
+    private let usageInterval: TimeInterval
+    private var usagePoller: Task<Void, Never>?
 
     public init(client: IPCClient,
                 makeClient: @escaping () throws -> IPCClient,
-                store: StateStore) {
+                store: StateStore,
+                fetchAccount: @escaping () async -> Account = { Account() },
+                usageInterval: TimeInterval = 60) {
         self.client = client
         self.makeClient = makeClient
         self.store = store
+        self.fetchAccount = fetchAccount
+        self.usageInterval = usageInterval
     }
 
     public func start() async {
@@ -76,6 +86,14 @@ public final class AppModel {
             }
             self.connected = false
             self.toast = "daemon connection lost"
+        }
+        usagePoller?.cancel()
+        usagePoller = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                await self.tickUsage()
+                try? await Task.sleep(nanoseconds: UInt64(self.usageInterval * 1_000_000_000))
+            }
         }
     }
 
@@ -160,6 +178,13 @@ public final class AppModel {
         persisted.splitPct = splitPct
         persisted.recents = recents
         store.save(persisted)
+    }
+
+    private func tickUsage() async {
+        let acc = await fetchAccount()
+        usage = acc.usage
+        plan = acc.plan
+        usageError = acc.usageError
     }
 
     private func apply(_ event: DaemonEvent) {

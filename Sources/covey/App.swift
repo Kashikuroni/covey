@@ -50,7 +50,8 @@ struct CoveyApp: App {
                         .homeDirectoryForCurrentUser.appendingPathComponent(".covey/state.json").path)
                     let m = AppModel(client: try CoveyApp.makeClient(),
                                      makeClient: CoveyApp.makeClient,
-                                     store: store)
+                                     store: store,
+                                     fetchAccount: UsageService.fetchAccount)
                     await m.start()
                     model = m
                 } catch {
