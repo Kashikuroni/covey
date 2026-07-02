@@ -67,6 +67,10 @@ public final class SocketServer {
     private func acceptOne() {
         let clientFD = accept(listenFD, nil, nil)
         guard clientFD >= 0 else { return }
+        // Broadcasts race client teardown: a write after the peer closed must
+        // return EPIPE, not raise SIGPIPE (default action kills the process).
+        var on: Int32 = 1
+        _ = setsockopt(clientFD, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
         nextConnID += 1
         let conn = Connection(fd: clientFD, id: nextConnID)
         onAccept?(conn)

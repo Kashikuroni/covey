@@ -42,6 +42,9 @@ public final class IPCClient {
     public func connect() throws {
         let sock = socket(AF_UNIX, SOCK_STREAM, 0)
         guard sock >= 0 else { throw IPCClientError.connectFailed(errno) }
+        // A write after the daemon closed must return EPIPE, not raise SIGPIPE.
+        var on: Int32 = 1
+        _ = setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
         guard UnixSocket.connect(sock, to: path) == 0 else {
             let e = errno
             Darwin.close(sock)
