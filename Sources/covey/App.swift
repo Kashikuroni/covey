@@ -60,6 +60,18 @@ struct CoveyApp: App {
                 Button("Filter Sessions") { model?.requestFilterFocus() }
                     .keyboardShortcut("f", modifiers: .command)
             }
+            CommandMenu("Session") {
+                Button("Kill Session…") {
+                    if let selected = model?.selected { model?.modal = .kill(selected) }
+                }
+                .keyboardShortcut("w", modifiers: .command)
+                .disabled(model?.selected == nil)
+                Button("Rename Session…") {
+                    if let selected = model?.selected { model?.modal = .rename(selected) }
+                }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+                .disabled(model?.selected == nil)
+            }
             CommandMenu("View") {
                 Toggle("Show Sessions", isOn: Binding(
                     get: { model?.showSessions ?? true },
@@ -70,6 +82,21 @@ struct CoveyApp: App {
                 Toggle("Show Status Bar", isOn: Binding(
                     get: { model?.showFooter ?? true },
                     set: { model?.setShowFooter($0) }))
+                Toggle("Show Inspector", isOn: Binding(
+                    get: { model?.showInspector ?? false },
+                    set: { model?.setShowInspector($0) }))
+                Divider()
+                Button("Focus Sessions") { model?.setFocus(.sessions) }
+                    .keyboardShortcut("1", modifiers: .command)
+                Button("Focus Terminal") { model?.setFocus(.terminal) }
+                    .keyboardShortcut("2", modifiers: .command)
+                Button("Focus Inspector") { model?.setFocus(.inspector) }
+                    .keyboardShortcut("3", modifiers: .command)
+                    .disabled(model?.showInspector != true)
+                Divider()
+                Toggle("Vim Mode", isOn: Binding(
+                    get: { model?.vimMode ?? false },
+                    set: { model?.setVimMode($0) }))
             }
         }
     }
