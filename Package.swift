@@ -27,9 +27,22 @@ let package = Package(
             dependencies: ["CoveydCore"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        .executableTarget(
+            name: "covey",
+            dependencies: [
+                "CoveyKit",
+                .product(name: "SwiftTerm", package: "SwiftTerm")
+            ],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
         .testTarget(
             name: "CoveyKitTests",
             dependencies: ["CoveyKit", "CoveydCore"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        .testTarget(
+            name: "CoveyAppTests",
+            dependencies: ["covey", "CoveydCore"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
