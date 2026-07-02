@@ -33,7 +33,8 @@ if FileManager.default.fileExists(atPath: socketPath) {
 }
 
 let registry = SessionRegistry()
-let ipc = IPCServer(registry: registry)
+let monitor = StatusMonitor(snapshot: { registry.snapshotScreens() })
+let ipc = IPCServer(registry: registry, monitor: monitor)
 let server = SocketServer(path: socketPath)
 server.onAccept = { conn in
     ipc.register(conn)
@@ -62,5 +63,7 @@ do {
     FileHandle.standardError.write(Data("coveyd: failed to start: \(error)\n".utf8))
     exit(1)
 }
+
+monitor.start()
 
 dispatchMain()

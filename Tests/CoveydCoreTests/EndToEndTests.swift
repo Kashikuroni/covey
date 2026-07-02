@@ -6,7 +6,8 @@ final class EndToEndTests: XCTestCase {
     func testCreateAttachInputOutputKill() throws {
         let path = "\(NSTemporaryDirectory())covey-e2e-\(UInt32.random(in: 0..<UInt32.max)).sock"
         let registry = SessionRegistry()
-        let ipc = IPCServer(registry: registry)
+        let monitor = StatusMonitor(snapshot: { registry.snapshotScreens() })
+        let ipc = IPCServer(registry: registry, monitor: monitor)
         let server = SocketServer(path: path)
         server.onAccept = { conn in
             ipc.register(conn)
