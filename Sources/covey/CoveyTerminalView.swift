@@ -12,6 +12,9 @@ final class CoveyTerminalView: TerminalView {
     /// buffer (e.g. entering/leaving vim); the chrome resets history mode.
     var onBufferSwitch: (() -> Void)?
 
+    /// Fired when a click focused the terminal (the click itself is swallowed).
+    var onFocusClick: (() -> Void)?
+
     func wheelRoute() -> WheelRoute {
         let terminal = getTerminal()
         guard terminal.isCurrentBufferAlternate else { return .viewport }
@@ -22,12 +25,15 @@ final class CoveyTerminalView: TerminalView {
     // MacTerminalView seals scrollWheel (`public override`, not `open`), so wheel
     // events are intercepted with a local monitor before AppKit delivers them.
     private var wheelMonitor: Any?
+    private var mouseMonitor: Any?
+    private var swallowNextMouseUp = false
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window == nil {
             removeWheelMonitor()
         } else if wheelMonitor == nil {
+            installMouseMonitor()
             wheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
                 guard let self, event.window === self.window, event.deltaY != 0 else { return event }
                 let point = self.convert(event.locationInWindow, from: nil)
@@ -53,6 +59,30 @@ final class CoveyTerminalView: TerminalView {
     private func removeWheelMonitor() {
         if let wheelMonitor { NSEvent.removeMonitor(wheelMonitor) }
         wheelMonitor = nil
+        if let mouseMonitor { NSEvent.removeMonitor(mouseMonitor) }
+        mouseMonitor = nil
+    }
+
+    // A click on an unfocused terminal must only focus it: with mouse
+    // reporting active the TUI would receive the click too (e.g. a link
+    // under the cursor opens). Swallow the focusing down AND its up.
+    private func installMouseMonitor() {
+        guard mouseMonitor == nil else { return }
+        mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] event in
+            guard let self, event.window === self.window else { return event }
+            if event.type == .leftMouseUp, self.swallowNextMouseUp {
+                self.swallowNextMouseUp = false
+                return nil
+            }
+            guard event.type == .leftMouseDown else { return event }
+            let point = self.convert(event.locationInWindow, from: nil)
+            guard self.bounds.contains(point) else { return event }
+            guard self.window?.firstResponder !== self else { return event }
+            self.window?.makeFirstResponder(self)
+            self.onFocusClick?()
+            self.swallowNextMouseUp = true
+            return nil
+        }
     }
 
     override func bufferActivated(source: Terminal) {
