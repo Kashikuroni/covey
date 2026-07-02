@@ -6,6 +6,9 @@ import PackageDescription
 let package = Package(
     name: "covey",
     platforms: [.macOS(.v26)],
+    dependencies: [
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm", from: "1.13.0")
+    ],
     targets: [
         .target(
             name: "CoveyKit",
@@ -13,7 +16,10 @@ let package = Package(
         ),
         .target(
             name: "CoveydCore",
-            dependencies: ["CoveyKit"],
+            dependencies: [
+                "CoveyKit",
+                .product(name: "SwiftTerm", package: "SwiftTerm")
+            ],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .executableTarget(
