@@ -55,6 +55,11 @@ final class CoveyTerminalView: TerminalView {
         wheelMonitor = nil
     }
 
+    override func bufferActivated(source: Terminal) {
+        super.bufferActivated(source: source)
+        onBufferSwitch?()
+    }
+
     func sendWheelReport(deltaY: CGFloat, at point: CGPoint) {
         let terminal = getTerminal()
         // Cell-level precision is enough for wheel reports; derive the grid
@@ -85,4 +90,7 @@ final class CoveyTerminalView: TerminalView {
 
 /// Lines the viewport sits short of the live bottom, reconstructed from the
 /// values of the public scroll callback (position == yDisp / maxScrollback).
-func linesShortOfBottom(position: Double, yDisp: Int) -> Int { 0 }
+func linesShortOfBottom(position: Double, yDisp: Int) -> Int {
+    guard position > 0, position < 1 else { return 0 }
+    return Int(((1 - position) * Double(yDisp) / position).rounded())
+}

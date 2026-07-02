@@ -1,7 +1,23 @@
 import XCTest
+@testable import CoveydCore
 
 extension XCTestCase {
     func bytes(_ s: String) -> [UInt8] {Array(s.utf8) }
+
+    /// Expectation that fulfills once the process's accumulated output
+    /// contains `needle`.
+    func expectOutput(_ p: PTYProcess, contains needle: String) -> XCTestExpectation {
+        let exp = expectation(description: "output contains \(needle)")
+        exp.assertForOverFulfill = false
+        var collected = [UInt8]()
+        p.setOutputHandler { chunk, _ in
+            collected += chunk
+            if String(decoding: collected, as: UTF8.self).contains(needle) {
+                exp.fulfill()
+            }
+        }
+        return exp
+    }
 
     /// Polls `cond` every 20 ms until true, failing the test after 5 s.
     func waitUntil(_ cond: @escaping () -> Bool, _ desc: String) {

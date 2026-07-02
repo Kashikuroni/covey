@@ -79,4 +79,33 @@ final class CoveyTerminalViewTests: XCTestCase {
         view.sendWheelArrows(deltaY: 0.3)
         XCTAssertEqual(probe.sent.count, 3, "at least 1 arrow per event")
     }
+
+    func testBufferSwitchCallbackFires() {
+        let (view, _) = makeView()
+        var switches = 0
+        view.onBufferSwitch = { switches += 1 }
+        view.feed(text: "\u{1b}[?1049h")
+        XCTAssertEqual(switches, 1)
+        view.feed(text: "\u{1b}[?1049l")
+        XCTAssertEqual(switches, 2)
+    }
+
+    func testLinesShortOfBottom() {
+        // 186-line scrollback: yDisp 185 of 186 is exactly one line short.
+        XCTAssertEqual(linesShortOfBottom(position: 185.0 / 186.0, yDisp: 185), 1)
+        XCTAssertEqual(linesShortOfBottom(position: 184.0 / 186.0, yDisp: 184), 2)
+        XCTAssertEqual(linesShortOfBottom(position: 0.5, yDisp: 93), 93)
+    }
+
+    func testScrollToPositionOneLandsExactBottom() {
+        let (view, probe) = makeView()
+        var text = ""
+        for i in 0..<200 { text += "line \(i)\r\n" }
+        view.feed(text: text)
+        view.scroll(toPosition: 0.997)   // truncation repro: lands short of bottom
+        XCTAssertLessThan(view.scrollPosition, 1.0)
+        view.scroll(toPosition: 1.0)     // the snap target: exact bottom
+        XCTAssertEqual(view.scrollPosition, 1.0)
+        XCTAssertEqual(probe.positions.last, 1.0)
+    }
 }
