@@ -29,7 +29,7 @@ let package = Package(
         ),
         .testTarget(
             name: "CoveyKitTests",
-            dependencies: ["CoveyKit"],
+            dependencies: ["CoveyKit", "CoveydCore"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
