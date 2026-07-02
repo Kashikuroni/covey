@@ -16,6 +16,12 @@ public final class AppModel {
 
     public enum Focus { case sessions, terminal, inspector }
 
+    public enum ListTab: Equatable { case active, recent }
+
+    public enum TerminalCommand: Equatable {
+        case focus, blur, scrollPage(up: Bool), scrollToBottom
+    }
+
     public private(set) var sessions: [Session] = []       // sorted by created
     public private(set) var statusByName: [String: Status] = [:]
     public private(set) var selected: String?
@@ -41,6 +47,14 @@ public final class AppModel {
     public private(set) var vimMode = false
     /// Bumped by `requestFilterFocus`; the filter field focuses on change.
     public private(set) var filterFocusTick = 0
+    private(set) var inputMode: InputMode = .normal
+    public private(set) var listTab: ListTab = .active
+    public private(set) var recentSelected: Int?
+    /// Dir to prefill in the New Session sheet (set by `N`).
+    public private(set) var newSessionPrefillDir: String?
+    /// Commands for the mounted terminal view (focus/scroll); set by the
+    /// representable like `onTerminalOutput`.
+    public var onTerminalCommand: ((TerminalCommand) -> Void)?
 
     /// Bytes for the currently attached session's terminal view. The terminal
     /// view mounts asynchronously after `selected` changes, so output (notably
@@ -89,7 +103,7 @@ public final class AppModel {
         showHeader = persisted.showHeader ?? true
         showInspector = persisted.showInspector ?? false
         sbWidth = persisted.sbWidth ?? 360
-        vimMode = persisted.vimMode ?? false
+        vimMode = persisted.vimMode ?? true
         do {
             let (list, statuses, lost) = try await client.list()
             sessions = list.sorted { $0.created < $1.created }
@@ -279,6 +293,126 @@ public final class AppModel {
             if seen.insert(s.dir).inserted { dirs.append(s.dir) }
         }
         return dirs
+    }
+
+    /// Flat visible ordering: orderedSessions() narrowed by the fuzzy filter.
+    public func visibleSessionNames() -> [String] {
+        orderedSessions().flatMap { group in
+            group.sessions.map(\.name).filter { fuzzyMatch(filter, $0) }
+        }
+    }
+
+    /// Recents hidden while a live session reuses the name (Recent tab rule).
+    public func visibleRecents() -> [RecentSession] {
+        let active = Set(sessions.map(\.name))
+        return recents.filter { !active.contains($0.name) }
+    }
+
+    public func setListTab(_ tab: ListTab) {
+        listTab = tab
+        recentSelected = tab == .recent ? (visibleRecents().isEmpty ? nil : 0) : nil
+    }
+
+    public func clearNewSessionPrefill() { newSessionPrefillDir = nil }
+
+    func apply(_ action: KeyAction) {
+        switch action {
+        case .selectNext: step(by: 1)
+        case .selectPrev: step(by: -1)
+        case .selectFirst: jump(to: 0)
+        case .selectByNumber(let n):
+            jump(to: n - 1)
+            inputMode = .normal
+        case .enterTerminal:
+            if listTab == .recent {
+                let items = visibleRecents()
+                if let idx = recentSelected, idx < items.count {
+                    let r = items[idx]
+                    Task { await relaunchRecent(r) }
+                }
+            } else if selected != nil {
+                setFocus(.terminal)
+                onTerminalCommand?(.focus)
+            }
+        case .exitTerminal:
+            setFocus(.sessions)
+            onTerminalCommand?(.blur)
+        case .toggleTab:
+            setListTab(listTab == .active ? .recent : .active)
+        case .newSession(let prefill):
+            newSessionPrefillDir = prefill
+                ? sessions.first(where: { $0.name == selected })?.dir : nil
+            modal = .newSession
+        case .killSelected:
+            if let selected { modal = .kill(selected) }
+        case .renameSelected:
+            inputMode = .normal
+            if let selected { modal = .rename(selected) }
+        case .startFilter:
+            requestFilterFocus()
+        case .openLeader:
+            inputMode = .leader(.root)
+        case .leaderDescend(let menu):
+            inputMode = .leader(menu)
+        case .leaderBack:
+            inputMode = .leader(.root)
+        case .closeOverlay:
+            inputMode = .normal
+        case .enterSelectMode:
+            inputMode = .selectSession
+        case .resizeSplit(let delta):
+            setSplitPct(splitPct + delta)
+        case .moveSelected(let up):
+            moveSelectedSession(up: up)
+        case .scrollTerminalPage(let up):
+            onTerminalCommand?(.scrollPage(up: up))
+        case .scrollTerminalToBottom:
+            onTerminalCommand?(.scrollToBottom)
+        case .showHelp:
+            inputMode = .help
+        }
+    }
+
+    private func step(by delta: Int) {
+        if listTab == .recent {
+            let count = visibleRecents().count
+            guard count > 0 else { recentSelected = nil; return }
+            let cur = recentSelected ?? -1
+            recentSelected = min(count - 1, max(0, cur + delta))
+            return
+        }
+        let names = visibleSessionNames()
+        guard !names.isEmpty else { return }
+        let cur = selected.flatMap { names.firstIndex(of: $0) } ?? -1
+        let next = min(names.count - 1, max(0, cur + delta))
+        let name = names[next]
+        Task { await select(name) }
+    }
+
+    private func jump(to index: Int) {
+        if listTab == .recent {
+            let count = visibleRecents().count
+            guard count > 0 else { return }
+            recentSelected = min(count - 1, max(0, index))
+            return
+        }
+        let names = visibleSessionNames()
+        guard !names.isEmpty else { return }
+        let name = names[min(names.count - 1, max(0, index))]
+        Task { await select(name) }
+    }
+
+    /// Keyboard reorder within the selected session's project group.
+    private func moveSelectedSession(up: Bool) {
+        guard listTab == .active, let selected else { return }
+        guard let group = orderedSessions().first(where: { g in
+            g.sessions.contains { $0.name == selected }
+        }) else { return }
+        let names = group.sessions.map(\.name)
+        guard let idx = names.firstIndex(of: selected) else { return }
+        guard up ? idx > 0 : idx < names.count - 1 else { return }
+        let to = up ? idx - 1 : idx + 2   // IndexSet move semantics
+        moveSession(inDir: group.dir, from: IndexSet(integer: idx), to: max(0, to))
     }
 
     // MARK: - private

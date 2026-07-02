@@ -107,7 +107,7 @@ final class AppModelChromeTests: XCTestCase {
         await model.start()
         XCTAssertFalse(model.showInspector)
         XCTAssertEqual(model.sbWidth, 360)
-        XCTAssertFalse(model.vimMode)
+        XCTAssertTrue(model.vimMode, "vim mode is on by default since slice 12")
         model.setShowInspector(true)
         model.setSbWidth(420)
         model.setVimMode(true)
@@ -138,5 +138,83 @@ final class AppModelChromeTests: XCTestCase {
         XCTAssertEqual(model.sbWidth, 600)
         model.setFocus(.inspector)
         XCTAssertEqual(model.focus, .inspector)
+    }
+
+    @MainActor
+    func testApplyNavigationWalksVisibleSessions() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        _ = try daemon.registry.create(dir: "/a", agent: "sh", argv: ["/bin/cat"], name: "s1")
+        _ = try daemon.registry.create(dir: "/a", agent: "sh", argv: ["/bin/cat"], name: "s2")
+        _ = try daemon.registry.create(dir: "/a", agent: "sh", argv: ["/bin/cat"], name: "s3")
+        await model.reconnect()
+        _ = await eventually { model.sessions.count == 3 }
+        model.apply(.selectNext)
+        _ = await eventually { model.selected == "s1" }
+        model.apply(.selectNext)
+        _ = await eventually { model.selected == "s2" }
+        model.apply(.selectPrev)
+        _ = await eventually { model.selected == "s1" }
+        model.apply(.selectByNumber(3))
+        _ = await eventually { model.selected == "s3" }
+        model.apply(.selectFirst)
+        _ = await eventually { model.selected == "s1" }
+        // filter narrows navigation
+        model.setFilter("s3")
+        model.apply(.selectNext)
+        _ = await eventually { model.selected == "s3" }
+        model.setFilter("")
+        for s in model.sessions { daemon.registry.kill(name: s.name) }
+    }
+
+    @MainActor
+    func testApplyModeTransitionsAndModals() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        model.apply(.openLeader)
+        XCTAssertEqual(model.inputMode, .leader(.root))
+        model.apply(.leaderDescend(.session))
+        XCTAssertEqual(model.inputMode, .leader(.session))
+        model.apply(.leaderBack)
+        XCTAssertEqual(model.inputMode, .leader(.root))
+        model.apply(.closeOverlay)
+        XCTAssertEqual(model.inputMode, .normal)
+        model.apply(.enterSelectMode)
+        XCTAssertEqual(model.inputMode, .selectSession)
+        model.apply(.closeOverlay)
+        model.apply(.showHelp)
+        XCTAssertEqual(model.inputMode, .help)
+        model.apply(.closeOverlay)
+        model.apply(.newSession(prefillDir: false))
+        XCTAssertEqual(model.modal, .newSession)
+        model.modal = nil
+        model.apply(.toggleTab)
+        XCTAssertEqual(model.listTab, .recent)
+        model.apply(.toggleTab)
+        XCTAssertEqual(model.listTab, .active)
+        model.apply(.resizeSplit(3))
+        XCTAssertEqual(model.splitPct, 41)   // 38 default + 3
+    }
+
+    @MainActor
+    func testApplyKillRenameNeedSelection() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        model.apply(.killSelected)
+        XCTAssertNil(model.modal, "no selection — no kill sheet")
+        await model.create(dir: "/a", agent: "/bin/cat")
+        _ = await eventually { model.sessions.count == 1 }
+        let name = model.sessions[0].name
+        await model.select(name)
+        model.apply(.killSelected)
+        XCTAssertEqual(model.modal, .kill(name))
+        model.modal = nil
+        model.apply(.renameSelected)
+        XCTAssertEqual(model.modal, .rename(name))
+        model.modal = nil
+        await model.kill(name)
     }
 }
