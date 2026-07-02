@@ -6,12 +6,17 @@ import CoveyKit
 /// is confined to the serial `server` queue.
 public final class IPCServer {
     private let registry: SessionRegistry
+    private let monitor: StatusMonitor
     private let server = DispatchQueue(label: "covey.ipc")
     private var sinks: [Int: ClientSink] = [:]
     private var subscribers: [String: Set<Int>] = [:]
 
-    public init(registry: SessionRegistry) {
+    public init(registry: SessionRegistry, monitor: StatusMonitor) {
         self.registry = registry
+        self.monitor = monitor
+        monitor.onStatusChanged = { [weak self] name, status in
+            self?.broadcast(.event(.statusChanged(name: name, status: status)))
+        }
         registry.onSessionAdded = { [weak self] s in
             self?.broadcast(.event(.sessionAdded(session: s)))
         }
@@ -61,7 +66,11 @@ public final class IPCServer {
 
         switch request.op {
         case .list:
-            reply(.sessions(registry.list()))
+            let sessions = registry.list()
+            let known = monitor.currentStatuses()
+            var statuses: [String: Status] = [:]
+            for s in sessions { statuses[s.name] = known[s.name] ?? .idle }
+            reply(.sessions(sessions: sessions, statuses: statuses))
 
         case let .create(dir, agent, argv, name):
             do {

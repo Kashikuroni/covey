@@ -26,7 +26,7 @@ public enum ServerMessage: Codable, Equatable{
     public enum Result: Codable, Equatable {
         case ok
         case session(Session)
-        case sessions([Session])
+        case sessions(sessions: [Session], statuses: [String: Status])
         case error(code: String, message: String)
     }
 }
@@ -36,4 +36,5 @@ public enum DaemonEvent: Codable, Equatable {
     case sessionAdded(session: Session)
     case sessionRemoved(name: String)
     case exited(name: String, code: Int32)
+    case statusChanged(name: String, status: Status)
 }

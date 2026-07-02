@@ -33,11 +33,12 @@ final class ProtocolTests: XCTestCase {
         let msgs: [ServerMessage] = [
             .response(id: 1, result: .ok),
             .response(id: 2, result: .session(s)),
-            .response(id: 3, result: .sessions([s])),
+            .response(id: 3, result: .sessions(sessions: [s], statuses: ["s-1": .running])),
             .response(id: 4, result: .error(code: "notFound", message: "no such session")),
             .event(.output(name: "s-1", seq: 5, bytesB64: "aGk=")),
             .event(.sessionAdded(session: s)),
             .event(.sessionRemoved(name: "s-1")),
+            .event(.statusChanged(name: "s-1", status: .waiting)),
             .event(.exited(name: "s-1", code: 0)),
         ]
         for m in msgs { try roundTrip(m) }
@@ -58,6 +59,14 @@ final class ProtocolTests: XCTestCase {
             try line(
                 Request(id: 3, op: .create( dir: "/w", agent: "claude", argv: nil, name: nil))
             ), #"{"id":3,"op":{"create":{"agent":"claude","dir":"/w"}}}"#
+        )
+    }
+
+    func testStatusChangedGoldenWireFormat() throws {
+        let data = try encoder().encode(DaemonEvent.statusChanged(name: "s-1", status: .waiting))
+        XCTAssertEqual(
+            String(decoding: data, as: UTF8.self),
+            #"{"statusChanged":{"name":"s-1","status":"waiting"}}"#
         )
     }
 }
