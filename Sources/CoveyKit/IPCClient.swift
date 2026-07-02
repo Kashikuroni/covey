@@ -67,9 +67,9 @@ public final class IPCClient {
 
     // MARK: - typed requests
 
-    public func list() async throws -> (sessions: [Session], statuses: [String: Status]) {
-        if case let .sessions(sessions, statuses) = try await request(.list) {
-            return (sessions, statuses)
+    public func list() async throws -> (sessions: [Session], statuses: [String: Status], lost: [Session]?) {
+        if case let .sessions(sessions, statuses, lost) = try await request(.list) {
+            return (sessions, statuses, lost)
         }
         throw IPCClientError.daemonError(code: "badResponse", message: "expected sessions")
     }
@@ -85,6 +85,10 @@ public final class IPCClient {
 
     public func kill(name: String) async throws {
         try await expectOK(.kill(name: name))
+    }
+
+    public func clearLost() async throws {
+        try await expectOK(.clearLost)
     }
 
     public func rename(name: String, newName: String) async throws {

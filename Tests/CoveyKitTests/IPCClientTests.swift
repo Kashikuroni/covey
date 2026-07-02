@@ -33,9 +33,10 @@ final class IPCClientTests: XCTestCase {
         let client = IPCClient(path: daemon.path)
         try client.connect()
         defer { client.close() }
-        let (sessions, statuses) = try await client.list()
+        let (sessions, statuses, lost) = try await client.list()
         XCTAssertEqual(sessions, [])
         XCTAssertEqual(statuses, [:])
+        XCTAssertNil(lost)
     }
 
     func testCreateReturnsSessionAndKillGhostThrowsNotFound() async throws {

@@ -32,7 +32,9 @@ if FileManager.default.fileExists(atPath: socketPath) {
     unlink(socketPath)   // stale socket
 }
 
-let registry = SessionRegistry()
+let registryStore = RegistryStore(path: dir.appendingPathComponent("registry.json").path)
+let registry = SessionRegistry(persisted: registryStore.load(),
+                               onPersist: { registryStore.save($0) })
 let monitor = StatusMonitor(snapshot: { registry.snapshotScreens() })
 let ipc = IPCServer(registry: registry, monitor: monitor)
 let server = SocketServer(path: socketPath)

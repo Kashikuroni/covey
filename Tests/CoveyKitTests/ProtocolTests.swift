@@ -33,8 +33,9 @@ final class ProtocolTests: XCTestCase {
         let msgs: [ServerMessage] = [
             .response(id: 1, result: .ok),
             .response(id: 2, result: .session(s)),
-            .response(id: 3, result: .sessions(sessions: [s], statuses: ["s-1": .running])),
+            .response(id: 3, result: .sessions(sessions: [s], statuses: ["s-1": .running], lost: [s])),
             .response(id: 4, result: .error(code: "notFound", message: "no such session")),
+            .response(id: 5, result: .sessions(sessions: [s], statuses: [:], lost: nil)),
             .event(.output(name: "s-1", seq: 5, bytesB64: "aGk=")),
             .event(.sessionAdded(session: s)),
             .event(.sessionRemoved(name: "s-1")),

@@ -8,6 +8,7 @@ public struct Request: Codable, Equatable {
     }
     public enum Op: Codable, Equatable{
         case list
+        case clearLost
         case create(dir: String, agent: String, argv: [String]?, name: String?)
         case kill(name: String)
         case rename(name: String, newName: String)
@@ -26,7 +27,8 @@ public enum ServerMessage: Codable, Equatable{
     public enum Result: Codable, Equatable {
         case ok
         case session(Session)
-        case sessions(sessions: [Session], statuses: [String: Status])
+        // `lost` is optional so payloads from older daemons decode as nil.
+        case sessions(sessions: [Session], statuses: [String: Status], lost: [Session]?)
         case error(code: String, message: String)
     }
 }

@@ -73,11 +73,35 @@ final class IPCServerTests: XCTestCase {
         } }, "statusChanged waiting")
         server.handle(Request(id: 2, op: .list), from: sink)
         waitUntil({ sink.captured.contains {
-            if case .response(2, .sessions(_, let statuses)) = $0 {
+            if case .response(2, .sessions(_, let statuses, _)) = $0 {
                 return statuses["menu"] == .waiting
             }
             return false
         } }, "list has statuses")
         server.handle(Request(id: 3, op: .kill(name: "menu")), from: sink)
+    }
+
+    func testListCarriesLostAndClearLostRemoves() {
+        let meta = SessionMeta(name: "old", dir: "/tmp", agent: "claude",
+                               argv: ["claude"], created: 1)
+        let registry = SessionRegistry(persisted: [meta])
+        let server = IPCServer(registry: registry,
+                               monitor: StatusMonitor(snapshot: { registry.snapshotScreens() }))
+        let sink = FakeSink(id: 1)
+        server.register(sink)
+        server.handle(Request(id: 1, op: .list), from: sink)
+        waitUntil({ sink.captured.contains {
+            if case .response(1, .sessions(_, _, let lost)) = $0 { return lost?.map(\.name) == ["old"] }
+            return false
+        } }, "list carries lost")
+        server.handle(Request(id: 2, op: .clearLost), from: sink)
+        waitUntil({ sink.captured.contains {
+            if case .response(2, .ok) = $0 { return true }; return false
+        } }, "clearLost acked")
+        server.handle(Request(id: 3, op: .list), from: sink)
+        waitUntil({ sink.captured.contains {
+            if case .response(3, .sessions(_, _, let lost)) = $0 { return lost == nil }
+            return false
+        } }, "lost cleared")
     }
 }

@@ -70,7 +70,15 @@ public final class IPCServer {
             let known = monitor.currentStatuses()
             var statuses: [String: Status] = [:]
             for s in sessions { statuses[s.name] = known[s.name] ?? .idle }
-            reply(.sessions(sessions: sessions, statuses: statuses))
+            let lost = registry.lost.map {
+                Session(name: $0.name, dir: $0.dir, cwd: $0.dir, agent: $0.agent,
+                        created: $0.created, git: nil, worktreeRepo: nil)
+            }
+            reply(.sessions(sessions: sessions, statuses: statuses,
+                            lost: lost.isEmpty ? nil : lost))
+
+        case .clearLost:
+            registry.clearLost(); reply(.ok)
 
         case let .create(dir, agent, argv, name):
             do {
