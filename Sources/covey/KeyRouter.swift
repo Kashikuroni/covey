@@ -86,6 +86,10 @@ enum KeyRouter {
 
         if context.focus == .terminal {
             if input.isControl, ch == "q" { return .exitTerminal }
+            // SwiftTerm does not map ⇧Tab; unhandled it falls through to
+            // AppKit's focus traversal (insertBacktab:). Forward it to the
+            // agent instead — the TUI's mode-cycle key.
+            if input.special == .tab, input.isShift { return .sendShiftTab }
             return nil
         }
         guard context.vimMode else { return nil }

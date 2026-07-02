@@ -62,6 +62,9 @@ final class KeyRouterTests: XCTestCase {
     func testTerminalFocusOnlyCtrlQ() {
         let terminal = ctx(focus: .terminal)
         XCTAssertEqual(KeyRouter.route(key("q", ctrl: true), context: terminal), .exitTerminal)
+        XCTAssertEqual(KeyRouter.route(.init(char: nil, isShift: true, special: .tab),
+                                       context: terminal), .sendShiftTab,
+                       "shift-tab must reach the agent, not AppKit focus traversal")
         XCTAssertNil(KeyRouter.route(key("j"), context: terminal))
         XCTAssertNil(KeyRouter.route(key(" "), context: terminal))
         // ⌃Q from the list side does nothing.
