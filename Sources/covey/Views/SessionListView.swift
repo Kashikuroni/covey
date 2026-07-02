@@ -4,6 +4,7 @@ import CoveyKit
 struct SessionListView: View {
     @Bindable var model: AppModel
     @State private var tab: Tab = .active
+    @FocusState private var filterFocused: Bool
 
     enum Tab: String, CaseIterable { case active = "Active", recent = "Recent" }
 
@@ -15,6 +16,14 @@ struct SessionListView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .padding(6)
+            if tab == .active {
+                TextField("Filter", text: Binding(
+                    get: { model.filter }, set: { model.setFilter($0) }))
+                    .textFieldStyle(.roundedBorder)
+                    .focused($filterFocused)
+                    .padding(.horizontal, 6)
+                    .onChange(of: model.filterFocusTick) { _, _ in filterFocused = true }
+            }
             if tab == .active { activeList } else { recentList }
         }
         .toolbar {
@@ -31,14 +40,18 @@ struct SessionListView: View {
     private var activeList: some View {
         List(selection: selectionBinding) {
             ForEach(dirs, id: \.self) { dir in
-                Section(dir) {
-                    ForEach(model.sessions.filter { $0.dir == dir }, id: \.name) { session in
-                        row(session)
-                            .tag(session.name)
-                            .contextMenu {
-                                Button("Rename…") { model.modal = .rename(session.name) }
-                                Button("Kill…", role: .destructive) { model.modal = .kill(session.name) }
-                            }
+                let rows = model.sessions
+                    .filter { $0.dir == dir && fuzzyMatch(model.filter, $0.name) }
+                if !rows.isEmpty {
+                    Section(dir) {
+                        ForEach(rows, id: \.name) { session in
+                            row(session)
+                                .tag(session.name)
+                                .contextMenu {
+                                    Button("Rename…") { model.modal = .rename(session.name) }
+                                    Button("Kill…", role: .destructive) { model.modal = .kill(session.name) }
+                                }
+                        }
                     }
                 }
             }

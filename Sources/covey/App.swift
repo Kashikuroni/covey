@@ -51,6 +51,16 @@ struct CoveyApp: App {
                 }
             }
         }
+        .commands {
+            CommandGroup(replacing: .newItem) {
+                Button("New Session") { model?.modal = .newSession }
+                    .keyboardShortcut("n", modifiers: .command)
+            }
+            CommandGroup(after: .textEditing) {
+                Button("Filter Sessions") { model?.requestFilterFocus() }
+                    .keyboardShortcut("f", modifiers: .command)
+            }
+        }
     }
 
     /// ensureDaemon + connect. The daemon binary lives next to our own binary —
