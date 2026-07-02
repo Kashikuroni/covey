@@ -76,4 +76,5 @@ final class ScrollbackBufferTests: XCTestCase {
         XCTAssertEqual(got.fromSeq, 2)
         XCTAssertFalse(got.gapped)
     }
+    
 }
