@@ -85,11 +85,20 @@ public final class AppModel {
         showFooter = persisted.showFooter ?? true
         showHeader = persisted.showHeader ?? true
         do {
-            let (list, statuses) = try await client.list()
+            let (list, statuses, lost) = try await client.list()
             sessions = list.sorted { $0.created < $1.created }
             statusByName = statuses
             connected = true
             toast = nil
+            if let lost, !lost.isEmpty {
+                // Sessions a dead daemon lost: surface them as relaunchable
+                // recents, oldest first so the newest ends on top.
+                for s in lost.sorted(by: { $0.created < $1.created }) {
+                    pushRecent(&recents, RecentSession(name: s.name, dir: s.dir, agent: s.agent))
+                }
+                persist()
+                try? await client.clearLost()
+            }
         } catch {
             connected = false
             toast = errorText(error)

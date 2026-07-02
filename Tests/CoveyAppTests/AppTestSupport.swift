@@ -13,9 +13,9 @@ final class TestDaemon {
     private let ipc: IPCServer
     private let server: SocketServer
 
-    init() throws {
+    init(persisted: [SessionMeta] = []) throws {
         path = "\(NSTemporaryDirectory())covey-app-\(UInt32.random(in: 0..<UInt32.max)).sock"
-        let registry = SessionRegistry()
+        let registry = SessionRegistry(persisted: persisted)
         self.registry = registry
         monitor = StatusMonitor(snapshot: { registry.snapshotScreens() })
         ipc = IPCServer(registry: registry, monitor: monitor)

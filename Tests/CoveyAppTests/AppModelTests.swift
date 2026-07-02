@@ -239,4 +239,25 @@ final class AppModelTests: XCTestCase {
         let dropped = await eventually { !model.connected && model.toast != nil }
         XCTAssertTrue(dropped, "stream end did not flip connected/toast")
     }
+
+    @MainActor
+    func testLostSessionsMergeIntoRecentsOnce() async throws {
+        let meta = SessionMeta(name: "lost1", dir: "/tmp", agent: "claude",
+                               argv: ["claude"], created: 1)
+        let daemon = try TestDaemon(persisted: [meta]); defer { daemon.stop() }
+        let path = "\(NSTemporaryDirectory())covey-lost-\(UInt32.random(in: 0..<UInt32.max)).json"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = StateStore(path: path, debounce: 0.05)
+        let client = IPCClient(path: daemon.path); try client.connect()
+        let model = AppModel(client: client,
+                             makeClient: { let c = IPCClient(path: daemon.path); try c.connect(); return c },
+                             store: store)
+        await model.start()
+        XCTAssertTrue(model.recents.contains { $0.name == "lost1" && $0.agent == "claude" })
+        store.flush()
+        XCTAssertTrue(store.load().recents.contains { $0.name == "lost1" })
+        // clearLost was acked: a reconnect must not resurface the session.
+        await model.reconnect()
+        XCTAssertEqual(model.recents.filter { $0.name == "lost1" }.count, 1)
+    }
 }
