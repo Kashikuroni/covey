@@ -2,21 +2,6 @@ import XCTest
 @testable import CoveydCore
 
 final class PTYProcessTests: XCTestCase {
-    private func expectOutput(_ p: PTYProcess, contains needle: String) -> XCTestExpectation {
-        let exp = expectation(description: "output contains \(needle)")
-        exp.assertForOverFulfill = false
-        var collected = [UInt8]()
-        p.setOutputHandler { chunk, _ in
-            collected += chunk
-            if String(
-                decoding: collected,
-                as: UTF8.self).contains(needle) {
-                    exp.fulfill()
-                }
-        }
-        return exp
-    }
-    
     func testEchoProducesOutputThenExitsZero() throws {
         let p = PTYProcess()
         let outExp = expectOutput(p, contains: "hello")
@@ -94,6 +79,27 @@ final class PTYProcessTests: XCTestCase {
         waitUntil({ _ = p.backfill(since: 0); polls += 1; return polls >= 10 },
                   "queue responsive while the detached child lives")
         p.kill()   // SIGHUP the group; leader death revokes the tty -> EOF -> reap
+        wait(for: [exitExp], timeout: 5)
+    }
+
+    func testWriteToStuckChildDoesNotWedgeQueue() throws {
+        // A raw-mode child that never reads its tty (like a wedged TUI) fills
+        // the kernel input queue; write() must park the excess instead of
+        // blocking the pty queue — a blocked queue freezes backfill (and used
+        // to freeze the whole daemon through IPCServer's queue.sync backfill,
+        // and even kill()). Canonical mode discards overflow, so force raw.
+        let p = PTYProcess()
+        let readyExp = expectOutput(p, contains: "READY")
+        let exitExp = expectation(description: "exit reported")
+        p.setExitHandler { _ in exitExp.fulfill() }
+        try p.spawn(argv: ["/bin/sh", "-c", "stty raw -echo; printf READY; exec sleep 30"],
+                    cols: 80, rows: 24)
+        wait(for: [readyExp], timeout: 5)   // raw mode is in effect from here
+        p.write([UInt8](repeating: UInt8(ascii: "x"), count: 256 * 1024))
+        var polls = 0
+        waitUntil({ _ = p.backfill(since: 0); polls += 1; return polls >= 10 },
+                  "queue responsive while input backlog is parked")
+        p.kill()
         wait(for: [exitExp], timeout: 5)
     }
 

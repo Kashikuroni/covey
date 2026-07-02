@@ -21,6 +21,12 @@ public final class PTYProcess {
     private var masterFD: Int32 = -1
     private var pid: pid_t = -1
     private var reaped = false
+    /// Input the kernel would not take yet (raw-mode child stopped reading its
+    /// tty). Drained by a write source; capped so a wedged child cannot grow
+    /// memory without bound — overflow is dropped like a full kernel queue.
+    private var pendingInput = [UInt8]()
+    private var writeSource: DispatchSourceWrite?
+    private let pendingInputLimit = 262_144
     
     public init(scrollbackLimit: Int = 1_000_000) {
         self.buffer = ScrollbackBuffer(limit: scrollbackLimit)
@@ -82,28 +88,57 @@ public final class PTYProcess {
         // PARENT
         pid = childPid
         masterFD = master
+        // Non-blocking: a raw-mode child that stops reading fills the kernel
+        // input queue, and a blocking write would wedge the pty queue forever
+        // (freezing kill/backfill for the whole daemon).
+        _ = fcntl(master, F_SETFL, fcntl(master, F_GETFL, 0) | O_NONBLOCK)
         startReadLoop()
     }
     
     public func write(_ bytes: [UInt8]) {
         queue.async { [weak self] in
             guard let self, self.masterFD >= 0 else { return }
-            bytes.withUnsafeBytes { raw in
-                guard var base = raw.baseAddress else {return}
-                var remaining = raw.count
-                while remaining > 0 {
-                    let n = Darwin.write(self.masterFD, base, remaining)
-                    if n > 0 {
-                        base = base.advanced(by: n)
-                        remaining -= n
-                    } else if n < 0 && errno == EINTR {
-                        continue // interrupted by a signal - retry
-                    } else {
-                        break // EOF or fatal error (e.g. EPIPE: child gone)
-                    }
-                }
+            if self.pendingInput.count + bytes.count <= self.pendingInputLimit {
+                self.pendingInput += bytes
+            }
+            self.drainPendingInput()
+        }
+    }
+
+    /// Writes as much of `pendingInput` as the kernel takes; on EAGAIN parks
+    /// the rest and arms a write source to continue when the fd drains.
+    private func drainPendingInput() {
+        guard masterFD >= 0 else {
+            pendingInput.removeAll()
+            return
+        }
+        while !pendingInput.isEmpty {
+            let n = pendingInput.withUnsafeBytes { raw -> Int in
+                guard let base = raw.baseAddress else { return -1 }
+                return Darwin.write(masterFD, base, raw.count)
+            }
+            if n > 0 {
+                pendingInput.removeFirst(n)
+            } else if n < 0 && errno == EINTR {
+                continue // interrupted by a signal - retry
+            } else if n < 0 && errno == EAGAIN {
+                armWriteSource()
+                return
+            } else {
+                pendingInput.removeAll() // EOF or fatal error (e.g. EPIPE: child gone)
+                return
             }
         }
+        writeSource?.cancel()
+        writeSource = nil
+    }
+
+    private func armWriteSource() {
+        guard writeSource == nil else { return }
+        let src = DispatchSource.makeWriteSource(fileDescriptor: masterFD, queue: queue)
+        src.setEventHandler { [weak self] in self?.drainPendingInput() }
+        writeSource = src
+        src.resume()
     }
     
     public func resize(cols: UInt16, rows: UInt16) {
@@ -134,7 +169,9 @@ public final class PTYProcess {
     public func backfill(since seq: Int) -> (
         bytes: [UInt8], fromSeq: Int, gapped: Bool
     ) {
-        queue.sync { buffer.since(seq)}
+        // ScrollbackBuffer synchronizes internally — never hop through the pty
+        // queue here: a stalled queue would cascade into the IPC thread.
+        buffer.since(seq)
     }
     
     private func startReadLoop() {
@@ -159,6 +196,8 @@ public final class PTYProcess {
             let chunk = Array(buf[0..<n])
             let range = buffer.append(chunk)
             onOutput?(chunk, range.from)
+        } else if n < 0 && (errno == EAGAIN || errno == EINTR) {
+            return  // spurious wakeup on the non-blocking fd
         } else {
             reap()  // EOF (n == 0) or EIO after the child exits (n < 0)
         }
@@ -167,6 +206,11 @@ public final class PTYProcess {
     private func reap() {
         guard !reaped else { return }
         reaped = true
+        // Cancel the write source before the read source's cancel handler
+        // closes the fd — a live source on a closed fd is undefined.
+        writeSource?.cancel()
+        writeSource = nil
+        pendingInput.removeAll()
         readSource?.cancel()
         var status: Int32 = 0
         // Safe to block: on macOS the master EOFs only once the session leader

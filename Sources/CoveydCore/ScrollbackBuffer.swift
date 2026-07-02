@@ -1,5 +1,9 @@
+import Foundation
+
 /// A bounded ring buffer of raw PTY output, addressed by an absolute byte
 /// sequence number (`seq`). Eviction is O(1): bytes are overwritten in place.
+/// Internally synchronized: `append`/`since` may be called from any thread,
+/// so readers (IPC backfill) never have to hop through the pty queue.
 public final class ScrollbackBuffer {
     /// `seq` of the oldest byte still available.
     public private(set) var headSeq = 0
@@ -9,6 +13,7 @@ public final class ScrollbackBuffer {
     private var storage: [UInt8]
     private var count = 0
     private let capacity: Int
+    private let lock = NSLock()
 
     public init(limit: Int) {
         capacity = max(1, limit)
@@ -17,6 +22,7 @@ public final class ScrollbackBuffer {
 
     @discardableResult
     public func append(_ bytes: [UInt8]) -> (from: Int, to: Int) {
+        lock.lock(); defer { lock.unlock() }
         // A chunk larger than the ring keeps only its tail. Advance tailSeq past
         // the dropped prefix first, so the returned range (and the seq handed to
         // output consumers) never starts inside evicted bytes.
@@ -38,6 +44,7 @@ public final class ScrollbackBuffer {
     }
 
     public func since(_ seq: Int) -> (bytes: [UInt8], fromSeq: Int, gapped: Bool) {
+        lock.lock(); defer { lock.unlock() }
         let gapped = seq < headSeq
         let effective = max(seq, headSeq)
         if effective >= tailSeq { return ([], tailSeq, gapped) }
