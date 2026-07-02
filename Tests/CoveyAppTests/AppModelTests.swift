@@ -118,9 +118,11 @@ final class AppModelTests: XCTestCase {
         let client = IPCClient(path: daemon1.path)
         try client.connect()
         let p2 = daemon2.path
-        let model = AppModel(client: client, makeClient: {
-            let c = IPCClient(path: p2); try c.connect(); return c
-        })
+        let statePath = "\(NSTemporaryDirectory())covey-recon-\(UInt32.random(in: 0..<UInt32.max)).json"
+        let model = AppModel(
+            client: client,
+            makeClient: { let c = IPCClient(path: p2); try c.connect(); return c },
+            store: StateStore(path: statePath, debounce: 0.05))
         await model.start()
         await model.create(dir: "/usr", agent: "/bin/cat")
         _ = await eventually { model.sessions.count == 1 }
@@ -135,6 +137,95 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(model.sessions.isEmpty)
         XCTAssertNil(model.selected, "stale selection not cleared")
         XCTAssertNil(model.toast, "spurious toast after reconnect")
+    }
+
+    @MainActor
+    func testExitedPushesRecentWithDirAndAgent() async throws {
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        await model.create(dir: "/usr", agent: "/bin/cat")
+        _ = await eventually { model.sessions.count == 1 }
+        let name = model.sessions[0].name
+        await model.kill(name)                        // -> .exited
+        let recorded = await eventually { model.recents.contains { $0.name == name } }
+        XCTAssertTrue(recorded)
+        let r = model.recents.first { $0.name == name }
+        XCTAssertEqual(r?.dir, "/usr")
+        XCTAssertEqual(r?.agent, "/bin/cat")
+    }
+
+    @MainActor
+    func testRenameDoesNotPushRecent() async throws {
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        await model.create(dir: "/usr", agent: "/bin/cat")
+        _ = await eventually { model.sessions.count == 1 }
+        let name = model.sessions[0].name
+        await model.rename(name, to: "renamed")       // -> sessionRemoved + sessionAdded
+        _ = await eventually { model.sessions.contains { $0.name == "renamed" } }
+        XCTAssertFalse(model.recents.contains { $0.name == name },
+                       "rename must not create a recent")
+        await model.kill("renamed")
+    }
+
+    @MainActor
+    func testRelaunchRecentCreatesSession() async throws {
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        let r = RecentSession(name: "back", dir: "/usr", agent: "/bin/cat")
+        await model.relaunchRecent(r)
+        let alive = await eventually { model.sessions.contains { $0.name == "back" } }
+        XCTAssertTrue(alive)
+        await model.kill("back")
+    }
+
+    @MainActor
+    func testSetThemeAndSplitPersistToStore() async throws {
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        let path = "\(NSTemporaryDirectory())covey-appstate-\(UInt32.random(in: 0..<UInt32.max)).json"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = StateStore(path: path, debounce: 0.05)
+        let client = IPCClient(path: daemon.path); try client.connect()
+        let model = AppModel(client: client,
+                             makeClient: { let c = IPCClient(path: daemon.path); try c.connect(); return c },
+                             store: store)
+        await model.start()
+        model.setTheme("light")
+        model.setSplitPct(25)
+        store.flush()
+        let reloaded = store.load()
+        XCTAssertEqual(reloaded.theme, "light")
+        XCTAssertEqual(reloaded.splitPct, 25)
+    }
+
+    @MainActor
+    func testStartAppliesPersistedThemeSplitRecents() async throws {
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        let path = "\(NSTemporaryDirectory())covey-appstate-\(UInt32.random(in: 0..<UInt32.max)).json"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        // Pre-seed a state file.
+        var seed = PersistedState(theme: "light", splitPct: 33)
+        seed.recents = [RecentSession(name: "old", dir: "/w", agent: "sh")]
+        let store0 = StateStore(path: path, debounce: 0.01)
+        store0.save(seed); store0.flush()
+
+        let store = StateStore(path: path, debounce: 0.05)
+        let client = IPCClient(path: daemon.path); try client.connect()
+        let model = AppModel(client: client,
+                             makeClient: { let c = IPCClient(path: daemon.path); try c.connect(); return c },
+                             store: store)
+        await model.start()
+        XCTAssertEqual(model.themeRaw, "light")
+        XCTAssertEqual(model.splitPct, 33)
+        XCTAssertEqual(model.recents.map(\.name), ["old"])
     }
 
     @MainActor

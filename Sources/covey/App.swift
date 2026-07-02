@@ -10,7 +10,6 @@ struct CoveyApp: App {
     init() {
         // SwiftPM executables launch as accessory processes; become a real app.
         NSApplication.shared.setActivationPolicy(.regular)
-        NSApplication.shared.activate(ignoringOtherApps: true)
     }
 
     var body: some Scene {
@@ -36,6 +35,13 @@ struct CoveyApp: App {
                     ProgressView("starting daemon…")
                         .frame(minWidth: 700, minHeight: 400)
                 }
+            }
+            .onAppear {
+                // Bring the window to the front on launch. `activate` in init runs
+                // before any window exists (SwiftPM apps start as accessory), so
+                // the window would otherwise open behind other apps.
+                NSApplication.shared.activate(ignoringOtherApps: true)
+                NSApplication.shared.windows.first?.makeKeyAndOrderFront(nil)
             }
             .task {
                 guard model == nil else { return }

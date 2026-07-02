@@ -20,6 +20,9 @@ public final class AppModel {
     public var modal: Modal?
     public private(set) var toast: String?
     public private(set) var connected = false
+    public private(set) var themeRaw: String = "dark"
+    public private(set) var splitPct: Int = 38
+    public private(set) var recents: [RecentSession] = []
 
     /// Bytes for the currently attached session's terminal view. The terminal
     /// view mounts asynchronously after `selected` changes, so output (notably
@@ -37,14 +40,23 @@ public final class AppModel {
 
     private var client: IPCClient
     private let makeClient: () throws -> IPCClient
+    private let store: StateStore
+    private var persisted = PersistedState()   // last known full state (keeps schema-only fields)
     private var eventLoop: Task<Void, Never>?
 
-    public init(client: IPCClient, makeClient: @escaping () throws -> IPCClient) {
+    public init(client: IPCClient,
+                makeClient: @escaping () throws -> IPCClient,
+                store: StateStore) {
         self.client = client
         self.makeClient = makeClient
+        self.store = store
     }
 
     public func start() async {
+        persisted = store.load()
+        themeRaw = persisted.theme ?? "dark"
+        splitPct = persisted.splitPct ?? 38
+        recents = persisted.recents
         do {
             let (list, statuses) = try await client.list()
             sessions = list.sorted { $0.created < $1.created }
@@ -123,7 +135,32 @@ public final class AppModel {
         }
     }
 
+    public func setTheme(_ raw: String) {
+        guard raw != themeRaw else { return }
+        themeRaw = raw
+        persist()
+    }
+
+    public func setSplitPct(_ pct: Int) {
+        let clamped = min(80, max(15, pct))
+        guard clamped != splitPct else { return }
+        splitPct = clamped
+        persist()
+    }
+
+    public func relaunchRecent(_ r: RecentSession) async {
+        do { _ = try await client.create(dir: r.dir, agent: r.agent, name: r.name) }
+        catch { toast = errorText(error) }
+    }
+
     // MARK: - private
+
+    private func persist() {
+        persisted.theme = themeRaw
+        persisted.splitPct = splitPct
+        persisted.recents = recents
+        store.save(persisted)
+    }
 
     private func apply(_ event: DaemonEvent) {
         switch event {
@@ -131,7 +168,15 @@ public final class AppModel {
             sessions.removeAll { $0.name == session.name }
             sessions.append(session)
             sessions.sort { $0.created < $1.created }
-        case .sessionRemoved(let name), .exited(let name, _):
+        case .sessionRemoved(let name):
+            sessions.removeAll { $0.name == name }
+            statusByName[name] = nil
+            if selected == name { selected = nil }
+        case .exited(let name, _):
+            if let s = sessions.first(where: { $0.name == name }) {
+                pushRecent(&recents, RecentSession(name: s.name, dir: s.dir, agent: s.agent))
+                persist()
+            }
             sessions.removeAll { $0.name == name }
             statusByName[name] = nil
             if selected == name { selected = nil }

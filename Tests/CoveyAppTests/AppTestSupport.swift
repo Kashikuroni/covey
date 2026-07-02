@@ -41,11 +41,11 @@ extension XCTestCase {
         let client = IPCClient(path: daemon.path)
         try client.connect()
         let path = daemon.path
-        let model = AppModel(client: client, makeClient: {
-            let c = IPCClient(path: path)
-            try c.connect()
-            return c
-        })
+        let statePath = "\(NSTemporaryDirectory())covey-model-\(UInt32.random(in: 0..<UInt32.max)).json"
+        let model = AppModel(
+            client: client,
+            makeClient: { let c = IPCClient(path: path); try c.connect(); return c },
+            store: StateStore(path: statePath, debounce: 0.05))
         return (model, client)
     }
 
