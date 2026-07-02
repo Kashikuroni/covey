@@ -77,5 +77,24 @@ final class PTYProcessTests: XCTestCase {
         )
         wait(for: [exp], timeout: 5)
     }
-    
+
+    func testMasterEOFImpliesChildExited() throws {
+        // macOS pty semantics (verified empirically): the master EOFs when the
+        // session leader exits (tty revoke), never while it lives — even with
+        // every slave fd closed. reap()'s blocking waitpid is therefore safe:
+        // by the time EOF triggers it, the child is a zombie. Pin both sides.
+        let p = PTYProcess()
+        let exitExp = expectation(description: "exit reported")
+        p.setExitHandler { _ in exitExp.fulfill() }
+        // The child detaches from the tty but keeps running: no EOF, no reap,
+        // and the queue must stay responsive (backfill is queue.sync).
+        try p.spawn(argv: ["/bin/sh", "-c", "exec >/dev/null 2>&1 </dev/null; sleep 30"],
+                    cols: 80, rows: 24)
+        var polls = 0
+        waitUntil({ _ = p.backfill(since: 0); polls += 1; return polls >= 10 },
+                  "queue responsive while the detached child lives")
+        p.kill()   // SIGHUP the group; leader death revokes the tty -> EOF -> reap
+        wait(for: [exitExp], timeout: 5)
+    }
+
 }

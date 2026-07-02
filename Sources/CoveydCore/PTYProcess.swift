@@ -169,6 +169,9 @@ public final class PTYProcess {
         reaped = true
         readSource?.cancel()
         var status: Int32 = 0
+        // Safe to block: on macOS the master EOFs only once the session leader
+        // has exited (tty revoke), so the child is already a zombie here. Pinned
+        // by PTYProcessTests.testMasterEOFImpliesChildExited.
         _ = waitpid(pid, &status, 0)
         let code: Int32
         if (status & 0x7f) == 0 {
