@@ -4,6 +4,23 @@ struct ContentView: View {
     @Bindable var model: AppModel
 
     var body: some View {
+        VStack(spacing: 0) {
+            if model.showHeader { TopBar(model: model); Divider() }
+            workspace
+            if model.showFooter { Divider(); StatusBar(model: model) }
+        }
+        .preferredColorScheme(model.themeRaw == "light" ? .light : .dark)
+        .sheet(item: $model.modal) { modal in
+            switch modal {
+            case .newSession: NewSessionSheet(model: model)
+            case .kill(let name): KillSheet(model: model, name: name)
+            case .rename(let name): RenameSheet(model: model, name: name)
+            }
+        }
+        .overlay(alignment: .bottom) { toastBar }
+    }
+
+    private var workspace: some View {
         GeometryReader { geo in
             let leftWidth = max(220, min(geo.size.width - 480,
                                          geo.size.width * CGFloat(model.splitPct) / 100))
@@ -15,15 +32,6 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .preferredColorScheme(model.themeRaw == "light" ? .light : .dark)
-        .sheet(item: $model.modal) { modal in
-            switch modal {
-            case .newSession: NewSessionSheet(model: model)
-            case .kill(let name): KillSheet(model: model, name: name)
-            case .rename(let name): RenameSheet(model: model, name: name)
-            }
-        }
-        .overlay(alignment: .bottom) { toastBar }
     }
 
     private func divider(total: CGFloat) -> some View {

@@ -17,14 +17,6 @@ struct CoveyApp: App {
             Group {
                 if let model {
                     ContentView(model: model)
-                        .toolbar {
-                            Button {
-                                model.setTheme(model.themeRaw == "dark" ? "light" : "dark")
-                            } label: {
-                                Image(systemName: model.themeRaw == "dark" ? "sun.max" : "moon")
-                            }
-                            .help("Toggle theme")
-                        }
                 } else if let startupError {
                     VStack(spacing: 10) {
                         Text("failed to start").font(.headline)
