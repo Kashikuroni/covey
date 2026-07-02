@@ -3,28 +3,32 @@ import CoveyKit
 
 struct SessionListView: View {
     @Bindable var model: AppModel
-    @State private var tab: Tab = .active
     @FocusState private var filterFocused: Bool
-
-    enum Tab: String, CaseIterable { case active = "Active", recent = "Recent" }
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("", selection: $tab) {
-                ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            Picker("", selection: Binding(
+                get: { model.listTab },
+                set: { model.setListTab($0) })) {
+                Text("Active").tag(AppModel.ListTab.active)
+                Text("Recent").tag(AppModel.ListTab.recent)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
             .padding(6)
-            if tab == .active {
+            if model.listTab == .active {
                 TextField("Filter", text: Binding(
                     get: { model.filter }, set: { model.setFilter($0) }))
                     .textFieldStyle(.roundedBorder)
                     .focused($filterFocused)
                     .padding(.horizontal, 6)
                     .onChange(of: model.filterFocusTick) { _, _ in filterFocused = true }
+                    .onExitCommand {
+                        model.setFilter("")
+                        filterFocused = false
+                    }
             }
-            if tab == .active { activeList } else { recentList }
+            if model.listTab == .active { activeList } else { recentList }
         }
         .toolbar {
             Button { model.modal = .newSession } label: { Image(systemName: "plus") }
@@ -60,10 +64,9 @@ struct SessionListView: View {
 
     // Recent, newest-first, hiding any name that is currently Active.
     private var recentList: some View {
-        let active = Set(model.sessions.map(\.name))
-        let items = model.recents.filter { !active.contains($0.name) }
+        let items = model.visibleRecents()
         return List {
-            ForEach(items, id: \.name) { r in
+            ForEach(Array(items.enumerated()), id: \.element.name) { idx, r in
                 HStack(spacing: 6) {
                     Circle().fill(.gray).frame(width: 8, height: 8)
                     VStack(alignment: .leading, spacing: 1) {
@@ -74,6 +77,8 @@ struct SessionListView: View {
                     Button("Relaunch") { Task { await model.relaunchRecent(r) } }
                         .buttonStyle(.borderless)
                 }
+                .listRowBackground(model.recentSelected == idx
+                                   ? Color.accentColor.opacity(0.15) : nil)
             }
         }
     }

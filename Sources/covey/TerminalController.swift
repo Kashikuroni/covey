@@ -12,8 +12,25 @@ struct TerminalRepresentable: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(model: model) }
 
     func makeNSView(context: Context) -> TerminalView {
-        let view = TerminalView(frame: .zero)
+        let view = CoveyTerminalView(frame: .zero)
         view.terminalDelegate = context.coordinator
+        let model = self.model
+        // Entering/leaving the alternate buffer invalidates any scrolled-up
+        // viewport, so a stale HISTORY badge must clear.
+        view.onBufferSwitch = { Task { @MainActor in model.setHistoryMode(false) } }
+        model.onTerminalCommand = { [weak view] command in
+            guard let view else { return }
+            switch command {
+            case .focus:
+                view.window?.makeFirstResponder(view)
+            case .blur:
+                view.window?.makeFirstResponder(nil)
+            case .scrollPage(let up):
+                if up { view.scrollUp(lines: 10) } else { view.scrollDown(lines: 10) }
+            case .scrollToBottom:
+                view.scroll(toPosition: 1.0)
+            }
+        }
         applyTheme(to: view)
         model.onTerminalOutput = { [weak view] bytes in
             view?.feed(byteArray: bytes[...])
@@ -55,6 +72,15 @@ struct TerminalRepresentable: NSViewRepresentable {
         }
 
         func scrolled(source: TerminalView, position: Double) {
+            // SwiftTerm's scroll(toPosition:) truncates, so a scrollbar drag can
+            // land one line short of the live bottom and pin the HISTORY badge;
+            // snap that last line (scroll(toPosition: 1.0) hits the exact bottom
+            // and re-fires scrolled with 1.0).
+            if linesShortOfBottom(position: position,
+                                  yDisp: source.getTerminal().buffer.yDisp) == 1 {
+                DispatchQueue.main.async { [weak source] in source?.scroll(toPosition: 1.0) }
+                return
+            }
             // position 1.0 == pinned to the live bottom; anything less is history.
             let history = position < 0.999
             Task { @MainActor in model.setHistoryMode(history) }

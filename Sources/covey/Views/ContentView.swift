@@ -19,15 +19,38 @@ struct ContentView: View {
             }
         }
         .overlay(alignment: .bottom) { toastBar }
+        .overlay(alignment: .bottom) {
+            if case .leader(let menu) = model.inputMode {
+                WhichKeyView(menu: menu).padding(.bottom, 36)
+            }
+        }
+        .overlay {
+            if model.inputMode == .help { HelpOverlay() }
+        }
         .onAppear {
-            // File→Close would shadow a menu ⌘W (AppKit picks the first key
-            // equivalent in menu order), so intercept before dispatch.
             keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                guard event.modifierFlags.intersection([.command, .shift, .option, .control]) == .command,
-                      event.charactersIgnoringModifiers == "w",
-                      model.modal == nil,
-                      let selected = model.selected else { return event }
-                model.modal = .kill(selected)
+                // ⌘W: kill sheet for the selected session (File→Close would
+                // shadow a menu ⌘W — AppKit picks the first key equivalent).
+                if event.modifierFlags.intersection([.command, .shift, .option, .control]) == .command,
+                   event.charactersIgnoringModifiers == "w" {
+                    guard model.modal == nil, let selected = model.selected else { return event }
+                    model.modal = .kill(selected)
+                    return nil
+                }
+                // ⌘-anything else belongs to the menu system.
+                guard !event.modifierFlags.contains(.command) else { return event }
+                // While a text field edits (filter, sheets), keys are its own.
+                if let responder = event.window?.firstResponder, responder is NSTextView {
+                    return event
+                }
+                let context = KeyRouter.Context(mode: model.inputMode,
+                                                focus: model.focus,
+                                                vimMode: model.vimMode,
+                                                sheetOpen: model.modal != nil)
+                guard let action = KeyRouter.route(keyInput(from: event), context: context) else {
+                    return event
+                }
+                model.apply(action)
                 return nil
             }
         }
@@ -94,6 +117,21 @@ struct ContentView: View {
                         model.setSplitPct(Int(value.location.x / total * 100))
                     }
             )
+    }
+
+    private func keyInput(from event: NSEvent) -> KeyInput {
+        let specials: [UInt16: Special] = [
+            53: .escape, 36: .enter, 48: .tab, 51: .backspace,
+            126: .up, 125: .down, 123: .left, 124: .right,
+            116: .pageUp, 121: .pageDown, 119: .end,
+        ]
+        let flags = event.modifierFlags
+        return KeyInput(
+            char: event.charactersIgnoringModifiers?.first,
+            isControl: flags.contains(.control),
+            isShift: flags.contains(.shift),
+            special: specials[event.keyCode]
+        )
     }
 
     @ViewBuilder

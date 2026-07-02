@@ -47,6 +47,10 @@ struct NewSessionSheet: View {
         }
         .padding(20)
         .frame(width: 420)
+        .onAppear {
+            if let prefill = model.newSessionPrefillDir { dir = prefill }
+            model.clearNewSessionPrefill()
+        }
     }
 }
 
