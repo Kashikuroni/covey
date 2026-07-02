@@ -13,13 +13,46 @@ public final class SessionRegistry {
     public var onExit: ((String, Int32) -> Void)?
     public var onSessionAdded: ((Session) -> Void)?
     public var onSessionRemoved: ((String) -> Void)?
-    private var entries: [String: (session: Session, process: PTYProcess, screen: ScreenModel)] = [:]
+    private var entries: [String: (session: Session, process: PTYProcess, screen: ScreenModel, argv: [String])] = [:]
     private let lock = NSLock()
     private let clock: () -> Int64
     private var counter = 0
-    
-    public init(clock: @escaping () -> Int64 = { Int64(time(nil)) }) {
+    private var lostMetas: [SessionMeta]
+    private let onPersist: (([SessionMeta]) -> Void)?
+
+    public init(clock: @escaping () -> Int64 = { Int64(time(nil)) },
+                persisted: [SessionMeta] = [],
+                onPersist: (([SessionMeta]) -> Void)? = nil) {
         self.clock = clock
+        self.lostMetas = persisted   // previous daemon life; surfaced, never respawned
+        self.onPersist = onPersist
+    }
+
+    /// Sessions from the previous daemon life. The GUI merges them into its
+    /// recents and acks with `clearLost()`.
+    public var lost: [SessionMeta] {
+        lock.lock(); defer { lock.unlock() }
+        return lostMetas
+    }
+
+    public func clearLost() {
+        lock.lock()
+        lostMetas = []
+        lock.unlock()
+        persistNow()
+    }
+
+    /// Snapshots live + lost metas under the lock, then persists outside it.
+    private func persistNow() {
+        guard let onPersist else { return }
+        lock.lock()
+        let metas = entries.values.map {
+            SessionMeta(name: $0.session.name, dir: $0.session.dir,
+                        agent: $0.session.agent, argv: $0.argv,
+                        created: $0.session.created)
+        } + lostMetas
+        lock.unlock()
+        onPersist(metas)
     }
     
     public func create (
@@ -49,7 +82,12 @@ public final class SessionRegistry {
             created: clock(), git: nil, worktreeRepo: nil
         )
         let proc = PTYProcess()
-        proc.setExitHandler { [weak self] code in self?.handleExit(id, code)}
+        // Identify the entry by process, not by name: the exit may arrive
+        // after a rename, when the create-time name no longer keys the entry.
+        proc.setExitHandler { [weak self, weak proc] code in
+            guard let proc else { return }
+            self?.handleExit(proc, code)
+        }
         let screen = ScreenModel(cols: 80, rows: 24)
         proc.setOutputHandler { bytes, _ in screen.feed(bytes) }
         do {
@@ -59,17 +97,15 @@ public final class SessionRegistry {
             throw error
         }
         if let autoNumber { counter = autoNumber }
-        entries[id] = (session, proc, screen)
+        entries[id] = (session, proc, screen, argv)
         lock.unlock()
+        persistNow()
         onSessionAdded?(session)
         return session
     }
     
     public func kill(name: String) {
-        lock.lock()
-        let proc = entries[name]?.process
-        lock.unlock()
-        proc?.kill()
+        withEntry(name)?.process.kill()
     }
 
     public func list() -> [Session] {
@@ -80,6 +116,14 @@ public final class SessionRegistry {
     public func get(name: String) -> Session? {
         lock.lock(); defer { lock.unlock() }
         return entries[name]?.session
+    }
+
+    /// Snapshot of a session's process and screen under the lock; callers act
+    /// on the pair outside it.
+    private func withEntry(_ name: String) -> (process: PTYProcess, screen: ScreenModel)? {
+        lock.lock(); defer { lock.unlock() }
+        guard let entry = entries[name] else { return nil }
+        return (entry.process, entry.screen)
     }
     
     public func attachOutput(
@@ -98,19 +142,13 @@ public final class SessionRegistry {
     }
 
     public func write(name: String, bytes: [UInt8]) {
-        lock.lock()
-        let proc = entries[name]?.process
-        lock.unlock()
-        proc?.write(bytes)
+        withEntry(name)?.process.write(bytes)
     }
 
     public func resize(name: String, cols: UInt16, rows: UInt16) {
-        lock.lock()
-        let proc = entries[name]?.process
-        let screen = entries[name]?.screen
-        lock.unlock()
-        proc?.resize(cols: cols, rows: rows)
-        screen?.resize(cols: Int(cols), rows: Int(rows))
+        guard let entry = withEntry(name) else { return }
+        entry.process.resize(cols: cols, rows: rows)
+        entry.screen.resize(cols: Int(cols), rows: Int(rows))
     }
     
     public func rename(name: String, newName: String) throws {
@@ -125,15 +163,13 @@ public final class SessionRegistry {
         entries[name] = nil
         entries[newName] = entry
         lock.unlock()
+        persistNow()
         onSessionRemoved?(name)
         onSessionAdded?(entry.session)
     }
     
     public func backfill(name: String, since seq: Int) -> (bytes: [UInt8], fromSeq: Int, gapped: Bool)? {
-        lock.lock()
-        let proc = entries[name]?.process
-        lock.unlock()
-        return proc?.backfill(since: seq)
+        withEntry(name)?.process.backfill(since: seq)
     }
     
     /// Visible screen text of every live session, for status inference.
@@ -144,11 +180,13 @@ public final class SessionRegistry {
         return screens.mapValues { $0.visibleText() }
     }
 
-    private func handleExit(_ id: String, _ code: Int32) {
+    private func handleExit(_ proc: PTYProcess, _ code: Int32) {
         lock.lock()
-        entries[id] = nil
+        let id = entries.first { $0.value.process === proc }?.key
+        if let id { entries[id] = nil }
         lock.unlock()
-        onExit?(id, code)
+        persistNow()
+        if let id { onExit?(id, code) }
     }
 
 }

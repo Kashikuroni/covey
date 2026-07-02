@@ -148,4 +148,62 @@ final class SessionRegistryTests: XCTestCase {
         XCTAssertEqual(a.name, "s-2")
         for s in reg.list() { reg.kill(name: s.name) }
     }
+
+    final class PersistSpy {
+        private let lock = NSLock()
+        private var snapshots: [[SessionMeta]] = []
+        func record(_ metas: [SessionMeta]) { lock.lock(); snapshots.append(metas); lock.unlock() }
+        var last: [SessionMeta]? { lock.lock(); defer { lock.unlock() }; return snapshots.last }
+    }
+
+    func testPersistCallbackTracksLifecycle() throws {
+        let spy = PersistSpy()
+        let reg = SessionRegistry(clock: { 7 }, onPersist: spy.record)
+        _ = try reg.create(dir: "/tmp", agent: "sh", argv: ["/bin/cat"], name: "a")
+        XCTAssertEqual(spy.last?.map(\.name), ["a"])
+        XCTAssertEqual(spy.last?.first?.argv, ["/bin/cat"])
+        XCTAssertEqual(spy.last?.first?.created, 7)
+        try reg.rename(name: "a", newName: "b")
+        XCTAssertEqual(spy.last?.map(\.name), ["b"])
+        reg.kill(name: "b")
+        waitUntil({ reg.list().isEmpty }, "exit removes entry")
+        waitUntil({ spy.last?.isEmpty == true }, "exit persists empty registry")
+    }
+
+    func testPersistedEntriesBecomeLostAndClear() {
+        let meta = SessionMeta(name: "old", dir: "/tmp", agent: "claude",
+                               argv: ["claude"], created: 1)
+        let spy = PersistSpy()
+        let reg = SessionRegistry(persisted: [meta], onPersist: spy.record)
+        XCTAssertEqual(reg.lost, [meta])
+        XCTAssertTrue(reg.list().isEmpty, "lost sessions are never respawned")
+        reg.clearLost()
+        XCTAssertTrue(reg.lost.isEmpty)
+        XCTAssertEqual(spy.last, [])
+    }
+
+    func testPersistIncludesLostUntilClaimed() throws {
+        let meta = SessionMeta(name: "old", dir: "/tmp", agent: "claude",
+                               argv: ["claude"], created: 1)
+        let spy = PersistSpy()
+        let reg = SessionRegistry(persisted: [meta], onPersist: spy.record)
+        _ = try reg.create(dir: "/a", agent: "sh", argv: ["/bin/cat"], name: "new")
+        XCTAssertEqual(Set(spy.last?.map(\.name) ?? []), ["new", "old"],
+                       "unclaimed lost sessions must survive a second daemon restart")
+        reg.kill(name: "new")
+        waitUntil({ reg.list().isEmpty }, "cleanup")
+    }
+
+    func testSecondLifeSeesFirstLifeSessionsAsLost() throws {
+        // Integration with RegistryStore: the daemon-restart scenario.
+        let path = "\(NSTemporaryDirectory())covey-registry-\(UInt32.random(in: 0..<UInt32.max)).json"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = RegistryStore(path: path)
+        let first = SessionRegistry(persisted: store.load(), onPersist: { store.save($0) })
+        _ = try first.create(dir: "/tmp", agent: "sh", argv: ["/bin/cat"], name: "s1")
+        let second = SessionRegistry(persisted: store.load(), onPersist: { store.save($0) })
+        XCTAssertEqual(second.lost.map(\.name), ["s1"])
+        first.kill(name: "s1")
+        waitUntil({ first.list().isEmpty }, "cleanup")
+    }
 }
