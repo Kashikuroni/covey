@@ -32,18 +32,14 @@ struct SessionListView: View {
         }
     }
 
-    private var dirs: [String] {
-        var seen = Set<String>()
-        return model.sessions.map(\.dir).filter { seen.insert($0).inserted }
-    }
-
     private var activeList: some View {
-        List(selection: selectionBinding) {
-            ForEach(dirs, id: \.self) { dir in
-                let rows = model.sessions
-                    .filter { $0.dir == dir && fuzzyMatch(model.filter, $0.name) }
+        let groups = model.orderedSessions()
+        let filtering = !model.filter.isEmpty
+        return List(selection: selectionBinding) {
+            ForEach(groups, id: \.dir) { group in
+                let rows = group.sessions.filter { fuzzyMatch(model.filter, $0.name) }
                 if !rows.isEmpty {
-                    Section(dir) {
+                    Section(group.dir) {
                         ForEach(rows, id: \.name) { session in
                             row(session)
                                 .tag(session.name)
@@ -51,6 +47,10 @@ struct SessionListView: View {
                                     Button("Rename…") { model.modal = .rename(session.name) }
                                     Button("Kill…", role: .destructive) { model.modal = .kill(session.name) }
                                 }
+                        }
+                        .onMove { from, to in
+                            guard !filtering else { return }
+                            model.moveSession(inDir: group.dir, from: from, to: to)
                         }
                     }
                 }
