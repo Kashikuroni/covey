@@ -1,5 +1,5 @@
 import XCTest
-@testable import CoveydCore
+@testable import CoveyKit
 
 final class NDJSONCodecTests: XCTestCase {
     func testEncodeLineAppendsNewline() throws {
