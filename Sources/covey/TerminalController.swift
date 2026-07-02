@@ -72,6 +72,13 @@ struct TerminalRepresentable: NSViewRepresentable {
         }
 
         func scrolled(source: TerminalView, position: Double) {
+            // Alternate-buffer region scrolls (a streaming TUI) fire this with
+            // position 0 (Terminal.scroll always notifies; alt scrollPosition
+            // is 0) — history mode does not apply there.
+            if source.getTerminal().isCurrentBufferAlternate {
+                Task { @MainActor in model.setHistoryMode(false) }
+                return
+            }
             // SwiftTerm's scroll(toPosition:) truncates, so a scrollbar drag can
             // land one line short of the live bottom and pin the HISTORY badge;
             // snap that last line (scroll(toPosition: 1.0) hits the exact bottom

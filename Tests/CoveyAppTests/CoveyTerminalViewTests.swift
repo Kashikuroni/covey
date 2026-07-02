@@ -97,6 +97,22 @@ final class CoveyTerminalViewTests: XCTestCase {
         XCTAssertEqual(linesShortOfBottom(position: 0.5, yDisp: 93), 93)
     }
 
+    @MainActor
+    func testAltBufferScrollEventsClearHistoryMode() async throws {
+        // Terminal.scroll() notifies unconditionally; in the alternate buffer
+        // scrollPosition is 0, which must NOT light the HISTORY badge.
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        let coordinator = TerminalRepresentable.Coordinator(model: model)
+        let (view, _) = makeView()
+        view.feed(text: "\u{1b}[?1049h")   // enter the alternate buffer
+        model.setHistoryMode(true)          // stale badge from a prior shell scroll
+        coordinator.scrolled(source: view, position: 0)
+        _ = await eventually { model.historyMode == false }
+        XCTAssertFalse(model.historyMode)
+    }
+
     func testScrollToPositionOneLandsExactBottom() {
         let (view, probe) = makeView()
         var text = ""

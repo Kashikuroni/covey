@@ -60,6 +60,7 @@ final class CoveyTerminalView: TerminalView {
         onBufferSwitch?()
     }
 
+
     func sendWheelReport(deltaY: CGFloat, at point: CGPoint) {
         let terminal = getTerminal()
         // Cell-level precision is enough for wheel reports; derive the grid
