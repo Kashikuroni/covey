@@ -36,6 +36,22 @@ final class StateStoreTests: XCTestCase {
         XCTAssertEqual(store.load(), PersistedState())
     }
 
+    func testInspectorAndVimFieldsRoundTrip() {
+        let path = tempPath()
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = StateStore(path: path, debounce: 5)
+        var s = PersistedState()
+        s.showInspector = true
+        s.vimMode = true
+        s.sbWidth = 300
+        store.save(s)
+        store.flush()
+        let back = StateStore(path: path).load()
+        XCTAssertEqual(back.showInspector, true)
+        XCTAssertEqual(back.vimMode, true)
+        XCTAssertEqual(back.sbWidth, 300)
+    }
+
     func testCorruptFileLoadsDefault() throws {
         let path = tempPath()
         defer { try? FileManager.default.removeItem(atPath: path) }

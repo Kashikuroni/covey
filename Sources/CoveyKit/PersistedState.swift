@@ -54,6 +54,8 @@ public struct PersistedState: Codable, Equatable {
     public var showSessions: Bool?
     public var showFooter: Bool?
     public var showHeader: Bool?
+    public var showInspector: Bool?
+    public var vimMode: Bool?
     public var lastVersion: String?
 
     public init(
@@ -64,6 +66,7 @@ public struct PersistedState: Codable, Equatable {
         sessions: [String: PersistedSession] = [:],
         fontScale: Int? = nil, sbWidth: Int? = nil,
         showSessions: Bool? = nil, showFooter: Bool? = nil, showHeader: Bool? = nil,
+        showInspector: Bool? = nil, vimMode: Bool? = nil,
         lastVersion: String? = nil
     ) {
         self.theme = theme; self.splitPct = splitPct; self.recents = recents
@@ -72,6 +75,8 @@ public struct PersistedState: Codable, Equatable {
         self.notes = notes; self.drafts = drafts; self.sessions = sessions
         self.fontScale = fontScale; self.sbWidth = sbWidth
         self.showSessions = showSessions; self.showFooter = showFooter
-        self.showHeader = showHeader; self.lastVersion = lastVersion
+        self.showHeader = showHeader
+        self.showInspector = showInspector; self.vimMode = vimMode
+        self.lastVersion = lastVersion
     }
 }

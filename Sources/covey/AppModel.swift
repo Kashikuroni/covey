@@ -14,7 +14,7 @@ public final class AppModel {
         case rename(String)
     }
 
-    public enum Focus { case sessions, terminal }
+    public enum Focus { case sessions, terminal, inspector }
 
     public private(set) var sessions: [Session] = []       // sorted by created
     public private(set) var statusByName: [String: Status] = [:]
@@ -36,6 +36,9 @@ public final class AppModel {
     public private(set) var showSessions = true
     public private(set) var showFooter = true
     public private(set) var showHeader = true
+    public private(set) var showInspector = false
+    public private(set) var sbWidth = 360
+    public private(set) var vimMode = false
     /// Bumped by `requestFilterFocus`; the filter field focuses on change.
     public private(set) var filterFocusTick = 0
 
@@ -84,6 +87,9 @@ public final class AppModel {
         showSessions = persisted.showSessions ?? true
         showFooter = persisted.showFooter ?? true
         showHeader = persisted.showHeader ?? true
+        showInspector = persisted.showInspector ?? false
+        sbWidth = persisted.sbWidth ?? 360
+        vimMode = persisted.vimMode ?? false
         do {
             let (list, statuses, lost) = try await client.list()
             sessions = list.sorted { $0.created < $1.created }
@@ -254,6 +260,15 @@ public final class AppModel {
     public func setShowSessions(_ on: Bool) { showSessions = on; persist() }
     public func setShowFooter(_ on: Bool) { showFooter = on; persist() }
     public func setShowHeader(_ on: Bool) { showHeader = on; persist() }
+    public func setShowInspector(_ on: Bool) { showInspector = on; persist() }
+    public func setVimMode(_ on: Bool) { vimMode = on; persist() }
+
+    public func setSbWidth(_ px: Int) {
+        let clamped = min(600, max(240, px))
+        guard clamped != sbWidth else { return }
+        sbWidth = clamped
+        persist()
+    }
 
     private func orderedDirs() -> [String] {
         var seen = Set<String>(); var dirs: [String] = []
@@ -277,6 +292,9 @@ public final class AppModel {
         persisted.showSessions = showSessions
         persisted.showFooter = showFooter
         persisted.showHeader = showHeader
+        persisted.showInspector = showInspector
+        persisted.sbWidth = sbWidth
+        persisted.vimMode = vimMode
         store.save(persisted)
     }
 

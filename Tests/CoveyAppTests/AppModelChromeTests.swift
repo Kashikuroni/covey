@@ -93,4 +93,50 @@ final class AppModelChromeTests: XCTestCase {
         XCTAssertFalse(model.historyMode, "history mode must reset on session switch")
         await model.kill(name); await model.kill(other)
     }
+
+    @MainActor
+    func testInspectorAndVimStatePersistAndLoad() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let path = "\(NSTemporaryDirectory())covey-inspector-\(UInt32.random(in: 0..<UInt32.max)).json"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = StateStore(path: path, debounce: 0.05)
+        let client = IPCClient(path: daemon.path); try client.connect()
+        let model = AppModel(client: client,
+                             makeClient: { let c = IPCClient(path: daemon.path); try c.connect(); return c },
+                             store: store)
+        await model.start()
+        XCTAssertFalse(model.showInspector)
+        XCTAssertEqual(model.sbWidth, 360)
+        XCTAssertFalse(model.vimMode)
+        model.setShowInspector(true)
+        model.setSbWidth(420)
+        model.setVimMode(true)
+        store.flush()
+        let reloaded = store.load()
+        XCTAssertEqual(reloaded.showInspector, true)
+        XCTAssertEqual(reloaded.sbWidth, 420)
+        XCTAssertEqual(reloaded.vimMode, true)
+        // A fresh model over the same store loads them back.
+        let client2 = IPCClient(path: daemon.path); try client2.connect()
+        let model2 = AppModel(client: client2,
+                              makeClient: { let c = IPCClient(path: daemon.path); try c.connect(); return c },
+                              store: StateStore(path: path, debounce: 0.05))
+        await model2.start()
+        XCTAssertTrue(model2.showInspector)
+        XCTAssertEqual(model2.sbWidth, 420)
+        XCTAssertTrue(model2.vimMode)
+    }
+
+    @MainActor
+    func testSbWidthClampsAndFocusInspector() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        model.setSbWidth(100)
+        XCTAssertEqual(model.sbWidth, 240)
+        model.setSbWidth(9000)
+        XCTAssertEqual(model.sbWidth, 600)
+        model.setFocus(.inspector)
+        XCTAssertEqual(model.focus, .inspector)
+    }
 }
