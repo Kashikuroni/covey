@@ -54,10 +54,15 @@ struct TerminalRepresentable: NSViewRepresentable {
             Task { @MainActor in await model.resize(cols: cols, rows: rows) }
         }
 
+        func scrolled(source: TerminalView, position: Double) {
+            // position 1.0 == pinned to the live bottom; anything less is history.
+            let history = position < 0.999
+            Task { @MainActor in model.setHistoryMode(history) }
+        }
+
         // The daemon owns process state; the rest of the delegate is unused.
         func setTerminalTitle(source: TerminalView, title: String) {}
         func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
-        func scrolled(source: TerminalView, position: Double) {}
         func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {}
         func bell(source: TerminalView) {}
         func clipboardCopy(source: TerminalView, content: Data) {}

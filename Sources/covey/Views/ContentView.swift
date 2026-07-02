@@ -25,11 +25,15 @@ struct ContentView: View {
             let leftWidth = max(220, min(geo.size.width - 480,
                                          geo.size.width * CGFloat(model.splitPct) / 100))
             HStack(spacing: 0) {
-                SessionListView(model: model)
-                    .frame(width: leftWidth)
-                divider(total: geo.size.width)
+                if model.showSessions {
+                    SessionListView(model: model)
+                        .frame(width: leftWidth)
+                        .onTapGesture { model.setFocus(.sessions) }
+                    divider(total: geo.size.width)
+                }
                 TerminalPaneView(model: model)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .onTapGesture { model.setFocus(.terminal) }
             }
         }
     }

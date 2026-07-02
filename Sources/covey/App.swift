@@ -60,6 +60,17 @@ struct CoveyApp: App {
                 Button("Filter Sessions") { model?.requestFilterFocus() }
                     .keyboardShortcut("f", modifiers: .command)
             }
+            CommandMenu("View") {
+                Toggle("Show Sessions", isOn: Binding(
+                    get: { model?.showSessions ?? true },
+                    set: { model?.setShowSessions($0) }))
+                Toggle("Show Top Bar", isOn: Binding(
+                    get: { model?.showHeader ?? true },
+                    set: { model?.setShowHeader($0) }))
+                Toggle("Show Status Bar", isOn: Binding(
+                    get: { model?.showFooter ?? true },
+                    set: { model?.setShowFooter($0) }))
+            }
         }
     }
 
