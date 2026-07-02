@@ -83,10 +83,13 @@ linesShort = round((1 - position) * yDisp / position)   // yDisp: buffer.yDisp (
 
 ## 3. Техдолг CoveydCore
 
-- **#5 `PTYProcess.reap`**: убрать блокирующий `waitpid(pid, &status, 0)`.
-  `DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue:)`
-  + `waitpid(WNOHANG)` в обработчике; I/O-очередь не виснет, если ребёнок
-  игнорирует SIGHUP до эскалации в SIGKILL.
+- **#5 `PTYProcess.reap`**: ЗАКРЫТО как не-баг (обнаружено при исполнении).
+  Эмпирика: на macOS master получает EOF ровно в момент выхода session
+  leader'а (tty revoke) — внук с открытыми fd слейва EOF не задерживает, а
+  живой лидер с закрытыми fd EOF не даёт вовсе. `reap()` вызывается только по
+  EOF ⇒ ребёнок уже зомби ⇒ блокирующий `waitpid` мгновенен. Вместо exit-source
+  (недостижимый код): комментарий-инвариант в `reap()` + тест
+  `testMasterEOFImpliesChildExited`, пинящий семантику в обе стороны.
 - **#6 `SessionRegistry.counter`**: инкремент только когда авто-имя реально
   использовано (создание успешно и имя не задано явно) — `s-N` без дыр.
 - **#7 `ScrollbackBuffer.append`**: кусок больше ёмкости кольца обрезается до
@@ -96,6 +99,18 @@ linesShort = round((1 - position) * yDisp / position)   // yDisp: buffer.yDisp (
 - **#9 дубли**: `SessionRegistry.withProcess(name) { proc in … }` вместо ×4
   паттерна `lock; entries[name]?.process; unlock; proc?.…`; сборщик
   `expectOutput` из дублей в тестах → общий `TestSupport`.
+
+## 3.1 Дополнение по итогам смоука: дедлок демона на застрявшем raw-ребёнке
+
+Смоук выявил зависание всего демона: raw-режимный ребёнок перестаёт читать
+tty → ядро не принимает ввод → блокирующий `write()` вешает pty-очередь →
+`backfill` (`queue.sync`) с IPC-потока вешает весь демон, включая `kill()`.
+Тот же класс отказа, что #5, но реальный. Фикс: master fd переведён в
+`O_NONBLOCK`, невлезший ввод паркуется в ограниченный `pendingInput`
+(переполнение отбрасывается, как в полной ядерной очереди) и доливается
+write-source'ом; `ScrollbackBuffer` синхронизирован внутренне, `backfill`
+больше не ходит через pty-очередь; read-петля терпит `EAGAIN`/`EINTR`.
+Запинено тестом `testWriteToStuckChildDoesNotWedgeQueue`.
 
 ## 4. Тесты
 
