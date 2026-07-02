@@ -55,6 +55,8 @@ enum KeyAction: Equatable {
     case noteDefocus
     case noteEscape
     case renameProject
+    case answerPrompt(Int)
+    case sendShiftTab
 }
 
 /// Map a Cyrillic char to the Latin key at the same physical QWERTY position;
@@ -144,7 +146,7 @@ enum KeyRouter {
         case .down: return .selectNext
         case .up: return .selectPrev
         case .enter: return .enterTerminal
-        case .tab: return .toggleTab
+        case .tab: return input.isShift ? .sendShiftTab : .toggleTab
         case .pageUp: return .scrollTerminalPage(up: true)
         case .pageDown: return .scrollTerminalPage(up: false)
         case .end: return .scrollTerminalToBottom
@@ -171,7 +173,11 @@ enum KeyRouter {
         case "{": return .resizeSplit(-8)
         case "}": return .resizeSplit(8)
         case "?": return .showHelp
-        default: return nil
+        default:
+            if let n = ch?.wholeNumberValue, (1...9).contains(n) {
+                return .answerPrompt(n)
+            }
+            return nil
         }
     }
 

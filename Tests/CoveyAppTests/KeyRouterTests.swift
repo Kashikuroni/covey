@@ -133,4 +133,17 @@ final class KeyRouterTests: XCTestCase {
         let session = ctx(mode: .leader(.session))
         XCTAssertEqual(KeyRouter.route(key("R"), context: session), .renameProject)
     }
+
+    func testPromptAnswerAndShiftTab() {
+        XCTAssertEqual(KeyRouter.route(key("1"), context: ctx()), .answerPrompt(1))
+        XCTAssertEqual(KeyRouter.route(key("9"), context: ctx()), .answerPrompt(9))
+        XCTAssertNil(KeyRouter.route(key("0"), context: ctx()))
+        XCTAssertNil(KeyRouter.route(key("i"), context: ctx()), "no reply composer: terminal is live")
+        XCTAssertEqual(KeyRouter.route(.init(char: nil, isShift: true, special: .tab),
+                                       context: ctx()), .sendShiftTab)
+        // plain tab still toggles tabs, select-mode digits still jump
+        XCTAssertEqual(KeyRouter.route(special(.tab), context: ctx()), .toggleTab)
+        XCTAssertEqual(KeyRouter.route(key("2"), context: ctx(mode: .selectSession)),
+                       .selectByNumber(2))
+    }
 }

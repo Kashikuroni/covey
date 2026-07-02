@@ -70,6 +70,7 @@ public final class AppModel {
     public var onTerminalCommand: ((TerminalCommand) -> Void)?
     public private(set) var noteTarget: NoteTarget?
     public private(set) var noteState = NoteUIState()
+    public private(set) var promptsByName: [String: [String]] = [:]
     public private(set) var notes: [String: String] = [:]
     public private(set) var projectNotes: [String: String] = [:]
     public private(set) var projectNames: [String: String] = [:]
@@ -384,6 +385,15 @@ public final class AppModel {
         inputMode = on ? .normal : .note   // edit: NSTextView owns keys
     }
 
+    /// tmux.rs send_choice port: the digit plus Enter.
+    public func answerPrompt(_ n: Int, session: String? = nil) {
+        guard let target = session ?? selected,
+              let options = promptsByName[target], n >= 1, n <= options.count
+        else { return }
+        Task { try? await client.input(name: target, bytes: Array("\(n)\r".utf8)) }
+    }
+
+
     func apply(_ action: KeyAction) {
         switch action {
         case .selectNext: step(by: 1)
@@ -492,6 +502,11 @@ public final class AppModel {
             if let dir = sessions.first(where: { $0.name == selected })?.dir {
                 modal = .renameProject(dir)
             }
+        case .answerPrompt(let n):
+            answerPrompt(n)
+        case .sendShiftTab:
+            guard let selected else { return }
+            Task { try? await client.input(name: selected, bytes: [0x1b, 0x5b, 0x5a]) }
         }
     }
 
@@ -606,6 +621,7 @@ public final class AppModel {
         case .sessionRemoved(let name):
             sessions.removeAll { $0.name == name }
             statusByName[name] = nil
+            promptsByName[name] = nil
             if selected == name { selected = nil }
         case .exited(let name, _):
             if let s = sessions.first(where: { $0.name == name }) {
@@ -614,9 +630,12 @@ public final class AppModel {
             }
             sessions.removeAll { $0.name == name }
             statusByName[name] = nil
+            promptsByName[name] = nil
             if selected == name { selected = nil }
         case let .statusChanged(name, status):
             statusByName[name] = status
+        case let .promptChanged(name, options):
+            promptsByName[name] = options.isEmpty ? nil : options
         case let .output(name, _, bytesB64):
             guard name == selected, let data = Data(base64Encoded: bytesB64) else { return }
             let bytes = [UInt8](data)
