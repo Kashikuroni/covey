@@ -14,6 +14,8 @@ public final class AppModel {
         case rename(String)
     }
 
+    public enum Focus { case sessions, terminal }
+
     public private(set) var sessions: [Session] = []       // sorted by created
     public private(set) var statusByName: [String: Status] = [:]
     public private(set) var selected: String?
@@ -26,6 +28,16 @@ public final class AppModel {
     public private(set) var usage: Usage?
     public private(set) var plan: String?
     public private(set) var usageError: String?
+    public private(set) var order: [String] = []
+    public private(set) var projectOrder: [String] = []
+    public var filter: String = ""
+    public private(set) var historyMode = false
+    public private(set) var focus: Focus = .terminal
+    public private(set) var showSessions = true
+    public private(set) var showFooter = true
+    public private(set) var showHeader = true
+    /// Bumped by `requestFilterFocus`; the filter field focuses on change.
+    public private(set) var filterFocusTick = 0
 
     /// Bytes for the currently attached session's terminal view. The terminal
     /// view mounts asynchronously after `selected` changes, so output (notably
@@ -67,6 +79,11 @@ public final class AppModel {
         themeRaw = persisted.theme ?? "dark"
         splitPct = persisted.splitPct ?? 38
         recents = persisted.recents
+        order = persisted.order
+        projectOrder = persisted.projectOrder
+        showSessions = persisted.showSessions ?? true
+        showFooter = persisted.showFooter ?? true
+        showHeader = persisted.showHeader ?? true
         do {
             let (list, statuses) = try await client.list()
             sessions = list.sorted { $0.created < $1.created }
@@ -104,6 +121,7 @@ public final class AppModel {
         }
         outputBuffer = []          // drop any bytes buffered for the old session
         selected = name
+        historyMode = false
         if let name {
             do { try await client.attach(name: name, sinceSeq: 0) }
             catch { toast = errorText(error) }
@@ -171,12 +189,85 @@ public final class AppModel {
         catch { toast = errorText(error) }
     }
 
+    public var counts: (total: Int, running: Int, waiting: Int) {
+        var r = 0, w = 0
+        for s in sessions {
+            switch statusByName[s.name] {
+            case .running: r += 1
+            case .waiting: w += 1
+            default: break
+            }
+        }
+        return (sessions.count, r, w)
+    }
+
+    /// dir groups ordered by `projectOrder` (unknown dirs appended by first
+    /// appearance); within a group, sessions ordered by `order` (unknown by created).
+    public func orderedSessions() -> [(dir: String, sessions: [Session])] {
+        orderedDirs().map { dir in
+            let inDir = sessions.filter { $0.dir == dir }.sorted { a, b in
+                let ia = order.firstIndex(of: a.name) ?? Int.max
+                let ib = order.firstIndex(of: b.name) ?? Int.max
+                if ia != ib { return ia < ib }
+                // `created` has 1s resolution, so adjacent creates tie; break by
+                // name to keep the order deterministic (Swift's sort is unstable).
+                if a.created != b.created { return a.created < b.created }
+                return a.name < b.name
+            }
+            return (dir, inDir)
+        }
+    }
+
+    public func setFilter(_ s: String) { filter = s }
+    public func requestFilterFocus() { filterFocusTick += 1 }
+    public func setHistoryMode(_ on: Bool) { historyMode = on }
+    public func setFocus(_ f: Focus) { focus = f }
+
+    public func moveSession(inDir dir: String, from: IndexSet, to: Int) {
+        var names = (orderedSessions().first { $0.dir == dir }?.sessions.map(\.name)) ?? []
+        names.move(fromOffsets: from, toOffset: to)
+        // Rebuild the flat `order` across every dir in its current order.
+        var newOrder: [String] = []
+        for group in orderedSessions() {
+            newOrder.append(contentsOf: group.dir == dir ? names : group.sessions.map(\.name))
+        }
+        order = newOrder
+        persist()
+    }
+
+    public func moveProject(from: IndexSet, to: Int) {
+        var dirs = orderedDirs()
+        dirs.move(fromOffsets: from, toOffset: to)
+        projectOrder = dirs
+        persist()
+    }
+
+    public func setShowSessions(_ on: Bool) { showSessions = on; persist() }
+    public func setShowFooter(_ on: Bool) { showFooter = on; persist() }
+    public func setShowHeader(_ on: Bool) { showHeader = on; persist() }
+
+    private func orderedDirs() -> [String] {
+        var seen = Set<String>(); var dirs: [String] = []
+        for d in projectOrder where sessions.contains(where: { $0.dir == d }) {
+            if seen.insert(d).inserted { dirs.append(d) }
+        }
+        for s in sessions where !seen.contains(s.dir) {
+            if seen.insert(s.dir).inserted { dirs.append(s.dir) }
+        }
+        return dirs
+    }
+
     // MARK: - private
 
     private func persist() {
         persisted.theme = themeRaw
         persisted.splitPct = splitPct
         persisted.recents = recents
+        persisted.order = order
+        persisted.projectOrder = projectOrder
+        persisted.showSessions = showSessions
+        persisted.showFooter = showFooter
+        persisted.showHeader = showHeader
         store.save(persisted)
     }
 
