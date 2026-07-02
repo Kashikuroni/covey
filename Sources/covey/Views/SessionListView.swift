@@ -98,17 +98,32 @@ struct SessionListView: View {
     }
 
     private func row(_ session: Session) -> some View {
-        HStack(spacing: 6) {
-            Circle().fill(statusColor(model.statusByName[session.name] ?? .idle))
-                .frame(width: 8, height: 8)
-            Text(session.name)
-            let counts = taskCounts(model.notes[session.name] ?? "")
-            if counts.total > 0 {
-                Text("\(counts.done)/\(counts.total)")
-                    .font(.caption2).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Circle().fill(statusColor(model.statusByName[session.name] ?? .idle))
+                    .frame(width: 8, height: 8)
+                Text(session.name)
+                let counts = taskCounts(model.notes[session.name] ?? "")
+                if counts.total > 0 {
+                    Text("\(counts.done)/\(counts.total)")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(session.agent).foregroundStyle(.secondary).font(.caption)
             }
-            Spacer()
-            Text(session.agent).foregroundStyle(.secondary).font(.caption)
+            if let options = model.promptsByName[session.name], !options.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(Array(options.prefix(9).enumerated()), id: \.offset) { idx, label in
+                        Button("\(idx + 1) \(label)") {
+                            Task { await model.select(session.name) }
+                            model.answerPrompt(idx + 1, session: session.name)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                        .lineLimit(1)
+                    }
+                }
+            }
         }
     }
 

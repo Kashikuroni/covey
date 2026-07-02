@@ -29,9 +29,13 @@ struct StatusBar: View {
         case .note:
             return "space toggle · e edit · d delete · V select · y yank · esc close"
         case .normal:
-            return model.vimMode
-                ? "n new · enter attach · d kill · space menu · / filter · ? help"
-                : "⌘N new · ⌘F filter"
+            guard model.vimMode else { return "⌘N new · ⌘F filter" }
+            var base = "n new · enter attach · d kill · space menu · / filter · ? help"
+            if let selected = model.selected,
+               !(model.promptsByName[selected] ?? []).isEmpty {
+                base += " · 1-9 answer"
+            }
+            return base
         }
     }
 
