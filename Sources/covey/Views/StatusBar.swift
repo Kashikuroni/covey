@@ -10,9 +10,17 @@ struct StatusBar: View {
             if model.historyMode {
                 Text("HISTORY").foregroundStyle(.yellow).font(.caption).fontWeight(.semibold)
             }
-            Text(model.focus == .sessions ? "sessions" : "terminal")
+            Text(focusLabel)
                 .foregroundStyle(.secondary).font(.caption)
         }
         .padding(.horizontal, 12).padding(.vertical, 4)
+    }
+
+    private var focusLabel: String {
+        switch model.focus {
+        case .sessions: return "sessions"
+        case .terminal: return "terminal"
+        case .inspector: return "inspector"
+        }
     }
 }

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @Bindable var model: AppModel
+    @State private var keyMonitor: Any?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -18,6 +19,22 @@ struct ContentView: View {
             }
         }
         .overlay(alignment: .bottom) { toastBar }
+        .onAppear {
+            // File→Close would shadow a menu ⌘W (AppKit picks the first key
+            // equivalent in menu order), so intercept before dispatch.
+            keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                guard event.modifierFlags.intersection([.command, .shift, .option, .control]) == .command,
+                      event.charactersIgnoringModifiers == "w",
+                      model.modal == nil,
+                      let selected = model.selected else { return event }
+                model.modal = .kill(selected)
+                return nil
+            }
+        }
+        .onDisappear {
+            if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+            keyMonitor = nil
+        }
     }
 
     private var workspace: some View {
@@ -34,8 +51,32 @@ struct ContentView: View {
                 TerminalPaneView(model: model)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .onTapGesture { model.setFocus(.terminal) }
+                if model.showInspector {
+                    rightDivider(total: geo.size.width)
+                    InspectorView()
+                        .frame(width: CGFloat(model.sbWidth))
+                        .contentShape(Rectangle())
+                        .onTapGesture { model.setFocus(.inspector) }
+                }
             }
         }
+    }
+
+    private func rightDivider(total: CGFloat) -> some View {
+        Rectangle()
+            .fill(Color.gray.opacity(0.25))
+            .frame(width: 6)
+            .contentShape(Rectangle())
+            .onHover { inside in
+                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+            }
+            .gesture(
+                DragGesture(coordinateSpace: .global)
+                    .onChanged { value in
+                        guard total > 0 else { return }
+                        model.setSbWidth(Int(total - value.location.x))
+                    }
+            )
     }
 
     private func divider(total: CGFloat) -> some View {
