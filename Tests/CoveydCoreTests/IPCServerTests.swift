@@ -12,17 +12,10 @@ final class FakeSink: ClientSink {
 }
 
 final class IPCServerTests: XCTestCase {
-    private func waitUntil(_ cond: @escaping () -> Bool, _ desc: String) {
-        let exp = expectation(description: desc)
-        let timer = DispatchSource.makeTimerSource(queue: .global())
-        timer.schedule(deadline: .now(), repeating: .milliseconds(20))
-        timer.setEventHandler { if cond() { timer.cancel(); exp.fulfill() } }
-        timer.resume()
-        wait(for: [exp], timeout: 5)
-    }
-
     func testCreateReturnsSessionAndBroadcastsAdded() {
-        let server = IPCServer(registry: SessionRegistry(clock: { 1 }))
+        let registry = SessionRegistry(clock: { 1 })
+        let server = IPCServer(registry: registry,
+                               monitor: StatusMonitor(snapshot: { registry.snapshotScreens() }))
         let sink = FakeSink(id: 1)
         server.register(sink)
         server.handle(Request(id: 10, op: .create(dir: "/usr", agent: "sh", argv: ["/bin/cat"], name: "s1")), from: sink)
@@ -32,7 +25,9 @@ final class IPCServerTests: XCTestCase {
     }
 
     func testUnknownNameReturnsNotFound() {
-        let server = IPCServer(registry: SessionRegistry())
+        let registry = SessionRegistry()
+        let server = IPCServer(registry: registry,
+                               monitor: StatusMonitor(snapshot: { registry.snapshotScreens() }))
         let sink = FakeSink(id: 1)
         server.register(sink)
         server.handle(Request(id: 5, op: .kill(name: "ghost")), from: sink)
@@ -42,7 +37,9 @@ final class IPCServerTests: XCTestCase {
     }
 
     func testAttachStreamsBackfillAndLiveOutput() {
-        let server = IPCServer(registry: SessionRegistry())
+        let registry = SessionRegistry()
+        let server = IPCServer(registry: registry,
+                               monitor: StatusMonitor(snapshot: { registry.snapshotScreens() }))
         let sink = FakeSink(id: 1)
         server.register(sink)
         server.handle(Request(id: 1, op: .create(dir: "/usr", agent: "sh", argv: ["/bin/cat"], name: "s1")), from: sink)
@@ -54,5 +51,33 @@ final class IPCServerTests: XCTestCase {
             return false
         } }, "live output")
         server.handle(Request(id: 4, op: .kill(name: "s1")), from: sink)
+    }
+
+    func testTickBroadcastsWaitingAndListCarriesStatuses() {
+        let registry = SessionRegistry()
+        let monitor = StatusMonitor(snapshot: { registry.snapshotScreens() })
+        let server = IPCServer(registry: registry, monitor: monitor)
+        let sink = FakeSink(id: 1)
+        server.register(sink)
+        // A session whose screen ends in a numbered menu -> waiting.
+        server.handle(Request(id: 1, op: .create(
+            dir: "/tmp", agent: "sh",
+            argv: ["/bin/sh", "-c", "printf 'pick:\\n  1. yes\\n  2. no\\n'; exec cat"],
+            name: "menu")), from: sink)
+        waitUntil({ registry.snapshotScreens()["menu"]?.contains("2. no") == true },
+                  "menu rendered")
+        monitor.tick()
+        waitUntil({ sink.captured.contains {
+            if case .event(.statusChanged("menu", .waiting)) = $0 { return true }
+            return false
+        } }, "statusChanged waiting")
+        server.handle(Request(id: 2, op: .list), from: sink)
+        waitUntil({ sink.captured.contains {
+            if case .response(2, .sessions(_, let statuses)) = $0 {
+                return statuses["menu"] == .waiting
+            }
+            return false
+        } }, "list has statuses")
+        server.handle(Request(id: 3, op: .kill(name: "menu")), from: sink)
     }
 }

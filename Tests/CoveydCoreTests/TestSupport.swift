@@ -2,6 +2,16 @@ import XCTest
 
 extension XCTestCase {
     func bytes(_ s: String) -> [UInt8] {Array(s.utf8) }
+
+    /// Polls `cond` every 20 ms until true, failing the test after 5 s.
+    func waitUntil(_ cond: @escaping () -> Bool, _ desc: String) {
+        let exp = expectation(description: desc)
+        let timer = DispatchSource.makeTimerSource(queue: .global())
+        timer.schedule(deadline: .now(), repeating: .milliseconds(20))
+        timer.setEventHandler { if cond() { timer.cancel(); exp.fulfill() } }
+        timer.resume()
+        wait(for: [exp], timeout: 5)
+    }
 }
 
 /// Minimal blocking client over a unix-domain socket, for end-to-end tests.

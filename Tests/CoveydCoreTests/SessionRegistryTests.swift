@@ -70,7 +70,7 @@ final class SessionRegistryTests: XCTestCase {
         let reg = SessionRegistry()
         let removed = expectation(description: "removed")
         let added = expectation(description: "added")
-        let s = try reg.create(dir: "/usr", agent: "sh", argv: ["/bin/cat"], name: "old")
+        _ = try reg.create(dir: "/usr", agent: "sh", argv: ["/bin/cat"], name: "old")
         reg.onSessionRemoved = { name in if name == "old" { removed.fulfill() } }
         reg.onSessionAdded = { sess in if sess.name == "new" { added.fulfill() } }
         try reg.rename(name: "old", newName: "new")
@@ -100,5 +100,17 @@ final class SessionRegistryTests: XCTestCase {
     func testBackfillReturnsNilForUnknown() throws {
         let reg = SessionRegistry()
         XCTAssertNil(reg.backfill(name: "ghost", since: 0))
+    }
+
+    func testSnapshotScreensShowsSessionOutput() throws {
+        let reg = SessionRegistry()
+        _ = try reg.create(
+            dir: "/tmp", agent: "sh",
+            argv: ["/bin/sh", "-c", "printf 'hello-screen'; exec cat"],
+            name: "scr"
+        )
+        waitUntil({ reg.snapshotScreens()["scr"]?.contains("hello-screen") == true },
+                  "screen shows output")
+        reg.kill(name: "scr")
     }
 }

@@ -13,7 +13,7 @@ public final class SessionRegistry {
     public var onExit: ((String, Int32) -> Void)?
     public var onSessionAdded: ((Session) -> Void)?
     public var onSessionRemoved: ((String) -> Void)?
-    private var entries: [String: (session: Session, process: PTYProcess)] = [:]
+    private var entries: [String: (session: Session, process: PTYProcess, screen: ScreenModel)] = [:]
     private let lock = NSLock()
     private let clock: () -> Int64
     private var counter = 0
@@ -41,13 +41,15 @@ public final class SessionRegistry {
         )
         let proc = PTYProcess()
         proc.setExitHandler { [weak self] code in self?.handleExit(id, code)}
+        let screen = ScreenModel(cols: 80, rows: 24)
+        proc.setOutputHandler { bytes, _ in screen.feed(bytes) }
         do {
             try proc.spawn(argv: argv, cwd: dir, cols: 80, rows: 24)
         } catch {
             lock.unlock()
             throw error
         }
-        entries[id] = (session, proc)
+        entries[id] = (session, proc, screen)
         lock.unlock()
         onSessionAdded?(session)
         return session
@@ -75,9 +77,14 @@ public final class SessionRegistry {
         _ handler: @escaping ([UInt8], Int) -> Void
     ) {
         lock.lock()
-        let proc = entries[name]?.process
+        guard let entry = entries[name] else { lock.unlock(); return }
+        let proc = entry.process
+        let screen = entry.screen
         lock.unlock()
-        proc?.setOutputHandler(handler)
+        proc.setOutputHandler { bytes, seq in
+            screen.feed(bytes)
+            handler(bytes, seq)
+        }
     }
 
     public func write(name: String, bytes: [UInt8]) {
@@ -90,8 +97,10 @@ public final class SessionRegistry {
     public func resize(name: String, cols: UInt16, rows: UInt16) {
         lock.lock()
         let proc = entries[name]?.process
+        let screen = entries[name]?.screen
         lock.unlock()
         proc?.resize(cols: cols, rows: rows)
+        screen?.resize(cols: Int(cols), rows: Int(rows))
     }
     
     public func rename(name: String, newName: String) throws {
@@ -117,6 +126,14 @@ public final class SessionRegistry {
         return proc?.backfill(since: seq)
     }
     
+    /// Visible screen text of every live session, for status inference.
+    public func snapshotScreens() -> [String: String] {
+        lock.lock()
+        let screens = entries.mapValues(\.screen)
+        lock.unlock()
+        return screens.mapValues { $0.visibleText() }
+    }
+
     private func handleExit(_ id: String, _ code: Int32) {
         lock.lock()
         entries[id] = nil
