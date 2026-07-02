@@ -23,7 +23,7 @@ struct TopBar: View {
                 Image(systemName: model.themeRaw == "dark" ? "sun.max" : "moon")
             }
             .buttonStyle(.borderless).help("Toggle theme")
-            TimelineView(.periodic(from: .now, by: 60)) { ctx in
+            TimelineView(.everyMinute) { ctx in
                 Text(clock(ctx.date)).foregroundStyle(.secondary).font(.callout).monospacedDigit()
             }
         }

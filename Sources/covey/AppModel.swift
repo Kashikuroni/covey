@@ -51,7 +51,7 @@ public final class AppModel {
     public private(set) var projectOrder: [String] = []
     public var filter: String = ""
     public private(set) var historyMode = false
-    public private(set) var focus: Focus = .terminal
+    public private(set) var focus: Focus = .sessions
     public private(set) var showSessions = true
     public private(set) var showFooter = true
     public private(set) var showHeader = true

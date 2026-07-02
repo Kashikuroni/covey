@@ -33,7 +33,11 @@ struct CoveyApp: App {
                 // before any window exists (SwiftPM apps start as accessory), so
                 // the window would otherwise open behind other apps.
                 NSApplication.shared.activate(ignoringOtherApps: true)
-                NSApplication.shared.windows.first?.makeKeyAndOrderFront(nil)
+                let window = NSApplication.shared.windows.first
+                window?.makeKeyAndOrderFront(nil)
+                // Start with vim-list focus: no control (filter field, buttons)
+                // grabs the keyboard, so j/k work immediately.
+                window?.makeFirstResponder(nil)
             }
             .task {
                 guard model == nil else { return }
