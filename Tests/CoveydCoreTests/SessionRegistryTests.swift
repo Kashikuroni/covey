@@ -127,4 +127,25 @@ final class SessionRegistryTests: XCTestCase {
                   "screen shows output")
         reg.kill(name: "scr")
     }
+
+    func testAutoNamesHaveNoGaps() throws {
+        let reg = SessionRegistry()
+        let a = try reg.create(dir: "/tmp", agent: "sh", argv: ["/bin/cat"])
+        _ = try reg.create(dir: "/tmp", agent: "sh", argv: ["/bin/cat"], name: "explicit")
+        XCTAssertThrowsError(
+            try reg.create(dir: "/tmp", agent: "sh", argv: ["/bin/cat"], name: "explicit"))
+        let b = try reg.create(dir: "/tmp", agent: "sh", argv: ["/bin/cat"])
+        XCTAssertEqual(a.name, "s-1")
+        XCTAssertEqual(b.name, "s-2",
+                       "explicit names and failed creates must not consume auto numbers")
+        for s in reg.list() { reg.kill(name: s.name) }
+    }
+
+    func testAutoNameSkipsExplicitCollision() throws {
+        let reg = SessionRegistry()
+        _ = try reg.create(dir: "/tmp", agent: "sh", argv: ["/bin/cat"], name: "s-1")
+        let a = try reg.create(dir: "/tmp", agent: "sh", argv: ["/bin/cat"])
+        XCTAssertEqual(a.name, "s-2")
+        for s in reg.list() { reg.kill(name: s.name) }
+    }
 }

@@ -29,8 +29,17 @@ public final class SessionRegistry {
         name: String? = nil
     ) throws -> Session {
         lock.lock()
-        counter += 1
-        let id = name ?? "s-\(counter)"
+        var autoNumber: Int?
+        let id: String
+        if let name {
+            id = name
+        } else {
+            // Explicit names may occupy s-N; probe forward, commit only on success.
+            var n = counter + 1
+            while entries["s-\(n)"] != nil { n += 1 }
+            autoNumber = n
+            id = "s-\(n)"
+        }
         if entries[id] != nil {
             lock.unlock()
             throw RegistryError.duplicateName(id)
@@ -49,6 +58,7 @@ public final class SessionRegistry {
             lock.unlock()
             throw error
         }
+        if let autoNumber { counter = autoNumber }
         entries[id] = (session, proc, screen)
         lock.unlock()
         onSessionAdded?(session)
