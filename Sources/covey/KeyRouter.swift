@@ -5,6 +5,7 @@ enum InputMode: Equatable {
     case leader(LeaderMenu)
     case selectSession
     case help
+    case note
 }
 
 enum LeaderMenu: Equatable { case root, git, session, app }
@@ -42,6 +43,18 @@ enum KeyAction: Equatable {
     case scrollTerminalPage(up: Bool)
     case scrollTerminalToBottom
     case showHelp
+    case toggleSessionNote
+    case toggleProjectNote
+    case noteCursor(down: Bool)
+    case noteToggleTask
+    case noteVisual
+    case noteYank
+    case noteDelete
+    case noteEdit
+    case noteArmClear
+    case noteDefocus
+    case noteEscape
+    case renameProject
 }
 
 /// Map a Cyrillic char to the Latin key at the same physical QWERTY position;
@@ -88,6 +101,29 @@ enum KeyRouter {
             return nil   // anything else is ignored; the mode stays
         case .help:
             return .closeOverlay
+        case .note:
+            return routeNote(input, ch)
+        }
+    }
+
+    private static func routeNote(_ input: KeyInput, _ ch: Character?) -> KeyAction? {
+        switch input.special {
+        case .down: return .noteCursor(down: true)
+        case .up: return .noteCursor(down: false)
+        case .tab: return .noteDefocus
+        case .escape: return .noteEscape
+        default: break
+        }
+        switch ch {
+        case "j": return .noteCursor(down: true)
+        case "k": return .noteCursor(down: false)
+        case " ": return .noteToggleTask
+        case "V": return .noteVisual
+        case "y": return .noteYank
+        case "d": return .noteDelete
+        case "e": return .noteEdit
+        case "c": return .noteArmClear
+        default: return nil
         }
     }
 
@@ -125,6 +161,8 @@ enum KeyRouter {
         case "d": return .killSelected
         case "/": return .startFilter
         case "s": return .enterSelectMode
+        case "t": return .toggleSessionNote
+        case "T": return .toggleProjectNote
         case " ": return .openLeader
         case "K": return .moveSelected(up: true)
         case "J": return .moveSelected(up: false)
@@ -145,6 +183,7 @@ enum KeyRouter {
         case (.root, "s"): return .leaderDescend(.session)
         case (.root, "a"): return .leaderDescend(.app)
         case (.session, "r"): return .renameSelected
+        case (.session, "R"): return .renameProject
         // Every other command in the tree is a later slice; like the TUI,
         // an unbound key closes the leader.
         default: return .closeOverlay

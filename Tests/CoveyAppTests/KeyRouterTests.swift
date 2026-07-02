@@ -102,4 +102,35 @@ final class KeyRouterTests: XCTestCase {
         XCTAssertEqual(KeyRouter.route(key("x"), context: help), .closeOverlay)
         XCTAssertEqual(KeyRouter.route(special(.enter), context: help), .closeOverlay)
     }
+
+    func testNoteToggleKeysInNormalMode() {
+        XCTAssertEqual(KeyRouter.route(key("t"), context: ctx()), .toggleSessionNote)
+        XCTAssertEqual(KeyRouter.route(key("T"), context: ctx()), .toggleProjectNote)
+        XCTAssertEqual(KeyRouter.route(key("е"), context: ctx()), .toggleSessionNote, "ЙЦУКЕН t")
+    }
+
+    func testNoteModeBindings() {
+        let note = ctx(mode: .note)
+        let cases: [(KeyInput, KeyAction)] = [
+            (key("j"), .noteCursor(down: true)), (key("k"), .noteCursor(down: false)),
+            (special(.down), .noteCursor(down: true)), (special(.up), .noteCursor(down: false)),
+            (key(" "), .noteToggleTask),
+            (key("V"), .noteVisual),
+            (key("y"), .noteYank),
+            (key("d"), .noteDelete),
+            (key("e"), .noteEdit),
+            (key("c"), .noteArmClear),
+            (special(.tab), .noteDefocus),
+            (special(.escape), .noteEscape),
+        ]
+        for (input, want) in cases {
+            XCTAssertEqual(KeyRouter.route(input, context: note), want, "\(input)")
+        }
+        XCTAssertNil(KeyRouter.route(key("z"), context: note), "unbound ignored")
+    }
+
+    func testLeaderSessionRenameProject() {
+        let session = ctx(mode: .leader(.session))
+        XCTAssertEqual(KeyRouter.route(key("R"), context: session), .renameProject)
+    }
 }
