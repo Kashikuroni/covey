@@ -40,6 +40,7 @@ final class ProtocolTests: XCTestCase {
             .event(.sessionAdded(session: s)),
             .event(.sessionRemoved(name: "s-1")),
             .event(.statusChanged(name: "s-1", status: .waiting)),
+            .event(.promptChanged(name: "s-1", options: ["yes", "no"])),
             .event(.exited(name: "s-1", code: 0)),
         ]
         for m in msgs { try roundTrip(m) }

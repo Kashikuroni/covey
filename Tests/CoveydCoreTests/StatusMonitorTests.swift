@@ -36,6 +36,44 @@ final class StatusMonitorTests: XCTestCase {
         XCTAssertEqual(m.currentStatuses(), ["s": .waiting])
     }
 
+    func testPromptOptionsEmitOnChangeOnly() {
+        var screens = ["s": "pick one:\n  1. yes\n  2. no"]
+        let monitor = StatusMonitor(snapshot: { screens })
+        let lock = NSLock()
+        var events: [(String, [String])] = []
+        monitor.onPromptChanged = { name, options in
+            lock.lock(); events.append((name, options)); lock.unlock()
+        }
+        func captured() -> [(String, [String])] {
+            lock.lock(); defer { lock.unlock() }; return events
+        }
+        monitor.tick()
+        XCTAssertEqual(captured().last?.1, ["yes", "no"])
+        monitor.tick()
+        XCTAssertEqual(captured().count, 1, "unchanged prompt does not re-emit")
+        screens["s"] = "done, moving on"
+        monitor.tick()
+        XCTAssertEqual(captured().last?.1, [], "prompt gone emits empty")
+        screens = [:]
+        monitor.tick()
+        XCTAssertEqual(captured().count, 2, "already-empty prompt set stays quiet on prune")
+    }
+
+    func testPrunedSessionWithPromptEmitsEmpty() {
+        var screens = ["s": "pick one:\n  1. yes\n  2. no"]
+        let monitor = StatusMonitor(snapshot: { screens })
+        let lock = NSLock()
+        var events: [(String, [String])] = []
+        monitor.onPromptChanged = { name, options in
+            lock.lock(); events.append((name, options)); lock.unlock()
+        }
+        monitor.tick()
+        screens = [:]
+        monitor.tick()
+        lock.lock(); let last = events.last; lock.unlock()
+        XCTAssertEqual(last?.1, [], "killed session clears its prompt")
+    }
+
     func testWorkingMarkerYieldsRunningEvenOnFirstTick() {
         let screens = ["s": "Thinking… esc to interrupt"]
         let (m, events) = makeMonitor { screens }

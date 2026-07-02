@@ -7,6 +7,8 @@ import CoveyKit
 public final class StatusMonitor {
     /// Fires only when a session's status differs from the previous tick.
     public var onStatusChanged: ((String, Status) -> Void)?
+    /// Fires when a session's detected prompt options change (empty = gone).
+    public var onPromptChanged: ((String, [String]) -> Void)?
 
     private let snapshot: () -> [String: String]
     private let interval: TimeInterval
@@ -14,6 +16,7 @@ public final class StatusMonitor {
     private var timer: DispatchSourceTimer?
     private var prevHash: [String: Int] = [:]
     private var prevStatus: [String: Status] = [:]
+    private var prevPrompt: [String: [String]] = [:]
 
     public init(
         interval: TimeInterval = 1.5,
@@ -51,6 +54,7 @@ public final class StatusMonitor {
         let screens = snapshot()
         var newHash: [String: Int] = [:]
         var newStatus: [String: Status] = [:]
+        var newPrompt: [String: [String]] = [:]
         for (name, content) in screens {
             let hash = StatusInference.contentHash(content)
             let prompt = StatusInference.parsePrompt(content)
@@ -62,12 +66,21 @@ public final class StatusMonitor {
             )
             newHash[name] = hash
             newStatus[name] = status
+            newPrompt[name] = prompt
             if prevStatus[name] != status {
                 onStatusChanged?(name, status)
             }
+            if prevPrompt[name, default: []] != prompt {
+                onPromptChanged?(name, prompt)
+            }
+        }
+        // Sessions that vanished while showing a prompt must clear it.
+        for (name, options) in prevPrompt where newPrompt[name] == nil && !options.isEmpty {
+            onPromptChanged?(name, [])
         }
         // Replacing the maps wholesale prunes removed sessions.
         prevHash = newHash
         prevStatus = newStatus
+        prevPrompt = newPrompt
     }
 }
