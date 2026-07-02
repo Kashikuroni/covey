@@ -14,19 +14,23 @@ struct TerminalRepresentable: NSViewRepresentable {
     func makeNSView(context: Context) -> TerminalView {
         let view = TerminalView(frame: .zero)
         view.terminalDelegate = context.coordinator
-        // Hardcoded dark theme (HANDOFF §5); theme switching arrives in slice 6.
-        view.nativeBackgroundColor = NSColor(red: 0x1C / 255, green: 0x19 / 255,
-                                             blue: 0x17 / 255, alpha: 1)
-        view.nativeForegroundColor = NSColor(red: 0xFA / 255, green: 0xF7 / 255,
-                                             blue: 0xF2 / 255, alpha: 1)
-        view.caretColor = .orange
+        applyTheme(to: view)
         model.onTerminalOutput = { [weak view] bytes in
             view?.feed(byteArray: bytes[...])
         }
         return view
     }
 
-    func updateNSView(_ view: TerminalView, context: Context) {}
+    func updateNSView(_ view: TerminalView, context: Context) {
+        applyTheme(to: view)
+    }
+
+    private func applyTheme(to view: TerminalView) {
+        let theme = Theme(raw: model.themeRaw)
+        view.nativeBackgroundColor = theme.background
+        view.nativeForegroundColor = theme.foreground
+        view.caretColor = theme.cursor
+    }
 
     // No teardown of `model.onTerminalOutput` here: sessions switch by remounting
     // (`.id`), and makeNSView of the new terminal overwrites the sink. Nil-ing it

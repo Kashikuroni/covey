@@ -18,6 +18,14 @@ struct CoveyApp: App {
             Group {
                 if let model {
                     ContentView(model: model)
+                        .toolbar {
+                            Button {
+                                model.setTheme(model.themeRaw == "dark" ? "light" : "dark")
+                            } label: {
+                                Image(systemName: model.themeRaw == "dark" ? "sun.max" : "moon")
+                            }
+                            .help("Toggle theme")
+                        }
                 } else if let startupError {
                     VStack(spacing: 10) {
                         Text("failed to start").font(.headline)
@@ -32,8 +40,11 @@ struct CoveyApp: App {
             .task {
                 guard model == nil else { return }
                 do {
+                    let store = StateStore(path: FileManager.default
+                        .homeDirectoryForCurrentUser.appendingPathComponent(".covey/state.json").path)
                     let m = AppModel(client: try CoveyApp.makeClient(),
-                                     makeClient: CoveyApp.makeClient)
+                                     makeClient: CoveyApp.makeClient,
+                                     store: store)
                     await m.start()
                     model = m
                 } catch {

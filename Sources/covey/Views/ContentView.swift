@@ -4,12 +4,18 @@ struct ContentView: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        HSplitView {
-            SessionListView(model: model)
-                .frame(minWidth: 220, maxWidth: 420)
-            TerminalPaneView(model: model)
-                .frame(minWidth: 480, minHeight: 320)
+        GeometryReader { geo in
+            let leftWidth = max(220, min(geo.size.width - 480,
+                                         geo.size.width * CGFloat(model.splitPct) / 100))
+            HStack(spacing: 0) {
+                SessionListView(model: model)
+                    .frame(width: leftWidth)
+                divider(total: geo.size.width)
+                TerminalPaneView(model: model)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
+        .preferredColorScheme(model.themeRaw == "light" ? .light : .dark)
         .sheet(item: $model.modal) { modal in
             switch modal {
             case .newSession: NewSessionSheet(model: model)
@@ -18,6 +24,23 @@ struct ContentView: View {
             }
         }
         .overlay(alignment: .bottom) { toastBar }
+    }
+
+    private func divider(total: CGFloat) -> some View {
+        Rectangle()
+            .fill(Color.gray.opacity(0.25))
+            .frame(width: 6)
+            .contentShape(Rectangle())
+            .onHover { inside in
+                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+            }
+            .gesture(
+                DragGesture(coordinateSpace: .global)
+                    .onChanged { value in
+                        guard total > 0 else { return }
+                        model.setSplitPct(Int(value.location.x / total * 100))
+                    }
+            )
     }
 
     @ViewBuilder
