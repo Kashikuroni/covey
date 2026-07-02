@@ -102,6 +102,20 @@ final class SessionRegistryTests: XCTestCase {
         XCTAssertNil(reg.backfill(name: "ghost", since: 0))
     }
 
+    // Regression: interactive shells IGNORE SIGTERM, so kill() must escalate via
+    // SIGHUP (and SIGKILL). This child explicitly traps SIGTERM, so it would
+    // survive a SIGTERM-only kill and the session would never exit.
+    func testKillTerminatesSigtermIgnoringChild() throws {
+        let reg = SessionRegistry()
+        _ = try reg.create(dir: "/usr", agent: "sh",
+                           argv: ["/bin/sh", "-c", "trap '' TERM; exec sleep 60"], name: "k")
+        let exited = expectation(description: "exit after SIGHUP/SIGKILL")
+        reg.onExit = { name, _ in if name == "k" { exited.fulfill() } }
+        reg.kill(name: "k")
+        wait(for: [exited], timeout: 5)
+        XCTAssertTrue(reg.list().isEmpty)
+    }
+
     func testSnapshotScreensShowsSessionOutput() throws {
         let reg = SessionRegistry()
         _ = try reg.create(

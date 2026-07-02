@@ -64,6 +64,16 @@ public final class PTYProcess {
         
         if childPid == 0 {
             // CHILD: async-signal-safe calls only. `env` is inherited in slice 1.
+            // Reset signal state: ignored dispositions and the blocked mask
+            // survive fork+exec, so a parent that ignores SIGTERM (coveyd does,
+            // for its own shutdown handling) would breed unkillable children.
+            var empty = sigset_t()
+            sigemptyset(&empty)
+            sigprocmask(SIG_SETMASK, &empty, nil)
+            signal(SIGTERM, SIG_DFL)
+            signal(SIGINT, SIG_DFL)
+            signal(SIGHUP, SIG_DFL)
+            signal(SIGQUIT, SIG_DFL)
             if let cwdC { _ = chdir(cwdC)}
             execvp(cargs[0]!, &cargs) // returns only if exec failed
             _exit(127)
@@ -107,7 +117,17 @@ public final class PTYProcess {
     public func kill() {
         queue.async { [weak self] in
             guard let self, self.pid > 0, !self.reaped else { return }
-            _ = Darwin.kill(self.pid, SIGTERM)
+            // forkpty made the child a session leader (pgid == pid), so signal the
+            // whole process group to also reach any grandchildren. Interactive
+            // shells IGNORE SIGTERM but honor SIGHUP (the "terminal closed"
+            // signal), so send SIGHUP first, then escalate to SIGKILL for anything
+            // that survives (the read loop reaps once the child finally dies).
+            let pid = self.pid
+            _ = Darwin.kill(-pid, SIGHUP)
+            self.queue.asyncAfter(deadline: .now() + 1) { [weak self] in
+                guard let self, self.pid == pid, !self.reaped else { return }
+                _ = Darwin.kill(-pid, SIGKILL)
+            }
         }
     }
     
