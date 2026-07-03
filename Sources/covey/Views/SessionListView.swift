@@ -111,6 +111,15 @@ struct SessionListView: View {
                 Spacer()
                 Text(session.agent).foregroundStyle(.secondary).font(.caption)
             }
+            if let git = session.git {
+                HStack(spacing: 4) {
+                    Text(session.worktreeRepo != nil ? "⧉" : "⎇")
+                    Text(git.branch).lineLimit(1)
+                    if git.added > 0 { Text("+\(git.added)").foregroundStyle(.green) }
+                    if git.removed > 0 { Text("−\(git.removed)").foregroundStyle(.red) }
+                }
+                .font(.caption2).foregroundStyle(.secondary)
+            }
             if let options = model.promptsByName[session.name], !options.isEmpty {
                 HStack(spacing: 6) {
                     ForEach(Array(options.prefix(9).enumerated()), id: \.offset) { idx, label in

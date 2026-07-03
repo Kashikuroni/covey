@@ -89,7 +89,10 @@ final class KeyRouterTests: XCTestCase {
         XCTAssertEqual(KeyRouter.route(special(.backspace), context: session), .leaderBack)
         XCTAssertEqual(KeyRouter.route(key("v"), context: session), .closeOverlay, "later command closes")
         let git = ctx(mode: .leader(.git))
-        XCTAssertEqual(KeyRouter.route(key("p"), context: git), .closeOverlay, "later command closes")
+        XCTAssertEqual(KeyRouter.route(key("p"), context: git), .promoteSelected)
+        XCTAssertEqual(KeyRouter.route(key("b"), context: git), .deleteBranchSelected)
+        XCTAssertEqual(KeyRouter.route(key("c"), context: git), .cleanupBranches)
+        XCTAssertEqual(KeyRouter.route(key("i"), context: git), .closeOverlay, "later command closes")
     }
 
     func testSelectSessionMode() {

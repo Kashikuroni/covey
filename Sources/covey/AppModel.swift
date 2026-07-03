@@ -14,6 +14,9 @@ public final class AppModel {
         case kill(String)
         case rename(String)
         case renameProject(String)
+        case promote(String)
+        case deleteBranch(String)
+        case cleanup(String)
     }
 
     public enum NoteTarget: Equatable {
@@ -136,7 +139,8 @@ public final class AppModel {
                 // Sessions a dead daemon lost: surface them as relaunchable
                 // recents, oldest first so the newest ends on top.
                 for s in lost.sorted(by: { $0.created < $1.created }) {
-                    pushRecent(&recents, RecentSession(name: s.name, dir: s.dir, agent: s.agent))
+                    pushRecent(&recents, RecentSession(name: s.name, dir: s.dir, agent: s.agent,
+                                                       resumeCmd: s.resumeCmd))
                 }
                 persist()
                 try? await client.clearLost()
@@ -184,9 +188,31 @@ public final class AppModel {
         catch { toast = errorText(error) }
     }
 
-    public func kill(_ name: String) async {
-        do { try await client.kill(name: name) }
+    public func kill(_ name: String, removeWorktree: Bool = false) async {
+        do { try await client.kill(name: name, removeWorktree: removeWorktree ? true : nil) }
         catch { toast = errorText(error) }
+    }
+
+    public func gitInfo(_ dir: String) async
+        -> (repoRoot: String?, currentBranch: String?, branches: [String]) {
+        (try? await client.gitInfo(dir: dir)) ?? (nil, nil, [])
+    }
+
+    /// The full-form create; errors surface as a toast AND are returned for
+    /// the sheet's inline banner.
+    @discardableResult
+    public func createFull(name: String?, dir: String, agent: String,
+                           terminal: Bool, worktree: WorktreeSpec?,
+                           model: String?, effort: String?) async -> String? {
+        do {
+            _ = try await client.create(dir: dir, agent: agent, name: name,
+                                        terminal: terminal ? true : nil,
+                                        worktree: worktree, model: model,
+                                        effort: effort)
+            return nil
+        } catch {
+            return errorText(error)
+        }
     }
 
     public func rename(_ name: String, to newName: String) async {
@@ -236,7 +262,8 @@ public final class AppModel {
     }
 
     public func relaunchRecent(_ r: RecentSession) async {
-        do { _ = try await client.create(dir: r.dir, agent: r.agent, name: r.name) }
+        do { _ = try await client.create(dir: r.dir, agent: r.agent, name: r.name,
+                                         resume: r.resumeCmd) }
         catch { toast = errorText(error) }
     }
 
@@ -507,7 +534,52 @@ public final class AppModel {
         case .sendShiftTab:
             guard let selected else { return }
             Task { try? await client.input(name: selected, bytes: [0x1b, 0x5b, 0x5a]) }
+        case .promoteSelected:
+            inputMode = .normal
+            guard let s = selectedSession() else { return }
+            if s.worktreeRepo == nil { toast = "not a worktree session"; return }
+            modal = .promote(s.name)
+        case .deleteBranchSelected:
+            inputMode = .normal
+            guard let s = selectedSession() else { return }
+            if s.worktreeRepo != nil { toast = "cannot delete: worktree session"; return }
+            guard let branch = s.git?.branch else { toast = "no git info"; return }
+            if protectedBranches.contains(branch) {
+                toast = "branch '\(branch)' is protected"
+                return
+            }
+            modal = .deleteBranch(s.name)
+        case .cleanupBranches:
+            inputMode = .normal
+            guard let s = selectedSession() else { return }
+            if s.git == nil { toast = "not a git repo"; return }
+            modal = .cleanup(s.dir)
         }
+    }
+
+    private func selectedSession() -> Session? {
+        sessions.first { $0.name == selected }
+    }
+
+    // MARK: - git action passthroughs (errors surface inline in the sheets)
+
+    public func promote(name: String) async -> String? {
+        do { try await client.promote(name: name); return nil }
+        catch { return errorText(error) }
+    }
+
+    public func deleteBranch(dir: String, branch: String) async -> String? {
+        do { try await client.deleteBranch(dir: dir, branch: branch); return nil }
+        catch { return errorText(error) }
+    }
+
+    public func mergedBranches(dir: String) async -> [String] {
+        (try? await client.mergedBranches(dir: dir)) ?? []
+    }
+
+    public func cleanupBranches(dir: String, branches: [String]) async -> String? {
+        do { try await client.cleanupBranches(dir: dir, branches: branches); return nil }
+        catch { return errorText(error) }
     }
 
     private func toggleNote(target: NoteTarget?) {
@@ -625,7 +697,8 @@ public final class AppModel {
             if selected == name { selected = nil }
         case .exited(let name, _):
             if let s = sessions.first(where: { $0.name == name }) {
-                pushRecent(&recents, RecentSession(name: s.name, dir: s.dir, agent: s.agent))
+                pushRecent(&recents, RecentSession(name: s.name, dir: s.dir, agent: s.agent,
+                                                   resumeCmd: s.resumeCmd))
                 persist()
             }
             sessions.removeAll { $0.name == name }
@@ -636,6 +709,10 @@ public final class AppModel {
             statusByName[name] = status
         case let .promptChanged(name, options):
             promptsByName[name] = options.isEmpty ? nil : options
+        case let .gitChanged(name, git):
+            if let i = sessions.firstIndex(where: { $0.name == name }) {
+                sessions[i].git = git
+            }
         case let .output(name, _, bytesB64):
             guard name == selected, let data = Data(base64Encoded: bytesB64) else { return }
             let bytes = [UInt8](data)

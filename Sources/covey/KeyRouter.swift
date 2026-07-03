@@ -57,6 +57,9 @@ enum KeyAction: Equatable {
     case renameProject
     case answerPrompt(Int)
     case sendShiftTab
+    case promoteSelected
+    case deleteBranchSelected
+    case cleanupBranches
 }
 
 /// Map a Cyrillic char to the Latin key at the same physical QWERTY position;
@@ -192,6 +195,9 @@ enum KeyRouter {
         case (.root, "g"): return .leaderDescend(.git)
         case (.root, "s"): return .leaderDescend(.session)
         case (.root, "a"): return .leaderDescend(.app)
+        case (.git, "p"): return .promoteSelected
+        case (.git, "b"): return .deleteBranchSelected
+        case (.git, "c"): return .cleanupBranches
         case (.session, "r"): return .renameSelected
         case (.session, "R"): return .renameProject
         // Every other command in the tree is a later slice; like the TUI,

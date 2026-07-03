@@ -284,6 +284,62 @@ final class AppModelChromeTests: XCTestCase {
     }
 
     @MainActor
+    func testExitedSessionCarriesResumeIntoRecentsAndRelaunch() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        // A "claude-like" session with a saved resume command.
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"],
+                                       name: "res", resumeCmd: "claude --resume abc")
+        await model.reconnect()
+        _ = await eventually { model.sessions.count == 1 }
+        XCTAssertEqual(model.sessions[0].resumeCmd, "claude --resume abc")
+        daemon.registry.kill(name: "res")
+        _ = await eventually { model.sessions.isEmpty }
+        XCTAssertEqual(model.recents.first?.resumeCmd, "claude --resume abc",
+                       "exit path must carry the resume command into recents")
+        // Relaunch resumes: the daemon runs the saved command (cat is fine here —
+        // we only assert the create round-trips with the resume argv).
+        await model.relaunchRecent(model.recents.first!)
+        _ = await eventually { model.sessions.count == 1 }
+        XCTAssertEqual(model.sessions[0].resumeCmd, "claude --resume abc",
+                       "a resumed session stays resumable")
+        daemon.registry.kill(name: "res")
+        _ = await eventually { model.sessions.isEmpty }
+    }
+
+    @MainActor
+    func testGitActionGuardsAndGitChangedEvent() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        // Plain session in a non-repo dir: promote refused, delete needs git.
+        await model.create(dir: "/tmp", agent: "/bin/cat")
+        _ = await eventually { model.sessions.count == 1 }
+        let name = model.sessions[0].name
+        await model.select(name)
+        model.apply(.promoteSelected)
+        XCTAssertNil(model.modal)
+        XCTAssertEqual(model.toast, "not a worktree session")
+        model.apply(.deleteBranchSelected)
+        XCTAssertNil(model.modal)
+        XCTAssertEqual(model.toast, "no git info")
+        model.apply(.cleanupBranches)
+        XCTAssertNil(model.modal)
+        XCTAssertEqual(model.toast, "not a git repo")
+        // gitChanged fills the card info; a protected branch blocks delete.
+        daemon.gitMonitor.onGitChanged?(name, GitInfo(branch: "main", added: 1, removed: 0))
+        _ = await eventually { model.sessions.first?.git?.branch == "main" }
+        model.apply(.deleteBranchSelected)
+        XCTAssertNil(model.modal)
+        XCTAssertEqual(model.toast, "branch 'main' is protected")
+        model.apply(.cleanupBranches)
+        XCTAssertEqual(model.modal, .cleanup("/tmp"))
+        model.modal = nil
+        await model.kill(name)
+    }
+
+    @MainActor
     func testRenameProjectModal() async throws {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
