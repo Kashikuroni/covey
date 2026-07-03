@@ -9,13 +9,20 @@ public struct Request: Codable, Equatable {
     public enum Op: Codable, Equatable{
         case list
         case clearLost
-        case create(dir: String, agent: String, argv: [String]?, name: String?)
-        case kill(name: String)
+        case create(dir: String, agent: String, argv: [String]?, name: String?,
+                    terminal: Bool?, worktree: WorktreeSpec?, model: String?,
+                    effort: String?, resume: String?)
+        case kill(name: String, removeWorktree: Bool?)
         case rename(name: String, newName: String)
         case attach(name: String, sinceSeq: Int?)
         case detach(name: String)
         case input(name: String, bytesB64: String)
         case resize(name: String, cols: UInt16, rows: UInt16)
+        case gitInfo(dir: String)
+        case promote(name: String)
+        case deleteBranch(dir: String, branch: String)
+        case mergedBranches(dir: String)
+        case cleanupBranches(dir: String, branches: [String])
     }
 }
 
@@ -29,6 +36,8 @@ public enum ServerMessage: Codable, Equatable{
         case session(Session)
         // `lost` is optional so payloads from older daemons decode as nil.
         case sessions(sessions: [Session], statuses: [String: Status], lost: [Session]?)
+        case gitInfo(repoRoot: String?, currentBranch: String?, branches: [String])
+        case branches([String])
         case error(code: String, message: String)
     }
 }
@@ -40,4 +49,5 @@ public enum DaemonEvent: Codable, Equatable {
     case exited(name: String, code: Int32)
     case statusChanged(name: String, status: Status)
     case promptChanged(name: String, options: [String])
+    case gitChanged(name: String, git: GitInfo?)
 }

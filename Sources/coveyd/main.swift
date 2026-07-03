@@ -36,7 +36,8 @@ let registryStore = RegistryStore(path: dir.appendingPathComponent("registry.jso
 let registry = SessionRegistry(persisted: registryStore.load(),
                                onPersist: { registryStore.save($0) })
 let monitor = StatusMonitor(snapshot: { registry.snapshotScreens() })
-let ipc = IPCServer(registry: registry, monitor: monitor)
+let gitMonitor = GitMonitor(snapshot: { registry.list().map { ($0.name, $0.dir) } })
+let ipc = IPCServer(registry: registry, monitor: monitor, gitMonitor: gitMonitor)
 let server = SocketServer(path: socketPath)
 server.onAccept = { conn in
     ipc.register(conn)
@@ -67,5 +68,6 @@ do {
 }
 
 monitor.start()
+gitMonitor.start()
 
 dispatchMain()

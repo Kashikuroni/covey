@@ -11,9 +11,14 @@ public final class IPCServer {
     private var sinks: [Int: ClientSink] = [:]
     private var subscribers: [String: Set<Int>] = [:]
 
-    public init(registry: SessionRegistry, monitor: StatusMonitor) {
+    public init(registry: SessionRegistry, monitor: StatusMonitor,
+                gitMonitor: GitMonitor? = nil) {
         self.registry = registry
         self.monitor = monitor
+        gitMonitor?.onGitChanged = { [weak self, weak registry] name, git in
+            registry?.updateGit(name: name, git: git)
+            self?.broadcast(.event(.gitChanged(name: name, git: git)))
+        }
         monitor.onStatusChanged = { [weak self] name, status in
             self?.broadcast(.event(.statusChanged(name: name, status: status)))
         }
@@ -75,7 +80,8 @@ public final class IPCServer {
             for s in sessions { statuses[s.name] = known[s.name] ?? .idle }
             let lost = registry.lost.map {
                 Session(name: $0.name, dir: $0.dir, cwd: $0.dir, agent: $0.agent,
-                        created: $0.created, git: nil, worktreeRepo: nil)
+                        created: $0.created, git: nil, worktreeRepo: $0.worktreeRepo,
+                        resumeCmd: $0.resumeCmd)
             }
             reply(.sessions(sessions: sessions, statuses: statuses,
                             lost: lost.isEmpty ? nil : lost))
@@ -83,20 +89,82 @@ public final class IPCServer {
         case .clearLost:
             registry.clearLost(); reply(.ok)
 
-        case let .create(dir, agent, argv, name):
+        case let .create(dir, agent, argv, name, terminal, worktree, model, effort, resume):
             do {
-                let s = try registry.create(dir: dir, agent: agent, argv: argv ?? [agent], name: name)
+                let s: Session
+                if let argv {   // explicit argv: the raw path (tests, compatibility)
+                    s = try registry.create(dir: dir, agent: agent, argv: argv, name: name)
+                } else {
+                    let spec = CreateSpec(name: name, dir: expandTilde(dir), agent: agent,
+                                          terminal: terminal ?? false, worktree: worktree,
+                                          model: model, effort: effort, resume: resume)
+                    // Git IO runs here, outside any registry lock.
+                    let prepared = try CreateService.prepare(spec)
+                    s = try registry.create(dir: prepared.finalDir, agent: prepared.label,
+                                            argv: prepared.argv, name: name,
+                                            worktreeRepo: prepared.worktreeRepo,
+                                            resumeCmd: prepared.resumeCmd)
+                }
                 attachOutputFanout(for: s.name)
                 reply(.session(s))
             } catch let e as RegistryError {
                 reply(errorResult(e))
             } catch {
-                reply(.error(code: "spawnFailed", message: "\(error)"))
+                reply(.error(code: "createFailed", message: "\(error)"))
             }
 
-        case let .kill(name):
+        case let .kill(name, removeWorktree):
             guard registry.get(name: name) != nil else { return notFound(name) }
+            if removeWorktree == true { registry.markWorktreeRemoval(name: name) }
             registry.kill(name: name); reply(.ok)
+
+        case let .gitInfo(dir):
+            let root = GitOps.repoRoot(expandTilde(dir))
+            reply(.gitInfo(repoRoot: root,
+                           currentBranch: root.flatMap { GitOps.currentBranch($0) },
+                           branches: root.map { GitOps.localBranches($0) } ?? []))
+
+        case let .promote(name):
+            guard let session = registry.get(name: name) else { return notFound(name) }
+            guard let repo = session.worktreeRepo else {
+                return reply(.error(code: "promoteFailed", message: "not a worktree session"))
+            }
+            guard let branch = GitOps.currentBranch(session.dir) else {
+                return reply(.error(code: "promoteFailed", message: "no branch checked out"))
+            }
+            do {
+                try GitOps.promoteWorktree(repo: repo, wtDir: session.dir, branch: branch)
+                reply(.ok)
+            } catch { reply(.error(code: "promoteFailed", message: "\(error)")) }
+
+        case let .deleteBranch(dir, branch):
+            guard !protectedBranches.contains(branch) else {
+                return reply(.error(code: "deleteBranchFailed",
+                                    message: "branch '\(branch)' is protected"))
+            }
+            guard let repo = GitOps.repoRoot(expandTilde(dir)) else {
+                return reply(.error(code: "deleteBranchFailed", message: "not a git repo"))
+            }
+            do { try GitOps.deleteBranch(repo: repo, branch: branch); reply(.ok) }
+            catch { reply(.error(code: "deleteBranchFailed", message: "\(error)")) }
+
+        case let .mergedBranches(dir):
+            let repo = GitOps.repoRoot(expandTilde(dir))
+            reply(.branches(repo.map { GitOps.listMergedBranches($0) } ?? []))
+
+        case let .cleanupBranches(dir, branches):
+            guard let repo = GitOps.repoRoot(expandTilde(dir)) else {
+                return reply(.error(code: "cleanupFailed", message: "not a git repo"))
+            }
+            var failures: [String] = []
+            for branch in branches where !protectedBranches.contains(branch) {
+                do { try GitOps.deleteBranch(repo: repo, branch: branch) }
+                catch { failures.append("\(branch): \(error)") }
+            }
+            failures.isEmpty
+                ? reply(.ok)
+                : reply(.error(code: "cleanupFailed",
+                               message: failures.joined(separator: "; ")))
 
         case let .rename(name, newName):
             do { try registry.rename(name: name, newName: newName); reply(.ok) }

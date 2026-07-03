@@ -19,6 +19,7 @@ public final class SessionRegistry {
     private var counter = 0
     private var lostMetas: [SessionMeta]
     private let onPersist: (([SessionMeta]) -> Void)?
+    private var pendingWorktreeRemoval: [String: (repo: String, path: String)] = [:]
 
     public init(clock: @escaping () -> Int64 = { Int64(time(nil)) },
                 persisted: [SessionMeta] = [],
@@ -49,7 +50,9 @@ public final class SessionRegistry {
         let metas = entries.values.map {
             SessionMeta(name: $0.session.name, dir: $0.session.dir,
                         agent: $0.session.agent, argv: $0.argv,
-                        created: $0.session.created)
+                        created: $0.session.created,
+                        worktreeRepo: $0.session.worktreeRepo,
+                        resumeCmd: $0.session.resumeCmd)
         } + lostMetas
         lock.unlock()
         onPersist(metas)
@@ -59,7 +62,9 @@ public final class SessionRegistry {
         dir: String,
         agent: String,
         argv: [String],
-        name: String? = nil
+        name: String? = nil,
+        worktreeRepo: String? = nil,
+        resumeCmd: String? = nil
     ) throws -> Session {
         lock.lock()
         var autoNumber: Int?
@@ -79,7 +84,8 @@ public final class SessionRegistry {
         }
         let session = Session(
             name: id, dir: dir, cwd: dir, agent: agent,
-            created: clock(), git: nil, worktreeRepo: nil
+            created: clock(), git: nil, worktreeRepo: worktreeRepo,
+            resumeCmd: resumeCmd
         )
         let proc = PTYProcess()
         // Identify the entry by process, not by name: the exit may arrive
@@ -106,6 +112,22 @@ public final class SessionRegistry {
     
     public func kill(name: String) {
         withEntry(name)?.process.kill()
+    }
+
+    /// Updates a live session's cached git info (transient; not persisted).
+    public func updateGit(name: String, git: GitInfo?) {
+        lock.lock()
+        entries[name]?.session.git = git
+        lock.unlock()
+    }
+
+    /// Schedules the session's worktree for removal once its process exits.
+    public func markWorktreeRemoval(name: String) {
+        lock.lock()
+        if let entry = entries[name], let repo = entry.session.worktreeRepo {
+            pendingWorktreeRemoval[name] = (repo: repo, path: entry.session.dir)
+        }
+        lock.unlock()
     }
 
     public func list() -> [Session] {
@@ -184,8 +206,12 @@ public final class SessionRegistry {
         lock.lock()
         let id = entries.first { $0.value.process === proc }?.key
         if let id { entries[id] = nil }
+        let removal = id.flatMap { pendingWorktreeRemoval.removeValue(forKey: $0) }
         lock.unlock()
         persistNow()
+        if let removal {
+            try? GitOps.removeWorktree(repo: removal.repo, wtPath: removal.path)
+        }
         if let id { onExit?(id, code) }
     }
 

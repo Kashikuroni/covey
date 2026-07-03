@@ -10,6 +10,7 @@ final class TestDaemon {
     let path: String
     let registry: SessionRegistry
     let monitor: StatusMonitor
+    var gitMonitor: GitMonitor!
     private let ipc: IPCServer
     private let server: SocketServer
 
@@ -18,7 +19,8 @@ final class TestDaemon {
         let registry = SessionRegistry(persisted: persisted)
         self.registry = registry
         monitor = StatusMonitor(snapshot: { registry.snapshotScreens() })
-        ipc = IPCServer(registry: registry, monitor: monitor)
+        gitMonitor = GitMonitor(snapshot: { registry.list().map { ($0.name, $0.dir) } })
+        ipc = IPCServer(registry: registry, monitor: monitor, gitMonitor: gitMonitor)
         server = SocketServer(path: path)
         let ipc = self.ipc
         server.onAccept = { conn in
