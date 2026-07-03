@@ -122,7 +122,8 @@ public final class IPCServer {
             let root = GitOps.repoRoot(expandTilde(dir))
             reply(.gitInfo(repoRoot: root,
                            currentBranch: root.flatMap { GitOps.currentBranch($0) },
-                           branches: root.map { GitOps.localBranches($0) } ?? []))
+                           branches: root.map { GitOps.localBranches($0) } ?? [],
+                           worktrees: root.map { GitOps.worktrees($0) } ?? [:]))
 
         case let .promote(name):
             guard let session = registry.get(name: name) else { return notFound(name) }

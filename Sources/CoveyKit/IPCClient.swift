@@ -88,9 +88,11 @@ public final class IPCClient {
     }
 
     public func gitInfo(dir: String) async throws
-        -> (repoRoot: String?, currentBranch: String?, branches: [String]) {
-        if case let .gitInfo(root, current, branches) = try await request(.gitInfo(dir: dir)) {
-            return (root, current, branches)
+        -> (repoRoot: String?, currentBranch: String?, branches: [String],
+            worktrees: [String: String]) {
+        if case let .gitInfo(root, current, branches, worktrees)
+            = try await request(.gitInfo(dir: dir)) {
+            return (root, current, branches, worktrees ?? [:])
         }
         throw IPCClientError.daemonError(code: "badResponse", message: "expected gitInfo")
     }

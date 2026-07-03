@@ -36,7 +36,9 @@ public enum ServerMessage: Codable, Equatable{
         case session(Session)
         // `lost` is optional so payloads from older daemons decode as nil.
         case sessions(sessions: [Session], statuses: [String: Status], lost: [Session]?)
-        case gitInfo(repoRoot: String?, currentBranch: String?, branches: [String])
+        // `worktrees` (branch -> path) is optional so older payloads decode.
+        case gitInfo(repoRoot: String?, currentBranch: String?, branches: [String],
+                     worktrees: [String: String]?)
         case branches([String])
         case error(code: String, message: String)
     }

@@ -8,10 +8,14 @@ public struct SessionMeta: Codable, Equatable {
     public var agent: String
     public var argv: [String]
     public var created: Int64
+    public var worktreeRepo: String?
+    public var resumeCmd: String?
 
-    public init(name: String, dir: String, agent: String, argv: [String], created: Int64) {
+    public init(name: String, dir: String, agent: String, argv: [String], created: Int64,
+                worktreeRepo: String? = nil, resumeCmd: String? = nil) {
         self.name = name; self.dir = dir; self.agent = agent
         self.argv = argv; self.created = created
+        self.worktreeRepo = worktreeRepo; self.resumeCmd = resumeCmd
     }
 }
 

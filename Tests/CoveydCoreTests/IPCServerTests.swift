@@ -205,15 +205,16 @@ final class IPCServerTests: XCTestCase {
         server.register(sink)
         server.handle(Request(id: 1, op: .gitInfo(dir: repo)), from: sink)
         waitUntil({ sink.captured.contains {
-            if case .response(1, .gitInfo(let root, let cur, let branches)) = $0 {
+            if case .response(1, .gitInfo(let root, let cur, let branches, let wts)) = $0 {
                 return root != nil && cur == "main" && branches == ["main"]
+                    && wts?.keys.contains("main") == true
             }
             return false
         } }, "gitInfo for a repo")
         server.handle(Request(id: 2, op: .gitInfo(dir: NSTemporaryDirectory())), from: sink)
         waitUntil({ sink.captured.contains {
-            if case .response(2, .gitInfo(let root, let cur, let branches)) = $0 {
-                return root == nil && cur == nil && branches.isEmpty
+            if case .response(2, .gitInfo(let root, let cur, let branches, let wts)) = $0 {
+                return root == nil && cur == nil && branches.isEmpty && (wts ?? [:]).isEmpty
             }
             return false
         } }, "gitInfo for a non-repo")

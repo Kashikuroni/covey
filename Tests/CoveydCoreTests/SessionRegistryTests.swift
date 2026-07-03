@@ -194,6 +194,17 @@ final class SessionRegistryTests: XCTestCase {
         waitUntil({ reg.list().isEmpty }, "cleanup")
     }
 
+    func testResumeAndWorktreeRepoPersistIntoMeta() throws {
+        let spy = PersistSpy()
+        let reg = SessionRegistry(onPersist: spy.record)
+        _ = try reg.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"], name: "r",
+                           worktreeRepo: "/repo", resumeCmd: "claude --resume u")
+        XCTAssertEqual(spy.last?.first?.worktreeRepo, "/repo")
+        XCTAssertEqual(spy.last?.first?.resumeCmd, "claude --resume u")
+        reg.kill(name: "r")
+        waitUntil({ reg.list().isEmpty }, "cleanup")
+    }
+
     func testSecondLifeSeesFirstLifeSessionsAsLost() throws {
         // Integration with RegistryStore: the daemon-restart scenario.
         let path = "\(NSTemporaryDirectory())covey-registry-\(UInt32.random(in: 0..<UInt32.max)).json"

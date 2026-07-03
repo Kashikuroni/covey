@@ -59,19 +59,28 @@ public enum GitOps {
                   readOnly: true)) != nil
     }
 
-    /// The worktree path where `branch` is checked out, if any (porcelain parse).
-    public static func worktreeForBranch(_ repo: String, _ branch: String) -> String? {
+    /// All of the repo's worktrees as branch -> path (porcelain parse). The
+    /// main worktree is included; detached worktrees carry no branch line and
+    /// are skipped.
+    public static func worktrees(_ repo: String) -> [String: String] {
         guard let out = try? run(repo, ["worktree", "list", "--porcelain"], readOnly: true)
-        else { return nil }
+        else { return [:] }
+        var map: [String: String] = [:]
         var path: String?
         for line in out.split(separator: "\n", omittingEmptySubsequences: false) {
             if line.hasPrefix("worktree ") {
                 path = String(line.dropFirst("worktree ".count))
-            } else if line == "branch refs/heads/\(branch)" {
-                return path
+            } else if line.hasPrefix("branch refs/heads/"), let p = path {
+                map[String(line.dropFirst("branch refs/heads/".count))] = p
+                path = nil
             }
         }
-        return nil
+        return map
+    }
+
+    /// The worktree path where `branch` is checked out, if any.
+    public static func worktreeForBranch(_ repo: String, _ branch: String) -> String? {
+        worktrees(repo)[branch]
     }
 
     /// Appends `entry` to the repo's .gitignore unless already present.
@@ -146,6 +155,11 @@ public enum GitOps {
 
     public static func checkout(repo: String, branch: String) throws {
         try run(repo, ["checkout", branch])
+    }
+
+    /// Creates `branch` from `base` and checks it out in the repo root.
+    public static func createBranch(_ repo: String, _ branch: String, base: String) throws {
+        try run(repo, ["checkout", "-b", branch, base])
     }
 
     /// Port of git.rs promote_worktree: stash dirty changes in the worktree,

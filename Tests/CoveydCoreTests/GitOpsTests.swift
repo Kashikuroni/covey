@@ -75,6 +75,29 @@ final class GitOpsTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: "\(wt)/junk.txt"))
     }
 
+    func testWorktreesMap() throws {
+        var map = GitOps.worktrees(repo)
+        XCTAssertEqual(Array(map.keys), ["main"], "main worktree is included")
+        XCTAssertTrue(map["main"]!.hasSuffix(URL(fileURLWithPath: repo).lastPathComponent))
+        try sh("git -C '\(repo)' branch other")
+        try GitOps.prepareWorktreeExisting(repo: repo, wtPath: "\(repo)/.worktrees/other",
+                                           branch: "other")
+        try sh("git -C '\(repo)' worktree add --detach '\(repo)/.worktrees/loose'")
+        map = GitOps.worktrees(repo)
+        XCTAssertEqual(map.keys.sorted(), ["main", "other"], "detached worktree skipped")
+        XCTAssertTrue(map["other"]!.hasSuffix(".worktrees/other"))
+        XCTAssertEqual(GitOps.worktrees(NSTemporaryDirectory()), [:])
+    }
+
+    func testCreateBranch() throws {
+        try GitOps.createBranch(repo, "feat", base: "main")
+        XCTAssertEqual(GitOps.currentBranch(repo), "feat", "created AND checked out")
+        XCTAssertThrowsError(try GitOps.createBranch(repo, "feat", base: "main"),
+                             "duplicate branch")
+        XCTAssertThrowsError(try GitOps.createBranch(repo, "x", base: "nope"),
+                             "unknown base")
+    }
+
     func testResolveAgentPath() {
         XCTAssertEqual(GitOps.resolveAgentPath("sh"), "/bin/sh")
         XCTAssertNil(GitOps.resolveAgentPath("definitely-not-a-binary-xyz"))
