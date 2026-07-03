@@ -75,20 +75,51 @@ public final class IPCClient {
     }
 
     public func create(dir: String, agent: String, argv: [String]? = nil,
-                       name: String? = nil) async throws -> Session {
+                       name: String? = nil, terminal: Bool? = nil,
+                       worktree: WorktreeSpec? = nil, model: String? = nil,
+                       effort: String? = nil, resume: String? = nil) async throws -> Session {
         if case let .session(s) = try await request(
-            .create(dir: dir, agent: agent, argv: argv, name: name)) {
+            .create(dir: dir, agent: agent, argv: argv, name: name,
+                    terminal: terminal, worktree: worktree, model: model,
+                    effort: effort, resume: resume)) {
             return s
         }
         throw IPCClientError.daemonError(code: "badResponse", message: "expected session")
     }
 
-    public func kill(name: String) async throws {
-        try await expectOK(.kill(name: name))
+    public func gitInfo(dir: String) async throws
+        -> (repoRoot: String?, currentBranch: String?, branches: [String]) {
+        if case let .gitInfo(root, current, branches) = try await request(.gitInfo(dir: dir)) {
+            return (root, current, branches)
+        }
+        throw IPCClientError.daemonError(code: "badResponse", message: "expected gitInfo")
+    }
+
+    public func kill(name: String, removeWorktree: Bool? = nil) async throws {
+        try await expectOK(.kill(name: name, removeWorktree: removeWorktree))
     }
 
     public func clearLost() async throws {
         try await expectOK(.clearLost)
+    }
+
+    public func promote(name: String) async throws {
+        try await expectOK(.promote(name: name))
+    }
+
+    public func deleteBranch(dir: String, branch: String) async throws {
+        try await expectOK(.deleteBranch(dir: dir, branch: branch))
+    }
+
+    public func mergedBranches(dir: String) async throws -> [String] {
+        if case let .branches(list) = try await request(.mergedBranches(dir: dir)) {
+            return list
+        }
+        throw IPCClientError.daemonError(code: "badResponse", message: "expected branches")
+    }
+
+    public func cleanupBranches(dir: String, branches: [String]) async throws {
+        try await expectOK(.cleanupBranches(dir: dir, branches: branches))
     }
 
     public func rename(name: String, newName: String) async throws {
