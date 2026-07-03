@@ -79,10 +79,21 @@ struct SessionListView: View {
                 HStack(spacing: 6) {
                     Circle().fill(.gray).frame(width: 8, height: 8)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(r.name)
-                        Text(r.dir).foregroundStyle(.secondary).font(.caption).lineLimit(1)
+                        HStack(spacing: 6) {
+                            Text(r.name)
+                            if r.resumeCmd != nil {
+                                // Relaunch continues the saved conversation.
+                                Text("↻").foregroundStyle(.secondary).font(.caption)
+                                    .help("relaunch resumes the conversation")
+                            }
+                            Spacer()
+                            Text(String(r.agent.split(separator: " ").first ?? ""))
+                                .foregroundStyle(.secondary).font(.caption)
+                        }
+                        Text(collapseHome(r.dir))
+                            .foregroundStyle(.secondary).font(.caption).lineLimit(1)
+                            .truncationMode(.head)
                     }
-                    Spacer()
                     Button("Relaunch") { Task { await model.relaunchRecent(r) } }
                         .buttonStyle(.borderless)
                 }
