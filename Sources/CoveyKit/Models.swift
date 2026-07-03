@@ -18,10 +18,13 @@ public struct Session: Codable, Equatable {
     public var created: Int64
     public var git: GitInfo?
     public var worktreeRepo: String?
-    
+    /// "claude --resume <uuid>" for cold-start relaunch; nil for non-claude.
+    public var resumeCmd: String?
+
     public init(
         name: String, dir: String, cwd: String, agent: String,
-        created: Int64, git: GitInfo? = nil, worktreeRepo: String? = nil
+        created: Int64, git: GitInfo? = nil, worktreeRepo: String? = nil,
+        resumeCmd: String? = nil
     ) {
         self.name = name
         self.dir = dir
@@ -30,10 +33,14 @@ public struct Session: Codable, Equatable {
         self.created = created
         self.git = git
         self.worktreeRepo = worktreeRepo
+        self.resumeCmd = resumeCmd
     }
 }
 
 public enum Status: String, Codable, Equatable {
     case running, waiting, idle
 }
+
+/// Branches that destructive git actions refuse to touch (git.rs port).
+public let protectedBranches = ["main", "master", "develop", "dev"]
 
