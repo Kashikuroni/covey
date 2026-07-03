@@ -194,8 +194,9 @@ public final class AppModel {
     }
 
     public func gitInfo(_ dir: String) async
-        -> (repoRoot: String?, currentBranch: String?, branches: [String]) {
-        (try? await client.gitInfo(dir: dir)) ?? (nil, nil, [])
+        -> (repoRoot: String?, currentBranch: String?, branches: [String],
+            worktrees: [String: String]) {
+        (try? await client.gitInfo(dir: dir)) ?? (nil, nil, [], [:])
     }
 
     /// The full-form create; errors surface as a toast AND are returned for
@@ -279,11 +280,12 @@ public final class AppModel {
         return (sessions.count, r, w)
     }
 
-    /// dir groups ordered by `projectOrder` (unknown dirs appended by first
+    /// Project groups (keyed by sessionRoot, so a worktree session sits with
+    /// its repo) ordered by `projectOrder` (unknown roots appended by first
     /// appearance); within a group, sessions ordered by `order` (unknown by created).
     public func orderedSessions() -> [(dir: String, sessions: [Session])] {
         orderedDirs().map { dir in
-            let inDir = sessions.filter { $0.dir == dir }.sorted { a, b in
+            let inDir = sessions.filter { sessionRoot($0) == dir }.sorted { a, b in
                 let ia = order.firstIndex(of: a.name) ?? Int.max
                 let ib = order.firstIndex(of: b.name) ?? Int.max
                 if ia != ib { return ia < ib }
@@ -335,11 +337,11 @@ public final class AppModel {
 
     private func orderedDirs() -> [String] {
         var seen = Set<String>(); var dirs: [String] = []
-        for d in projectOrder where sessions.contains(where: { $0.dir == d }) {
+        for d in projectOrder where sessions.contains(where: { sessionRoot($0) == d }) {
             if seen.insert(d).inserted { dirs.append(d) }
         }
-        for s in sessions where !seen.contains(s.dir) {
-            if seen.insert(s.dir).inserted { dirs.append(s.dir) }
+        for s in sessions where !seen.contains(sessionRoot(s)) {
+            if seen.insert(sessionRoot(s)).inserted { dirs.append(sessionRoot(s)) }
         }
         return dirs
     }
@@ -380,7 +382,7 @@ public final class AppModel {
     }
 
     public func displayName(forDir dir: String) -> String {
-        projectNames[dir] ?? dir
+        projectNames[dir] ?? projectDefaultName(dir)
     }
 
     public func noteText() -> String {
@@ -447,7 +449,7 @@ public final class AppModel {
             setListTab(listTab == .active ? .recent : .active)
         case .newSession(let prefill):
             newSessionPrefillDir = prefill
-                ? sessions.first(where: { $0.name == selected })?.dir : nil
+                ? sessions.first(where: { $0.name == selected }).map(sessionRoot) : nil
             modal = .newSession
         case .killSelected:
             if let selected { modal = .kill(selected) }
@@ -479,8 +481,8 @@ public final class AppModel {
         case .toggleSessionNote:
             toggleNote(target: selected.map { .session($0) })
         case .toggleProjectNote:
-            let dir = sessions.first(where: { $0.name == selected })?.dir
-            toggleNote(target: dir.map { .project($0) })
+            let root = sessions.first(where: { $0.name == selected }).map(sessionRoot)
+            toggleNote(target: root.map { .project($0) })
         case .noteCursor(let down):
             if disarmClearIfNeeded() { return }
             let total = taskCounts(noteText()).total
@@ -526,8 +528,8 @@ public final class AppModel {
             inputMode = .normal
         case .renameProject:
             inputMode = .normal
-            if let dir = sessions.first(where: { $0.name == selected })?.dir {
-                modal = .renameProject(dir)
+            if let root = sessions.first(where: { $0.name == selected }).map(sessionRoot) {
+                modal = .renameProject(root)
             }
         case .answerPrompt(let n):
             answerPrompt(n)
