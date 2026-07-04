@@ -240,6 +240,29 @@ final class SessionRegistryTests: XCTestCase {
         var last: [SessionMeta]? { lock.lock(); defer { lock.unlock() }; return snapshots.last }
     }
 
+    func testCompanionCreateCascadeKillAndRename() throws {
+        let spy = PersistSpy()
+        let reg = SessionRegistry(onPersist: spy.record)
+        let parent = try reg.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"],
+                                    name: "agent")
+        let comp = try reg.create(dir: "/tmp", agent: "zsh", argv: ["/bin/cat"],
+                                  name: "\(parent.name)+sh", companionOf: parent.name)
+        XCTAssertEqual(comp.companionOf, "agent")
+        XCTAssertEqual(reg.companionName(of: "agent"), "agent+sh")
+
+        // persistNow must not include companions (they never become lost).
+        XCTAssertEqual(spy.last?.map(\.name), ["agent"])
+
+        // rename cascades: the companion follows the parent's name.
+        try reg.rename(name: "agent", newName: "renamed")
+        XCTAssertEqual(reg.companionName(of: "renamed"), "renamed+sh")
+        XCTAssertEqual(reg.get(name: "renamed+sh")?.companionOf, "renamed")
+
+        // kill cascades to the companion.
+        reg.kill(name: "renamed")
+        waitUntil({ reg.list().isEmpty }, "cascade kill removes both")
+    }
+
     func testPersistCallbackTracksLifecycle() throws {
         let spy = PersistSpy()
         let reg = SessionRegistry(clock: { 7 }, onPersist: spy.record)

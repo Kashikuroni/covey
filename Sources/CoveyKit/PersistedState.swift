@@ -70,6 +70,8 @@ public struct PersistedState: Codable, Equatable {
     public var showHeader: Bool?
     public var showInspector: Bool?
     public var vimMode: Bool?
+    /// Split axis per parent session name ("v"/"h") for the companion pane.
+    public var splitAxes: [String: String]?
     public var lastVersion: String?
 
     public init(
@@ -81,6 +83,7 @@ public struct PersistedState: Codable, Equatable {
         fontScale: Int? = nil, sbWidth: Int? = nil,
         showSessions: Bool? = nil, showFooter: Bool? = nil, showHeader: Bool? = nil,
         showInspector: Bool? = nil, vimMode: Bool? = nil,
+        splitAxes: [String: String]? = nil,
         lastVersion: String? = nil
     ) {
         self.theme = theme; self.splitPct = splitPct; self.recents = recents
@@ -91,6 +94,7 @@ public struct PersistedState: Codable, Equatable {
         self.showSessions = showSessions; self.showFooter = showFooter
         self.showHeader = showHeader
         self.showInspector = showInspector; self.vimMode = vimMode
+        self.splitAxes = splitAxes
         self.lastVersion = lastVersion
     }
 }

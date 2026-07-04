@@ -54,7 +54,9 @@ public final class SessionRegistry {
     private func persistNow() {
         guard let onPersist else { return }
         lock.lock()
-        let metas = entries.values.map {
+        // Companions are excluded: a dead shell is not worth resurfacing
+        // as lost after a daemon restart.
+        let metas = entries.values.filter { $0.session.companionOf == nil }.map {
             SessionMeta(name: $0.session.name, dir: $0.session.dir,
                         agent: $0.session.agent, argv: $0.argv,
                         created: $0.session.created,
@@ -71,7 +73,8 @@ public final class SessionRegistry {
         argv: [String],
         name: String? = nil,
         worktreeRepo: String? = nil,
-        resumeCmd: String? = nil
+        resumeCmd: String? = nil,
+        companionOf: String? = nil
     ) throws -> Session {
         lock.lock()
         var autoNumber: Int?
@@ -92,7 +95,7 @@ public final class SessionRegistry {
         let session = Session(
             name: id, dir: dir, cwd: dir, agent: agent,
             created: clock(), git: nil, worktreeRepo: worktreeRepo,
-            resumeCmd: resumeCmd
+            resumeCmd: resumeCmd, companionOf: companionOf
         )
         let proc = PTYProcess()
         // Identify the entry by process, not by name: the exit may arrive
@@ -118,7 +121,17 @@ public final class SessionRegistry {
     }
     
     public func kill(name: String) {
+        // A parent takes its companion shell down with it.
+        if let comp = companionName(of: name) {
+            withEntry(comp)?.process.kill()
+        }
         withEntry(name)?.process.kill()
+    }
+
+    /// Name of the live companion shell of `name`, if any.
+    public func companionName(of name: String) -> String? {
+        lock.lock(); defer { lock.unlock() }
+        return entries.values.first { $0.session.companionOf == name }?.session.name
     }
 
     /// Kills the session's child and respawns it in place once it exits:
@@ -216,10 +229,24 @@ public final class SessionRegistry {
         entry.session.name = newName
         entries[name] = nil
         entries[newName] = entry
+        // Cascade: the companion follows "<parent>+sh" and its back-reference.
+        var companionPair: (old: String, session: Session)?
+        if var comp = entries.values.first(where: { $0.session.companionOf == name }) {
+            let oldComp = comp.session.name
+            comp.session.name = "\(newName)+sh"
+            comp.session.companionOf = newName
+            entries[oldComp] = nil
+            entries[comp.session.name] = comp
+            companionPair = (oldComp, comp.session)
+        }
         lock.unlock()
         persistNow()
         onSessionRemoved?(name)
         onSessionAdded?(entry.session)
+        if let pair = companionPair {
+            onSessionRemoved?(pair.old)
+            onSessionAdded?(pair.session)
+        }
     }
     
     public func backfill(name: String, since seq: Int) -> (bytes: [UInt8], fromSeq: Int, gapped: Bool)? {

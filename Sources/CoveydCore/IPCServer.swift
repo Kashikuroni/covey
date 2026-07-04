@@ -96,21 +96,25 @@ public final class IPCServer {
         case .clearLost:
             registry.clearLost(); reply(.ok)
 
-        case let .create(dir, agent, argv, name, terminal, worktree, model, effort, resume):
+        case let .create(dir, agent, argv, name, terminal, worktree, model, effort, resume, companionOf):
             do {
+                // A companion's name is derived, never client-chosen.
+                let effectiveName = companionOf.map { "\($0)+sh" } ?? name
                 let s: Session
                 if let argv {   // explicit argv: the raw path (tests, compatibility)
-                    s = try registry.create(dir: dir, agent: agent, argv: argv, name: name)
+                    s = try registry.create(dir: dir, agent: agent, argv: argv,
+                                            name: effectiveName, companionOf: companionOf)
                 } else {
-                    let spec = CreateSpec(name: name, dir: expandTilde(dir), agent: agent,
+                    let spec = CreateSpec(name: effectiveName, dir: expandTilde(dir), agent: agent,
                                           terminal: terminal ?? false, worktree: worktree,
                                           model: model, effort: effort, resume: resume)
                     // Git IO runs here, outside any registry lock.
                     let prepared = try CreateService.prepare(spec)
                     s = try registry.create(dir: prepared.finalDir, agent: prepared.label,
-                                            argv: prepared.argv, name: name,
+                                            argv: prepared.argv, name: effectiveName,
                                             worktreeRepo: prepared.worktreeRepo,
-                                            resumeCmd: prepared.resumeCmd)
+                                            resumeCmd: prepared.resumeCmd,
+                                            companionOf: companionOf)
                 }
                 attachOutputFanout(for: s.name)
                 reply(.session(s))
@@ -146,6 +150,9 @@ public final class IPCServer {
             guard let branch = GitOps.currentBranch(session.dir) else {
                 return reply(.error(code: "promoteFailed", message: "no branch checked out"))
             }
+            // The companion shell lives inside the worktree — take it down
+            // before the tree is removed.
+            if let comp = registry.companionName(of: name) { registry.kill(name: comp) }
             do {
                 try GitOps.promoteWorktree(repo: repo, wtDir: session.dir, branch: branch)
                 reply(.ok)

@@ -77,11 +77,12 @@ public final class IPCClient {
     public func create(dir: String, agent: String, argv: [String]? = nil,
                        name: String? = nil, terminal: Bool? = nil,
                        worktree: WorktreeSpec? = nil, model: String? = nil,
-                       effort: String? = nil, resume: String? = nil) async throws -> Session {
+                       effort: String? = nil, resume: String? = nil,
+                       companionOf: String? = nil) async throws -> Session {
         if case let .session(s) = try await request(
             .create(dir: dir, agent: agent, argv: argv, name: name,
                     terminal: terminal, worktree: worktree, model: model,
-                    effort: effort, resume: resume)) {
+                    effort: effort, resume: resume, companionOf: companionOf)) {
             return s
         }
         throw IPCClientError.daemonError(code: "badResponse", message: "expected session")

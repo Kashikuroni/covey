@@ -18,10 +18,39 @@ final class IPCServerTests: XCTestCase {
                                monitor: StatusMonitor(snapshot: { registry.snapshotScreens() }))
         let sink = FakeSink(id: 1)
         server.register(sink)
-        server.handle(Request(id: 10, op: .create(dir: "/usr", agent: "sh", argv: ["/bin/cat"], name: "s1", terminal: nil, worktree: nil, model: nil, effort: nil, resume: nil)), from: sink)
+        server.handle(Request(id: 10, op: .create(dir: "/usr", agent: "sh", argv: ["/bin/cat"], name: "s1", terminal: nil, worktree: nil, model: nil, effort: nil, resume: nil, companionOf: nil)), from: sink)
         waitUntil({ sink.captured.contains { if case .response(10, .session) = $0 { return true }; return false } }, "create response")
         waitUntil({ sink.captured.contains { if case .event(.sessionAdded) = $0 { return true }; return false } }, "added event")
         server.handle(Request(id: 11, op: .kill(name: "s1", removeWorktree: nil)), from: sink)
+    }
+
+    func testCreateCompanionDerivesNameAndKillCascades() {
+        let registry = SessionRegistry(clock: { 1 })
+        let server = IPCServer(registry: registry,
+                               monitor: StatusMonitor(snapshot: { registry.snapshotScreens() }))
+        let sink = FakeSink(id: 1)
+        server.register(sink)
+        server.handle(Request(id: 1, op: .create(dir: "/tmp", agent: "claude",
+                                                 argv: ["/bin/cat"], name: "agent",
+                                                 terminal: nil, worktree: nil, model: nil,
+                                                 effort: nil, resume: nil, companionOf: nil)),
+                      from: sink)
+        server.handle(Request(id: 2, op: .create(dir: "/tmp", agent: "zsh",
+                                                 argv: ["/bin/cat"], name: "ignored",
+                                                 terminal: nil, worktree: nil, model: nil,
+                                                 effort: nil, resume: nil, companionOf: "agent")),
+                      from: sink)
+        // The daemon derives the companion name, ignoring the client's.
+        waitUntil({ sink.captured.contains {
+            if case .response(2, .session(let s)) = $0 {
+                return s.name == "agent+sh" && s.companionOf == "agent"
+            }
+            return false
+        } }, "companion session derived name")
+        server.handle(Request(id: 3, op: .kill(name: "agent", removeWorktree: nil)), from: sink)
+        waitUntil({ sink.captured.contains {
+            if case .event(.exited(name: "agent+sh", _)) = $0 { return true }; return false
+        } }, "companion cascades on kill")
     }
 
     func testUnknownNameReturnsNotFound() {
@@ -42,7 +71,7 @@ final class IPCServerTests: XCTestCase {
                                monitor: StatusMonitor(snapshot: { registry.snapshotScreens() }))
         let sink = FakeSink(id: 1)
         server.register(sink)
-        server.handle(Request(id: 1, op: .create(dir: "/usr", agent: "sh", argv: ["/bin/cat"], name: "s1", terminal: nil, worktree: nil, model: nil, effort: nil, resume: nil)), from: sink)
+        server.handle(Request(id: 1, op: .create(dir: "/usr", agent: "sh", argv: ["/bin/cat"], name: "s1", terminal: nil, worktree: nil, model: nil, effort: nil, resume: nil, companionOf: nil)), from: sink)
         server.handle(Request(id: 2, op: .attach(name: "s1", sinceSeq: nil)), from: sink)
         server.handle(Request(id: 3, op: .input(name: "s1", bytesB64: Data("ping\n".utf8).base64EncodedString())), from: sink)
         waitUntil({ sink.captured.contains {
@@ -64,7 +93,7 @@ final class IPCServerTests: XCTestCase {
             dir: "/tmp", agent: "sh",
             argv: ["/bin/sh", "-c", "printf 'pick:\\n  1. yes\\n  2. no\\n'; exec cat"],
             name: "menu", terminal: nil, worktree: nil, model: nil,
-            effort: nil, resume: nil)), from: sink)
+            effort: nil, resume: nil, companionOf: nil)), from: sink)
         waitUntil({ registry.snapshotScreens()["menu"]?.contains("2. no") == true },
                   "menu rendered")
         monitor.tick()
@@ -125,7 +154,7 @@ final class IPCServerTests: XCTestCase {
         server.handle(Request(id: 1, op: .create(
             dir: repo, agent: "sh", argv: nil, name: "wt",
             terminal: nil, worktree: .new(branch: "wt-branch", base: "main"),
-            model: nil, effort: nil, resume: nil)), from: sink)
+            model: nil, effort: nil, resume: nil, companionOf: nil)), from: sink)
         var created: Session?
         waitUntil({ sink.captured.contains {
             if case .response(1, .session(let s)) = $0 { created = s; return true }
@@ -159,7 +188,7 @@ final class IPCServerTests: XCTestCase {
         // promote a plain (non-worktree) session -> promoteFailed
         server.handle(Request(id: 1, op: .create(dir: repo, agent: "sh", argv: ["/bin/cat"],
                                                  name: "plain", terminal: nil, worktree: nil,
-                                                 model: nil, effort: nil, resume: nil)), from: sink)
+                                                 model: nil, effort: nil, resume: nil, companionOf: nil)), from: sink)
         server.handle(Request(id: 2, op: .promote(name: "plain")), from: sink)
         waitUntil({ sink.captured.contains {
             if case .response(2, .error(let code, _)) = $0 { return code == "promoteFailed" }
@@ -184,7 +213,25 @@ final class IPCServerTests: XCTestCase {
         } }, "cleanup ok")
         XCTAssertFalse(GitOps.branchExists(repo, "merged-b"))
         XCTAssertTrue(GitOps.branchExists(repo, "main"), "protected skipped, not failed")
+        // promote with a companion: the shell dies, then the tree promotes.
+        let wt = "\(repo)/.worktrees/feat"
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "git -C '\(repo)' worktree add -q -b feat '\(wt)'"]
+        try p.run(); p.waitUntilExit()
+        _ = try registry.create(dir: wt, agent: "sh", argv: ["/bin/cat"],
+                                name: "wts", worktreeRepo: repo)
+        _ = try registry.create(dir: wt, agent: "zsh", argv: ["/bin/cat"],
+                                name: "wts+sh", companionOf: "wts")
+        server.handle(Request(id: 7, op: .promote(name: "wts")), from: sink)
+        waitUntil({ sink.captured.contains {
+            if case .response(7, .ok) = $0 { return true }; return false
+        } }, "promote ok with companion")
+        waitUntil({ sink.captured.contains {
+            if case .event(.exited(name: "wts+sh", _)) = $0 { return true }; return false
+        } }, "companion killed by promote")
         server.handle(Request(id: 6, op: .kill(name: "plain", removeWorktree: nil)), from: sink)
+        server.handle(Request(id: 8, op: .kill(name: "wts", removeWorktree: nil)), from: sink)
     }
 
     func testRestartRespawnsAndUpserts() throws {

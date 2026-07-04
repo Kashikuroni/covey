@@ -20,11 +20,14 @@ public struct Session: Codable, Equatable {
     public var worktreeRepo: String?
     /// "claude --resume <uuid>" for cold-start relaunch; nil for non-claude.
     public var resumeCmd: String?
+    /// Name of the parent session when this is a split companion shell;
+    /// nil for regular sessions. Companions are hidden from the GUI lists.
+    public var companionOf: String?
 
     public init(
         name: String, dir: String, cwd: String, agent: String,
         created: Int64, git: GitInfo? = nil, worktreeRepo: String? = nil,
-        resumeCmd: String? = nil
+        resumeCmd: String? = nil, companionOf: String? = nil
     ) {
         self.name = name
         self.dir = dir
@@ -34,6 +37,7 @@ public struct Session: Codable, Equatable {
         self.git = git
         self.worktreeRepo = worktreeRepo
         self.resumeCmd = resumeCmd
+        self.companionOf = companionOf
     }
 }
 

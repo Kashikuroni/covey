@@ -23,6 +23,14 @@ final class PersistedStateTests: XCTestCase {
         XCTAssertTrue(json.contains("recents"))     // empty array -> present
     }
 
+    func testSplitAxesRoundTrip() throws {
+        var st = PersistedState()
+        st.splitAxes = ["agent": "h"]
+        let data = try JSONEncoder().encode(st)
+        let back = try JSONDecoder().decode(PersistedState.self, from: data)
+        XCTAssertEqual(back.splitAxes, ["agent": "h"])
+    }
+
     func testPushRecentDedupesNewestFirst() {
         var r: [RecentSession] = []
         pushRecent(&r, RecentSession(name: "a", dir: "/w", agent: "sh"))

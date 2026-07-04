@@ -18,16 +18,16 @@ final class ProtocolTests: XCTestCase {
         let ops: [Request.Op] = [
             .list,
             .create(dir: "/work", agent: "claude", argv: ["claude"], name: nil,
-                    terminal: nil, worktree: nil, model: nil, effort: nil, resume: nil),
+                    terminal: nil, worktree: nil, model: nil, effort: nil, resume: nil, companionOf: nil),
             .create(dir: "/work", agent: "claude", argv: nil, name: "s9",
                     terminal: true, worktree: .new(branch: "b", base: "main"),
-                    model: "opus", effort: "max", resume: "claude --resume u"),
+                    model: "opus", effort: "max", resume: "claude --resume u", companionOf: nil),
             .create(dir: "/work", agent: "claude", argv: nil, name: nil,
                     terminal: nil, worktree: .checkout(branch: "feat"),
-                    model: nil, effort: nil, resume: nil),
+                    model: nil, effort: nil, resume: nil, companionOf: nil),
             .create(dir: "/work", agent: "claude", argv: nil, name: nil,
                     terminal: nil, worktree: .checkoutNew(branch: "feat", base: "main"),
-                    model: nil, effort: nil, resume: nil),
+                    model: nil, effort: nil, resume: nil, companionOf: nil),
             .kill(name: "s-1", removeWorktree: nil),
             .kill(name: "s-1", removeWorktree: true),
             .restart(name: "s-1", dir: nil),
@@ -46,6 +46,20 @@ final class ProtocolTests: XCTestCase {
         for op in ops { try roundTrip(Request(id: 7, op: op)) }
     }
     
+    func testCreateCompanionOfRoundTrip() throws {
+        let op = Request.Op.create(dir: "/tmp", agent: "sh", argv: nil, name: nil,
+                                   terminal: true, worktree: nil, model: nil,
+                                   effort: nil, resume: nil, companionOf: "agent-1")
+        try roundTrip(Request(id: 7, op: op))
+
+        var s = Session(name: "agent-1+sh", dir: "/tmp", cwd: "/tmp",
+                        agent: "zsh", created: 1)
+        s.companionOf = "agent-1"
+        let data = try encoder().encode(s)
+        let back = try JSONDecoder().decode(Session.self, from: data)
+        XCTAssertEqual(back.companionOf, "agent-1")
+    }
+
     func testServerMessageRoundTrip() throws {
         let s = Session(name: "s-1", dir: "/w", cwd: "/w", agent: "claude", created: 1)
         let msgs: [ServerMessage] = [
@@ -90,7 +104,7 @@ final class ProtocolTests: XCTestCase {
             try line(
                 Request(id: 3, op: .create(dir: "/w", agent: "claude", argv: nil, name: nil,
                                            terminal: nil, worktree: nil, model: nil,
-                                           effort: nil, resume: nil))
+                                           effort: nil, resume: nil, companionOf: nil))
             ), #"{"id":3,"op":{"create":{"agent":"claude","dir":"/w"}}}"#
         )
     }
