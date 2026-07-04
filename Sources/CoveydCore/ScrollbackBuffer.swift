@@ -43,6 +43,12 @@ public final class ScrollbackBuffer {
         return (from, tailSeq)
     }
 
+    /// The last `maxBytes` of retained scrollback (fewer when the buffer holds
+    /// less). For scanning exit output — never blocks on the pty queue.
+    public func tail(_ maxBytes: Int) -> [UInt8] {
+        since(max(headSeq, tailSeq - maxBytes)).bytes
+    }
+
     public func since(_ seq: Int) -> (bytes: [UInt8], fromSeq: Int, gapped: Bool) {
         lock.lock(); defer { lock.unlock() }
         let gapped = seq < headSeq

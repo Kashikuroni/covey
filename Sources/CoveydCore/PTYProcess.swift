@@ -173,6 +173,12 @@ public final class PTYProcess {
         // queue here: a stalled queue would cascade into the IPC thread.
         buffer.since(seq)
     }
+
+    /// The last `maxBytes` of scrollback (see ScrollbackBuffer.tail). Used to
+    /// scan a dying claude's output for its `--resume` hint.
+    public func scrollbackTail(_ maxBytes: Int) -> [UInt8] {
+        buffer.tail(maxBytes)
+    }
     
     private func startReadLoop() {
         let src = DispatchSource.makeReadSource(fileDescriptor: masterFD, queue: queue)

@@ -30,6 +30,8 @@ final class ProtocolTests: XCTestCase {
                     model: nil, effort: nil, resume: nil),
             .kill(name: "s-1", removeWorktree: nil),
             .kill(name: "s-1", removeWorktree: true),
+            .restart(name: "s-1", dir: nil),
+            .restart(name: "s-1", dir: "/repo"),
             .rename(name: "a", newName: "b"),
             .attach(name: "s-1", sinceSeq: 42),
             .detach(name: "s-1"),

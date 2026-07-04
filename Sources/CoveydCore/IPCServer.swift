@@ -31,6 +31,13 @@ public final class IPCServer {
         registry.onSessionRemoved = { [weak self] name in
             self?.broadcast(.event(.sessionRemoved(name: name)))
         }
+        registry.onRestarted = { [weak self] s in
+            guard let self else { return }
+            // The respawn created a new PTYProcess — re-bind the output fanout
+            // to it; subscribers are keyed by name and survive untouched.
+            self.attachOutputFanout(for: s.name)
+            self.broadcast(.event(.sessionAdded(session: s)))   // client upserts
+        }
         registry.onExit = { [weak self] name, code in
             guard let self else { return }
             self.broadcast(.event(.exited(name: name, code: code)))
@@ -117,6 +124,12 @@ public final class IPCServer {
             guard registry.get(name: name) != nil else { return notFound(name) }
             if removeWorktree == true { registry.markWorktreeRemoval(name: name) }
             registry.kill(name: name); reply(.ok)
+
+        case let .restart(name, dir):
+            guard registry.get(name: name) != nil else { return notFound(name) }
+            do { try registry.restart(name: name, dir: dir); reply(.ok) }
+            catch let e as RegistryError { reply(errorResult(e)) }
+            catch { reply(.error(code: "restartFailed", message: "\(error)")) }
 
         case let .gitInfo(dir):
             let root = GitOps.repoRoot(expandTilde(dir))
@@ -214,6 +227,8 @@ public final class IPCServer {
         switch e {
         case .notFound(let n):      return .error(code: "notFound", message: "no session: \(n)")
         case .duplicateName(let n): return .error(code: "duplicateName", message: "name taken: \(n)")
+        case .dirMissing(let d):
+            return .error(code: "restartFailed", message: "directory missing: \(d)")
         }
     }
 }

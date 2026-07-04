@@ -101,6 +101,10 @@ public final class IPCClient {
         try await expectOK(.kill(name: name, removeWorktree: removeWorktree))
     }
 
+    public func restart(name: String, dir: String? = nil) async throws {
+        try await expectOK(.restart(name: name, dir: dir))
+    }
+
     public func clearLost() async throws {
         try await expectOK(.clearLost)
     }

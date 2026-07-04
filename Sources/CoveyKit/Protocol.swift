@@ -13,6 +13,9 @@ public struct Request: Codable, Equatable {
                     terminal: Bool?, worktree: WorktreeSpec?, model: String?,
                     effort: String?, resume: String?)
         case kill(name: String, removeWorktree: Bool?)
+        // Kill the child and respawn it in place; `dir` overrides the respawn
+        // directory (return-to-root). claude resumes, other agents rerun argv.
+        case restart(name: String, dir: String?)
         case rename(name: String, newName: String)
         case attach(name: String, sinceSeq: Int?)
         case detach(name: String)

@@ -187,6 +187,34 @@ final class IPCServerTests: XCTestCase {
         server.handle(Request(id: 6, op: .kill(name: "plain", removeWorktree: nil)), from: sink)
     }
 
+    func testRestartRespawnsAndUpserts() throws {
+        let registry = SessionRegistry()
+        let server = IPCServer(registry: registry,
+                               monitor: StatusMonitor(snapshot: { registry.snapshotScreens() }))
+        let sink = FakeSink(id: 1)
+        server.register(sink)
+        _ = try registry.create(dir: "/usr", agent: "sh", argv: ["/bin/cat"], name: "r1")
+        server.handle(Request(id: 1, op: .restart(name: "r1", dir: "/tmp")), from: sink)
+        waitUntil({ sink.captured.contains {
+            if case .response(1, .ok) = $0 { return true }; return false
+        } }, "restart ok")
+        waitUntil({ sink.captured.contains {
+            if case .event(.sessionAdded(let s)) = $0 { return s.name == "r1" && s.dir == "/tmp" }
+            return false
+        } }, "upsert with the new dir")
+        XCTAssertFalse(sink.captured.contains {
+            if case .event(.exited(let n, _)) = $0 { return n == "r1" }
+            return false
+        }, "no exited during a restart")
+        server.handle(Request(id: 2, op: .restart(name: "r1", dir: "/definitely/not/here")),
+                      from: sink)
+        waitUntil({ sink.captured.contains {
+            if case .response(2, .error(let code, _)) = $0 { return code == "restartFailed" }
+            return false
+        } }, "missing dir surfaces restartFailed")
+        registry.kill(name: "r1")
+    }
+
     func testGitInfoRepoAndNonRepo() throws {
         let repo = "\(NSTemporaryDirectory())covey-ipcinfo-\(UInt32.random(in: 0..<UInt32.max))"
         try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)

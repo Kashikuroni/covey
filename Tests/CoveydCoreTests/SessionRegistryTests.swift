@@ -128,6 +128,90 @@ final class SessionRegistryTests: XCTestCase {
         reg.kill(name: "scr")
     }
 
+    func testRestartRespawnsSameEntry() throws {
+        let reg = SessionRegistry()
+        let restarted = expectation(description: "restarted")
+        var updated: Session?
+        reg.onRestarted = { s in updated = s; restarted.fulfill() }
+        reg.onExit = { _, _ in XCTFail("restart must not emit exit") }
+        reg.onSessionRemoved = { _ in XCTFail("restart must not remove") }
+        _ = try reg.create(dir: "/usr", agent: "sh", argv: ["/bin/cat"], name: "r1")
+        try reg.restart(name: "r1")
+        wait(for: [restarted], timeout: 5)
+        XCTAssertEqual(updated?.name, "r1")
+        XCTAssertEqual(updated?.dir, "/usr", "no override: same dir")
+        XCTAssertEqual(reg.list().map(\.name), ["r1"], "entry survived the restart")
+        reg.onExit = nil; reg.onSessionRemoved = nil
+        reg.kill(name: "r1")
+    }
+
+    func testRestartDirOverride() throws {
+        let reg = SessionRegistry()
+        let restarted = expectation(description: "restarted")
+        var updated: Session?
+        reg.onRestarted = { s in updated = s; restarted.fulfill() }
+        _ = try reg.create(dir: "/usr", agent: "sh", argv: ["/bin/cat"], name: "r2")
+        try reg.restart(name: "r2", dir: "/tmp")
+        wait(for: [restarted], timeout: 5)
+        XCTAssertEqual(updated?.dir, "/tmp", "return-to-root respawns in the override dir")
+        reg.kill(name: "r2")
+    }
+
+    func testRestartMissingDirThrows() throws {
+        let reg = SessionRegistry()
+        _ = try reg.create(dir: "/usr", agent: "sh", argv: ["/bin/cat"], name: "r3")
+        XCTAssertThrowsError(try reg.restart(name: "r3", dir: "/definitely/not/here")) {
+            XCTAssertEqual($0 as? RegistryError, .dirMissing("/definitely/not/here"))
+        }
+        XCTAssertThrowsError(try reg.restart(name: "ghost")) {
+            XCTAssertEqual($0 as? RegistryError, .notFound("ghost"))
+        }
+        reg.kill(name: "r3")
+    }
+
+    func testRestartClaudeUsesResumeArgv() throws {
+        // A claude session (resumeCmd set) respawns through the resume command
+        // with the 15.1 fallback wrapper — visible in the persisted argv.
+        // Capture the meta the moment it carries the respawn argv: the
+        // respawned sh may exit (claude absent) and persist again before the
+        // assertion runs.
+        var claudeMeta: SessionMeta?
+        let reg = SessionRegistry(onPersist: { metas in
+            if let m = metas.first(where: { $0.name == "cl" }), m.argv.first == "/bin/sh" {
+                claudeMeta = m
+            }
+        })
+        let restarted = expectation(description: "restarted")
+        reg.onRestarted = { _ in restarted.fulfill() }
+        _ = try reg.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"],
+                           name: "cl", resumeCmd: "claude --resume 12345678-1234-1234-1234-123456789abc")
+        try reg.restart(name: "cl")
+        wait(for: [restarted], timeout: 5)
+        XCTAssertEqual(claudeMeta?.argv.first, "/bin/sh")
+        XCTAssertTrue(claudeMeta?.argv.last?.contains("--resume 12345678") == true,
+                      "\(claudeMeta?.argv ?? [])")
+        XCTAssertTrue(claudeMeta?.argv.last?.contains("|| ") == true, "fallback wrapper present")
+        reg.kill(name: "cl")
+    }
+
+    func testExitRefreshesResumeCmdFromOutput() throws {
+        // claude prints its resume hint on exit; the registry re-reads it so
+        // recents (and the next restart) carry the post-/clear uuid.
+        let reg = SessionRegistry()
+        let exited = expectation(description: "exited")
+        var upserted: Session?
+        reg.onSessionAdded = { s in
+            if s.resumeCmd != "claude --resume old" { upserted = s }
+        }
+        reg.onExit = { _, _ in exited.fulfill() }
+        let hint = "claude --resume 12345678-1234-1234-1234-123456789abc"
+        _ = try reg.create(dir: "/tmp", agent: "claude",
+                           argv: ["/bin/sh", "-c", "echo '\(hint)'"],
+                           name: "cl2", resumeCmd: "claude --resume old")
+        wait(for: [exited], timeout: 5)
+        XCTAssertEqual(upserted?.resumeCmd, hint, "fresh hint upserted before exited")
+    }
+
     func testAutoNamesHaveNoGaps() throws {
         let reg = SessionRegistry()
         let a = try reg.create(dir: "/tmp", agent: "sh", argv: ["/bin/cat"])

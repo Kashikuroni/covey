@@ -17,8 +17,13 @@ public struct RecentSession: Codable, Equatable {
     public var dir: String
     public var agent: String
     public var resumeCmd: String?
-    public init(name: String, dir: String, agent: String, resumeCmd: String? = nil) {
-        self.name = name; self.dir = dir; self.agent = agent; self.resumeCmd = resumeCmd
+    /// Epoch seconds when the session stopped; optional so payloads written
+    /// before the field existed keep decoding.
+    public var stoppedAt: Int64?
+    public init(name: String, dir: String, agent: String,
+                resumeCmd: String? = nil, stoppedAt: Int64? = nil) {
+        self.name = name; self.dir = dir; self.agent = agent
+        self.resumeCmd = resumeCmd; self.stoppedAt = stoppedAt
     }
 }
 
@@ -31,6 +36,15 @@ public func pushRecent(_ recents: inout [RecentSession], _ entry: RecentSession)
     recents.removeAll { $0.name == entry.name }
     recents.insert(entry, at: 0)
     if recents.count > maxRecents { recents.removeLast(recents.count - maxRecents) }
+}
+
+/// Compact age string (port of timeutil.rs humanize_age): 42s, 5m, 3h, 2d.
+public func humanizeAge(_ secs: Int64) -> String {
+    let s = max(0, secs)
+    if s < 60 { return "\(s)s" }
+    if s < 3600 { return "\(s / 60)m" }
+    if s < 86_400 { return "\(s / 3600)h" }
+    return "\(s / 86_400)d"
 }
 
 /// Persisted UI state (`~/.covey/state.json`). Owned by the GUI. Optional scalars

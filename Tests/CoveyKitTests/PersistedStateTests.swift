@@ -32,6 +32,30 @@ final class PersistedStateTests: XCTestCase {
         XCTAssertEqual(r.first?.dir, "/w2")          // newest payload wins
     }
 
+    func testHumanizeAge() {
+        XCTAssertEqual(humanizeAge(0), "0s")
+        XCTAssertEqual(humanizeAge(59), "59s")
+        XCTAssertEqual(humanizeAge(60), "1m")
+        XCTAssertEqual(humanizeAge(3599), "59m")
+        XCTAssertEqual(humanizeAge(3600), "1h")
+        XCTAssertEqual(humanizeAge(86_399), "23h")
+        XCTAssertEqual(humanizeAge(86_400), "1d")
+        XCTAssertEqual(humanizeAge(-5), "0s", "clock skew clamps to zero")
+    }
+
+    func testRecentSessionStoppedAtRoundTripsAndOldPayloadDecodes() throws {
+        let r = RecentSession(name: "a", dir: "/d", agent: "claude",
+                              resumeCmd: "claude --resume u", stoppedAt: 1_700_000_000)
+        let data = try JSONEncoder().encode(r)
+        let back = try JSONDecoder().decode(RecentSession.self, from: data)
+        XCTAssertEqual(back, r)
+        // Payload written before the field existed decodes with stoppedAt nil.
+        let old = #"{"name":"b","dir":"/d","agent":"sh"}"#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(RecentSession.self, from: old)
+        XCTAssertNil(decoded.stoppedAt)
+        XCTAssertNil(decoded.resumeCmd)
+    }
+
     func testPushRecentTruncatesToMax() {
         var r: [RecentSession] = []
         for i in 0..<(maxRecents + 5) {

@@ -4,6 +4,7 @@ import CoveyKit
 public enum RegistryError: Error, Equatable {
     case duplicateName(String)
     case notFound(String)
+    case dirMissing(String)
 }
 
 /// In-memory registry of live sessions: name -> (Session, PTYProcess).
@@ -13,7 +14,13 @@ public final class SessionRegistry {
     public var onExit: ((String, Int32) -> Void)?
     public var onSessionAdded: ((Session) -> Void)?
     public var onSessionRemoved: ((String) -> Void)?
-    private var entries: [String: (session: Session, process: PTYProcess, screen: ScreenModel, argv: [String])] = [:]
+    /// Fired when a pending restart respawned the session in place (the entry,
+    /// name and screen survive; no exited/sessionRemoved accompany it).
+    public var onRestarted: ((Session) -> Void)?
+    private var entries: [String: (session: Session, process: PTYProcess,
+                                   screen: ScreenModel, argv: [String],
+                                   size: (cols: UInt16, rows: UInt16))] = [:]
+    private var pendingRestart: [String: String] = [:]   // name -> respawn dir
     private let lock = NSLock()
     private let clock: () -> Int64
     private var counter = 0
@@ -103,7 +110,7 @@ public final class SessionRegistry {
             throw error
         }
         if let autoNumber { counter = autoNumber }
-        entries[id] = (session, proc, screen, argv)
+        entries[id] = (session, proc, screen, argv, (80, 24))
         lock.unlock()
         persistNow()
         onSessionAdded?(session)
@@ -112,6 +119,28 @@ public final class SessionRegistry {
     
     public func kill(name: String) {
         withEntry(name)?.process.kill()
+    }
+
+    /// Kills the session's child and respawns it in place once it exits:
+    /// claude resumes its conversation, anything else reruns its argv. `dir`
+    /// overrides the respawn directory (return-to-root). The entry, screen and
+    /// name survive; no exited/sessionRemoved events fire.
+    public func restart(name: String, dir: String? = nil) throws {
+        lock.lock()
+        guard let entry = entries[name] else {
+            lock.unlock(); throw RegistryError.notFound(name)
+        }
+        let target = dir ?? entry.session.dir
+        lock.unlock()
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: target, isDirectory: &isDir),
+              isDir.boolValue else {
+            throw RegistryError.dirMissing(target)
+        }
+        lock.lock()
+        pendingRestart[name] = target
+        lock.unlock()
+        kill(name: name)
     }
 
     /// Updates a live session's cached git info (transient; not persisted).
@@ -171,6 +200,9 @@ public final class SessionRegistry {
         guard let entry = withEntry(name) else { return }
         entry.process.resize(cols: cols, rows: rows)
         entry.screen.resize(cols: Int(cols), rows: Int(rows))
+        lock.lock()
+        entries[name]?.size = (cols, rows)
+        lock.unlock()
     }
     
     public func rename(name: String, newName: String) throws {
@@ -204,15 +236,77 @@ public final class SessionRegistry {
 
     private func handleExit(_ proc: PTYProcess, _ code: Int32) {
         lock.lock()
-        let id = entries.first { $0.value.process === proc }?.key
-        if let id { entries[id] = nil }
-        let removal = id.flatMap { pendingWorktreeRemoval.removeValue(forKey: $0) }
+        guard let id = entries.first(where: { $0.value.process === proc })?.key,
+              let entry = entries[id] else {
+            lock.unlock()
+            return
+        }
+        let restartDir = pendingRestart.removeValue(forKey: id)
+        lock.unlock()
+
+        // A dying claude prints its resume hint; re-read it so the stored
+        // command survives /clear having rotated the conversation id.
+        var freshResume: String?
+        if entry.session.resumeCmd != nil {
+            let tail = String(decoding: proc.scrollbackTail(4096), as: UTF8.self)
+            freshResume = parseResumeCommand(tail)
+        }
+
+        if let restartDir,
+           let respawned = respawn(id: id, dir: restartDir, resume: freshResume) {
+            persistNow()
+            onRestarted?(respawned)
+            return
+        }
+        // No pending restart — or the respawn failed: normal exit path.
+
+        lock.lock()
+        var updated: Session?
+        if let fresh = freshResume, fresh != entries[id]?.session.resumeCmd {
+            entries[id]?.session.resumeCmd = fresh
+            updated = entries[id]?.session
+        }
+        entries[id] = nil
+        let removal = pendingWorktreeRemoval.removeValue(forKey: id)
         lock.unlock()
         persistNow()
+        if let updated { onSessionAdded?(updated) }   // recents read the client cache
         if let removal {
             try? GitOps.removeWorktree(repo: removal.repo, wtPath: removal.path)
         }
-        if let id { onExit?(id, code) }
+        onExit?(id, code)
+    }
+
+    /// Respawns a pending-restart session in `dir`. Returns the updated
+    /// session, or nil when the spawn failed (caller falls through to the
+    /// normal exit path). Command resolution shells out — never under the lock.
+    private func respawn(id: String, dir: String, resume: String?) -> Session? {
+        lock.lock()
+        guard let old = entries[id] else { lock.unlock(); return nil }
+        lock.unlock()
+
+        var session = old.session
+        if let resume { session.resumeCmd = resume }
+        let argv = session.resumeCmd.map { CreateService.resumeArgv($0) } ?? old.argv
+        let proc = PTYProcess()
+        proc.setExitHandler { [weak self, weak proc] code in
+            guard let proc else { return }
+            self?.handleExit(proc, code)
+        }
+        let screen = old.screen
+        proc.setOutputHandler { bytes, _ in screen.feed(bytes) }
+        do {
+            try proc.spawn(argv: argv, cwd: dir, cols: old.size.cols, rows: old.size.rows)
+        } catch {
+            return nil
+        }
+        session.dir = dir
+        session.cwd = dir
+        session.git = nil        // GitMonitor re-reads for the (possibly new) dir
+        lock.lock()
+        entries[id] = (session, proc, screen, argv, old.size)
+        lock.unlock()
+        return session
     }
 
 }

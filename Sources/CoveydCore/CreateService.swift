@@ -86,6 +86,12 @@ public enum CreateService {
                         worktreeRepo: repo, resumeCmd: resumeCmd)
     }
 
+    /// The argv a claude restart runs: the (fresh) resume command hardened by
+    /// resumeLaunchCommand, first word resolved like any create.
+    public static func resumeArgv(_ resumeCmd: String) -> [String] {
+        ["/bin/sh", "-c", resolveCommand(resumeLaunchCommand(resumeCmd))]
+    }
+
     private static func resolveCommand(_ command: String) -> String {
         guard let bin = command.split(separator: " ").first.map(String.init),
               !bin.contains("/"),
