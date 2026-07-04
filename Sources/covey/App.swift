@@ -38,6 +38,11 @@ struct CoveyApp: App {
                 // Start with vim-list focus: no control (filter field, buttons)
                 // grabs the keyboard, so j/k work immediately.
                 window?.makeFirstResponder(nil)
+                // Content under the (invisible) title bar so the topbar row
+                // sits at traffic-light level, not below it.
+                window?.titleVisibility = .hidden
+                window?.titlebarAppearsTransparent = true
+                window?.styleMask.insert(.fullSizeContentView)
             }
             .task {
                 guard model == nil else { return }

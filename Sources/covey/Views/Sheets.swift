@@ -12,6 +12,75 @@ extension AppModel.Modal: Identifiable {
         case .promote(let name): return "promote-\(name)"
         case .deleteBranch(let name): return "delete-branch-\(name)"
         case .cleanup(let dir): return "cleanup-\(dir)"
+        case .restart(let name): return "restart-\(name)"
+        case .restartAll: return "restart-all"
+        }
+    }
+}
+
+struct RestartSheet: View {
+    let model: AppModel
+    let name: String
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Restart \"\(name)\"?").font(.headline)
+            Text("claude resumes the conversation; other agents relaunch fresh.")
+                .font(.caption).foregroundStyle(.secondary)
+            if let error {
+                Text("! \(error)").font(.caption).foregroundStyle(.red)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { model.modal = nil }
+                Button("Restart") {
+                    Task {
+                        if let err = await model.restart(name) { error = err }
+                        else { model.modal = nil }
+                    }
+                }
+                .buttonStyle(.glassProminent)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 360)
+    }
+}
+
+struct RestartAllSheet: View {
+    let model: AppModel
+    @State private var confirmation = ""
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Restart all claude sessions?").font(.headline)
+            Text("Each claude session exits and resumes its conversation. Type yes to confirm.")
+                .font(.caption).foregroundStyle(.secondary)
+            TextField("yes", text: $confirmation)
+                .onSubmit { if confirmsRestart(confirmation) { run() } }
+            if let error {
+                Text("! \(error)").font(.caption).foregroundStyle(.red)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { model.modal = nil }
+                Button("Restart all") { run() }
+                    .buttonStyle(.glassProminent)
+                    .disabled(!confirmsRestart(confirmation))
+            }
+        }
+        .padding(20)
+        .frame(width: 380)
+    }
+
+    private func run() {
+        Task {
+            let errors = await model.restartAllClaude()
+            if errors.isEmpty { model.modal = nil }
+            else { error = errors.joined(separator: " · ") }
         }
     }
 }
@@ -40,7 +109,9 @@ struct PromoteSheet: View {
                 Text("y promote · n cancel").font(.caption2).foregroundStyle(.tertiary)
                 Spacer()
                 Button("Cancel") { model.modal = nil }
-                Button("Promote") { confirm() }.keyboardShortcut(.defaultAction)
+                Button("Promote") { confirm() }
+                    .buttonStyle(.glassProminent)
+                    .keyboardShortcut(.defaultAction)
             }
         }
         .padding(20)
@@ -84,6 +155,7 @@ struct DeleteBranchSheet: View {
                 Spacer()
                 Button("Cancel") { model.modal = nil }
                 Button("Delete", role: .destructive) { confirm() }
+                    .buttonStyle(.glassProminent)
                     .keyboardShortcut(.defaultAction)
             }
         }
@@ -152,6 +224,7 @@ struct CleanupSheet: View {
                 Spacer()
                 Button("Cancel") { model.modal = nil }
                 Button("Delete selected") { confirm() }
+                    .buttonStyle(.glassProminent)
                     .disabled(selected.isEmpty)
             }
         }
@@ -226,6 +299,7 @@ struct RenameProjectSheet: View {
                     model.setProjectName(dir: dir, name: name)
                     model.modal = nil
                 }
+                .buttonStyle(.glassProminent)
                 .keyboardShortcut(.defaultAction)
             }
         }
@@ -256,6 +330,7 @@ struct KillSheet: View {
                         model.modal = nil
                     }
                 }
+                .buttonStyle(.glassProminent)
                 .keyboardShortcut(.defaultAction)
             }
         }
@@ -283,6 +358,7 @@ struct RenameSheet: View {
                         model.modal = nil
                     }
                 }
+                .buttonStyle(.glassProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(newName.isEmpty)
             }

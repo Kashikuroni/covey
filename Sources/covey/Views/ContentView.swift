@@ -4,12 +4,27 @@ struct ContentView: View {
     @Bindable var model: AppModel
     @State private var keyMonitor: Any?
 
+    private var tokens: Tokens { Tokens(Theme(raw: model.themeRaw)) }
+
     var body: some View {
         VStack(spacing: 0) {
-            if model.showHeader { TopBar(model: model); Divider() }
+            if model.showHeader {
+                TopBar(model: model)
+                tokens.bd.frame(height: 1)
+            }
             workspace
-            if model.showFooter { Divider(); StatusBar(model: model) }
+            if model.showFooter {
+                tokens.bd.frame(height: 1)
+                StatusBar(model: model)
+            }
         }
+        .background(tokens.bg)
+        // The window uses fullSizeContentView: pull the topbar up into the
+        // (transparent) title-bar zone so it shares the traffic-light row.
+        .ignoresSafeArea(.container, edges: .top)
+        // No system (blue) focus rings anywhere; the caret and our own field
+        // styling carry focus. Inherited by every input in the hierarchy.
+        .focusEffectDisabled()
         .preferredColorScheme(model.themeRaw == "light" ? .light : .dark)
         .tint(Tokens(Theme(raw: model.themeRaw)).accent)
         .sheet(item: $model.modal) { modal in

@@ -18,21 +18,26 @@ struct SessionListView: View {
     private var activeList: some View {
         let groups = model.orderedSessions()
         let filtering = !model.filter.isEmpty
-        // Card numbers match selectByNumber: position in the flat visible order.
-        let numbers = Dictionary(uniqueKeysWithValues:
-            model.visibleSessionNames().enumerated().map { ($1, $0 + 1) })
-        return List(selection: selectionBinding) {
+        // No List(selection:): the system paints its own (blue) selection
+        // under the card — the card renders selection itself, clicks select.
+        return List {
             ForEach(groups, id: \.dir) { group in
                 let rows = group.sessions.filter { fuzzyMatch(model.filter, $0.name) }
                 if !rows.isEmpty {
                     Section {
                         ForEach(rows, id: \.name) { session in
-                            card(session, number: numbers[session.name] ?? 0)
-                                .tag(session.name)
+                            card(session)
+                                .onTapGesture { Task { await model.select(session.name) } }
                                 .listRowBackground(Color.clear)
                                 .listRowSeparator(.hidden)
-                                .listRowInsets(EdgeInsets(top: 2.5, leading: 8,
-                                                          bottom: 2.5, trailing: 8))
+                                // The List's private table pads rows by a
+                                // fixed 8pt per side that no SwiftUI
+                                // modifier removes (probed on macOS 26).
+                                // Make 8pt the uniform gap instead:
+                                // horizontal 0 (table's own 8), vertical
+                                // 4 + 4 between cards.
+                                .listRowInsets(EdgeInsets(top: 4, leading: 0,
+                                                          bottom: 4, trailing: 0))
                                 .contextMenu {
                                     Button("Rename…") { model.modal = .rename(session.name) }
                                     Button("Kill…", role: .destructive) { model.modal = .kill(session.name) }
@@ -44,7 +49,9 @@ struct SessionListView: View {
                         }
                     } header: {
                         projectHeader(group: group, rows: rows)
+                            .listRowSeparator(.hidden)
                     }
+                    .listSectionSeparator(.hidden)
                 }
             }
         }
@@ -70,20 +77,12 @@ struct SessionListView: View {
         }
     }
 
-    private var selectionBinding: Binding<String?> {
-        Binding(get: { model.selected },
-                set: { name in Task { await model.select(name) } })
-    }
 
-    private func card(_ session: Session, number: Int) -> some View {
+    private func card(_ session: Session) -> some View {
         let selected = model.selected == session.name
         let status = model.statusByName[session.name] ?? .idle
         return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
-                Text(number > 0 ? "\(number)" : "")
-                    .font(mono(10)).foregroundStyle(tk.t4)
-                    .frame(width: 13, alignment: .trailing)
-                statusDot(status)
                 Text(session.name)
                     .font(mono(13, .medium))
                     .foregroundStyle(selected ? tk.t1 : (status == .waiting ? tk.wait : tk.t2))
@@ -96,6 +95,7 @@ struct SessionListView: View {
                 Spacer()
                 Text(statusLabel(status))
                     .font(mono(11)).foregroundStyle(statusLabelColor(status))
+                AgentIcon(agent: session.agent, tk: tk)
             }
             Group {
                 if isReturnable(session) {
@@ -103,11 +103,10 @@ struct SessionListView: View {
                         .font(mono(11)).foregroundStyle(tk.t4)
                 } else if let git = session.git {
                     HStack(spacing: 6) {
-                        Text(session.agent).font(mono(11)).foregroundStyle(tk.t3)
                         HStack(spacing: 3) {
                             Text(session.worktreeRepo != nil ? "⧉" : "⎇")
                                 .font(.system(size: 10)).foregroundStyle(tk.t4)
-                            Text(git.branch).font(mono(11)).foregroundStyle(tk.t3)
+                            Text(git.branch).font(mono(9)).foregroundStyle(tk.t3)
                                 .lineLimit(1)
                         }
                         Spacer()
@@ -125,11 +124,8 @@ struct SessionListView: View {
                             .font(mono(11))
                         }
                     }
-                } else {
-                    Text(session.agent).font(mono(11)).foregroundStyle(tk.t3)
                 }
             }
-            .padding(.leading, 19)
             if let options = model.promptsByName[session.name], !options.isEmpty {
                 HStack(spacing: 6) {
                     ForEach(Array(options.prefix(9).enumerated()), id: \.offset) { idx, label in
@@ -142,8 +138,7 @@ struct SessionListView: View {
                         .lineLimit(1)
                     }
                 }
-                .padding(.leading, 19)
-            }
+                }
         }
         .padding(EdgeInsets(top: 7, leading: 11, bottom: 8, trailing: 11))
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -160,22 +155,6 @@ struct SessionListView: View {
                 .padding(.vertical, 8)
         }
         .shadow(color: tk.shadowColor, radius: Tokens.shadowRadius, y: Tokens.shadowY)
-    }
-
-    private func statusDot(_ status: Status) -> some View {
-        Group {
-            switch status {
-            case .running:
-                Circle().fill(tk.run)
-                    .shadow(color: tk.run.opacity(0.55), radius: 2.5)
-            case .waiting:
-                Circle().fill(tk.wait)
-            case .idle:
-                Circle().fill(tk.idle)
-                    .overlay(Circle().strokeBorder(tk.bd2))
-            }
-        }
-        .frame(width: 6, height: 6)
     }
 
     private func statusLabel(_ status: Status) -> String {

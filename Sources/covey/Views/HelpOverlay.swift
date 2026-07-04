@@ -24,7 +24,7 @@ struct HelpOverlay: View {
         ("leader (space)", [
             ("g", "git: promote · delete branch · cleanup · return to root · issue (later)"),
             ("s", "session: rename · restart · verify (later) · nvim (later)"),
-            ("a", "app: restart all claude · usage log (later)"),
+            ("a", "app: restart all claude · theme · usage log (later)"),
         ]),
     ]
 

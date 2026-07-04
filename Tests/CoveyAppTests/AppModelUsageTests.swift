@@ -20,7 +20,7 @@ final class AppModelUsageTests: XCTestCase {
     @MainActor
     func testPollerAppliesUsageAndPlan() async throws {
         let daemon = try TestDaemon(); defer { daemon.stop() }
-        let acc = Account(usage: Usage(fiveHour: UsageWindow(utilization: 55, resetUnix: nil, resetHHMM: nil),
+        let acc = Account(usage: Usage(fiveHour: UsageWindow(utilization: 55, resetUnix: nil),
                                        sevenDay: nil, sevenDaySonnet: nil),
                           plan: "Max 5×", usageError: nil)
         let model = try makeUsageModel(daemon, fetch: { acc })

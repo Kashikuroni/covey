@@ -14,8 +14,8 @@ struct WhichKeyView: View {
     private var rows: [Row] {
         switch menu {
         case .root: return [
-            Row(key: "g", label: "git — issue · promote · delete branch · cleanup", implemented: true),
-            Row(key: "s", label: "session — rename · verify · nvim", implemented: true),
+            Row(key: "g", label: "git — issue · promote · delete branch · cleanup · return", implemented: true),
+            Row(key: "s", label: "session — rename · restart · verify · nvim", implemented: true),
             Row(key: "a", label: "app — usage log · restart claude", implemented: true),
         ]
         case .git: return [
@@ -23,17 +23,20 @@ struct WhichKeyView: View {
             Row(key: "p", label: "promote worktree to root", implemented: true),
             Row(key: "b", label: "delete session branch", implemented: true),
             Row(key: "c", label: "cleanup merged branches", implemented: true),
+            Row(key: "r", label: "return to repo root", implemented: true),
         ]
         case .session: return [
             Row(key: "r", label: "rename session", implemented: true),
             Row(key: "R", label: "rename project (later)", implemented: false),
+            Row(key: "u", label: "restart session", implemented: true),
             Row(key: "v", label: "verify / cancel (later)", implemented: false),
             Row(key: "V", label: "verification details (later)", implemented: false),
             Row(key: "e", label: "nvim in agent dir (later)", implemented: false),
         ]
         case .app: return [
             Row(key: "l", label: "usage log (later)", implemented: false),
-            Row(key: "u", label: "restart all claude sessions (later)", implemented: false),
+            Row(key: "u", label: "restart all claude sessions", implemented: true),
+            Row(key: "t", label: "toggle dark / light theme", implemented: true),
         ]
         }
     }
@@ -54,7 +57,7 @@ struct WhichKeyView: View {
                 .font(.caption2).foregroundStyle(.tertiary)
         }
         .padding(12)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .glassEffect(.regular, in: .rect(cornerRadius: 8))
         .shadow(radius: 8)
     }
 

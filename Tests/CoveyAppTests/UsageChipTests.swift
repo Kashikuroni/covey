@@ -2,20 +2,46 @@ import XCTest
 @testable import covey
 
 final class UsageChipTests: XCTestCase {
-    func testWindowLabelRoundsPercent() {
-        let w = UsageWindow(utilization: 76.6, resetUnix: nil, resetHHMM: nil)
-        XCTAssertEqual(windowLabel("5h", w), "5h 77%")
+    private let now = Date(timeIntervalSince1970: 1_750_000_000)
+
+    private func label(afterSeconds secs: Int64) -> String {
+        remainingLabel(resetUnix: 1_750_000_000 + secs, now: now)
     }
 
-    func testWindowLabelIncludesResetWhenPresent() {
-        let w = UsageWindow(utilization: 40, resetUnix: nil, resetHHMM: "10:40")
-        XCTAssertEqual(windowLabel("7d", w), "7d 40% · 10:40")
+    func testRemainingLabelExpired() {
+        XCTAssertEqual(label(afterSeconds: 0), "0m")
+        XCTAssertEqual(label(afterSeconds: -3600), "0m")
     }
 
-    func testIsClaudeAgent() {
-        XCTAssertTrue(isClaudeAgent("claude"))
-        XCTAssertTrue(isClaudeAgent("/usr/local/bin/Claude"))
-        XCTAssertFalse(isClaudeAgent("sh"))
-        XCTAssertFalse(isClaudeAgent("/bin/cat"))
+    func testRemainingLabelMinutes() {
+        XCTAssertEqual(label(afterSeconds: 60), "1m")
+        XCTAssertEqual(label(afterSeconds: 37 * 60), "37m")
+        XCTAssertEqual(label(afterSeconds: 59 * 60), "59m")
+    }
+
+    func testRemainingLabelHours() {
+        XCTAssertEqual(label(afterSeconds: 3600), "1h")
+        XCTAssertEqual(label(afterSeconds: (2 * 60 + 13) * 60), "2h13m")
+        XCTAssertEqual(label(afterSeconds: (23 * 60 + 59) * 60), "23h59m")
+    }
+
+    func testRemainingLabelDays() {
+        XCTAssertEqual(label(afterSeconds: 24 * 3600), "1d")
+        XCTAssertEqual(label(afterSeconds: (3 * 24 + 4) * 3600), "3d4h")
+    }
+
+    func testRemainingLabelCeilsPartialMinutes() {
+        // 61s is "2 minutes to go" — never show less time than remains.
+        XCTAssertEqual(label(afterSeconds: 61), "2m")
+    }
+
+    func testUsageLevelThresholds() {
+        // amux CLI thresholds: <50 ok, 50–79 warn, ≥80 err.
+        XCTAssertEqual(usageLevel(0), .ok)
+        XCTAssertEqual(usageLevel(49), .ok)
+        XCTAssertEqual(usageLevel(50), .warn)
+        XCTAssertEqual(usageLevel(79), .warn)
+        XCTAssertEqual(usageLevel(80), .err)
+        XCTAssertEqual(usageLevel(100), .err)
     }
 }

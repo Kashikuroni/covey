@@ -561,6 +561,9 @@ public final class AppModel {
         case .restartAllPrompt:
             inputMode = .normal
             modal = .restartAll
+        case .toggleTheme:
+            inputMode = .normal
+            setTheme(themeRaw == "dark" ? "light" : "dark")
         case .returnToRoot:
             inputMode = .normal
             guard let s = selectedSession() else { return }

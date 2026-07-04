@@ -47,4 +47,16 @@ final class UsageParseTests: XCTestCase {
         XCTAssertEqual(parseISO8601("2026-06-02T10:40:01Z"), expected)
         XCTAssertNil(parseISO8601("nonsense"))
     }
+
+    func testParseISO8601FractionalSeconds() {
+        // The live API sends microseconds + offset:
+        // "2026-07-04T03:49:59.580980+00:00". The fraction is irrelevant
+        // for a minutes-scale countdown — it must still parse.
+        var c = DateComponents()
+        c.year = 2026; c.month = 7; c.day = 4; c.hour = 3; c.minute = 49; c.second = 59
+        c.timeZone = TimeZone(identifier: "UTC")
+        let expected = Int64(Calendar(identifier: .gregorian).date(from: c)!.timeIntervalSince1970)
+        XCTAssertEqual(parseISO8601("2026-07-04T03:49:59.580980+00:00"), expected)
+        XCTAssertEqual(parseISO8601("2026-07-04T03:49:59.123Z"), expected)
+    }
 }

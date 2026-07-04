@@ -62,6 +62,7 @@ enum KeyAction: Equatable {
     case restartSelected
     case restartAllPrompt
     case returnToRoot
+    case toggleTheme
 }
 
 /// Map a Cyrillic char to the Latin key at the same physical QWERTY position;
@@ -203,6 +204,7 @@ enum KeyRouter {
         case (.git, "r"): return .returnToRoot
         case (.session, "u"): return .restartSelected
         case (.app, "u"): return .restartAllPrompt
+        case (.app, "t"): return .toggleTheme
         case (.session, "r"): return .renameSelected
         case (.session, "R"): return .renameProject
         // Every other command in the tree is a later slice; like the TUI,

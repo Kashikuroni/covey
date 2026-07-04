@@ -3,7 +3,6 @@ import Foundation
 public struct UsageWindow: Equatable {
     public var utilization: Double     // 0–100
     public var resetUnix: Int64?       // reset instant, from `resets_at`
-    public var resetHHMM: String?      // local HH:mm, filled by fetchAccount
 }
 
 public struct Usage: Equatable {
@@ -22,8 +21,8 @@ public struct Account: Equatable {
     }
 }
 
-/// Parses the `/api/oauth/usage` body. `resetHHMM` is NOT formatted here (see
-/// fetchAccount). Returns nil if unusable or all windows are null.
+/// Parses the `/api/oauth/usage` body. Returns nil if unusable or all
+/// windows are null.
 func parseUsage(_ body: Data) -> Usage? {
     guard let root = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
         return nil
@@ -32,7 +31,7 @@ func parseUsage(_ body: Data) -> Usage? {
         guard let w = root[key] as? [String: Any],
               let util = w["utilization"] as? Double else { return nil }
         let resetUnix = (w["resets_at"] as? String).flatMap(parseISO8601)
-        return UsageWindow(utilization: util, resetUnix: resetUnix, resetHHMM: nil)
+        return UsageWindow(utilization: util, resetUnix: resetUnix)
     }
     let usage = Usage(fiveHour: window("five_hour"),
                       sevenDay: window("seven_day"),
@@ -67,9 +66,13 @@ func planLabel(_ tier: String) -> String {
 }
 
 /// ISO8601 (e.g. "2026-06-02T10:40:01Z") -> Unix seconds, or nil.
+/// The live API appends microseconds ("…T03:49:59.580980+00:00");
+/// ISO8601DateFormatter's `.withFractionalSeconds` only takes exactly three
+/// digits, so the fraction is stripped instead — seconds are enough here.
 func parseISO8601(_ s: String) -> Int64? {
+    let trimmed = s.replacingOccurrences(of: #"\.\d+"#, with: "", options: .regularExpression)
     let f = ISO8601DateFormatter()
     f.formatOptions = [.withInternetDateTime]
-    guard let date = f.date(from: s) else { return nil }
+    guard let date = f.date(from: trimmed) else { return nil }
     return Int64(date.timeIntervalSince1970)
 }

@@ -4,6 +4,8 @@ import CoveyKit
 struct TerminalPaneView: View {
     let model: AppModel
 
+    private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
+
     var body: some View {
         VStack(spacing: 0) {
             if let name = model.selected,
@@ -25,8 +27,8 @@ struct TerminalPaneView: View {
             Text(session.name).fontWeight(.semibold)
             Text(session.dir).foregroundStyle(.secondary).lineLimit(1)
             Spacer()
-            if isClaudeAgent(session.agent) {
-                UsageChip(usage: model.usage, plan: model.plan, error: model.usageError)
+            if agentKind(session.agent) == .claude {
+                UsageChip(usage: model.usage, plan: model.plan, error: model.usageError, tk: tk)
             }
             Text(session.agent).foregroundStyle(.secondary).font(.caption)
         }

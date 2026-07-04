@@ -10,8 +10,7 @@ enum UsageService {
         var acc = Account()
         switch await oauthGet("/api/oauth/usage") {
         case .success(let body):
-            if var usage = parseUsage(body) {
-                fillResetTimes(&usage)
+            if let usage = parseUsage(body) {
                 acc.usage = usage
             } else {
                 acc.usageError = "parse"
@@ -41,17 +40,5 @@ enum UsageService {
         } catch {
             return .failure(UsageFailure(code: "net"))
         }
-    }
-
-    /// Format each window's `resetUnix` into a local HH:mm string.
-    private static func fillResetTimes(_ usage: inout Usage) {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        func fmt(_ w: inout UsageWindow?) {
-            guard var win = w, let unix = win.resetUnix else { return }
-            win.resetHHMM = f.string(from: Date(timeIntervalSince1970: TimeInterval(unix)))
-            w = win
-        }
-        fmt(&usage.fiveHour); fmt(&usage.sevenDay); fmt(&usage.sevenDaySonnet)
     }
 }
