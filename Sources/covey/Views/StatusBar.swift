@@ -2,10 +2,17 @@ import SwiftUI
 
 struct StatusBar: View {
     let model: AppModel
+    @FocusState private var filterFocused: Bool
+
+    private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
 
     var body: some View {
         HStack(spacing: 12) {
-            Text(hints).foregroundStyle(.secondary).font(.caption)
+            if model.filterActive {
+                filterRow
+            } else {
+                Text(hints).foregroundStyle(.secondary).font(.caption)
+            }
             Spacer()
             if model.vimMode {
                 Text(modeLabel).font(.caption).fontWeight(.semibold)
@@ -18,6 +25,35 @@ struct StatusBar: View {
                 .foregroundStyle(.secondary).font(.caption)
         }
         .padding(.horizontal, 12).padding(.vertical, 4)
+    }
+
+    private var filterRow: some View {
+        HStack(spacing: 6) {
+            Text("/").font(.caption.monospaced()).foregroundStyle(tk.accent)
+            TextField("filter", text: Binding(
+                get: { model.filter }, set: { model.setFilter($0) }))
+                .textFieldStyle(.roundedBorder)
+                .controlSize(.small)
+                .frame(width: 180)
+                .focused($filterFocused)
+                .onAppear { filterFocused = true }
+                .onExitCommand { model.filterEscape() }
+                .onSubmit { model.filterCommit() }
+                .onKeyPress(.downArrow) { model.apply(.selectNext); return .handled }
+                .onKeyPress(.upArrow) { model.apply(.selectPrev); return .handled }
+                .onKeyPress(phases: .down) { press in
+                    // ⌃j/⌃k walk the filtered list; plain letters type into
+                    // the field (so names containing j/k stay findable).
+                    guard press.modifiers.contains(.control) else { return .ignored }
+                    switch press.key {
+                    case "j": model.apply(.selectNext); return .handled
+                    case "k": model.apply(.selectPrev); return .handled
+                    default: return .ignored
+                    }
+                }
+            Text("\(model.visibleSessionNames().count)/\(model.sessions.count)")
+                .font(.caption.monospaced()).foregroundStyle(tk.t4)
+        }
     }
 
     private var hints: String {
