@@ -55,13 +55,16 @@ struct CoveyApp: App {
                 }
             }
         }
+        // Content under the title bar: the topbar row sits at traffic-light
+        // level (TopBar pads left for the buttons), and the toolbar is gone.
+        .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("New Session") { model?.modal = .newSession }
                     .keyboardShortcut("n", modifiers: .command)
             }
             CommandGroup(after: .textEditing) {
-                Button("Filter Sessions") { model?.requestFilterFocus() }
+                Button("Filter Sessions") { model?.apply(.startFilter) }
                     .keyboardShortcut("f", modifiers: .command)
             }
             CommandMenu("Session") {
