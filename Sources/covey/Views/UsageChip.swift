@@ -40,7 +40,7 @@ struct UsageChip: View {
                     if let w = usage.fiveHour { pill("5h", w, now: ctx.date) }
                     if let w = usage.sevenDay { pill("7d", w, now: ctx.date) }
                     if let w = usage.sevenDaySonnet { pill("S 7d", w, now: ctx.date) }
-                    if let plan { badge(Text(plan).foregroundStyle(.secondary)) }
+                    if let plan { badge(Text(plan)) }
                 }
                 .font(.caption)
             }
@@ -72,7 +72,10 @@ struct UsageChip: View {
     }
 
     private func badge(_ text: Text) -> some View {
+        // Muted ayu body color: plain white reads as an extra accent in the
+        // dark theme. The percentage keeps its own threshold color.
         text
+            .foregroundStyle(tk.t3)
             .padding(.horizontal, 6).padding(.vertical, 2)
             .glassEffect(.regular, in: .rect(cornerRadius: 4))
     }

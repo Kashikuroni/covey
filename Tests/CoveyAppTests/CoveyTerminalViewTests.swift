@@ -104,7 +104,7 @@ final class CoveyTerminalViewTests: XCTestCase {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
         await model.start()
-        let coordinator = TerminalRepresentable.Coordinator(model: model)
+        let coordinator = TerminalRepresentable.Coordinator(model: model, name: "s-1")
         let (view, _) = makeView()
         view.feed(text: "\u{1b}[?1049h")   // enter the alternate buffer
         model.setHistoryMode(true)          // stale badge from a prior shell scroll

@@ -8,7 +8,7 @@ enum InputMode: Equatable {
     case note
 }
 
-enum LeaderMenu: Equatable { case root, git, session, app }
+enum LeaderMenu: Equatable { case root, git, session, app, terminal }
 
 /// Non-character keys the router cares about.
 enum Special: Equatable {
@@ -63,6 +63,12 @@ enum KeyAction: Equatable {
     case restartAllPrompt
     case returnToRoot
     case toggleTheme
+    case splitVertical
+    case splitHorizontal
+    case splitClose
+    case splitFocusToggle
+    case cycleFocus(forward: Bool)
+    case openRecent
 }
 
 /// Map a Cyrillic char to the Latin key at the same physical QWERTY position;
@@ -92,6 +98,9 @@ enum KeyRouter {
 
         if context.focus == .terminal {
             if input.isControl, ch == "q" { return .exitTerminal }
+            if input.isControl, ch == "\\" { return .splitFocusToggle }
+            if input.isControl, ch == "l" { return .cycleFocus(forward: true) }
+            if input.isControl, ch == "h" { return .cycleFocus(forward: false) }
             // SwiftTerm does not map ⇧Tab; unhandled it falls through to
             // AppKit's focus traversal (insertBacktab:). Forward it to the
             // agent instead — the TUI's mode-cycle key.
@@ -149,6 +158,10 @@ enum KeyRouter {
             switch ch {
             case "k": return .scrollTerminalPage(up: true)
             case "j": return .scrollTerminalPage(up: false)
+            // ⌃h/⌃l walk the focus zones (list -> agent -> shell -> inspector).
+            case "l": return .cycleFocus(forward: true)
+            case "h": return .cycleFocus(forward: false)
+            case "\\": return .splitFocusToggle
             default: return nil
             }
         }
@@ -170,6 +183,7 @@ enum KeyRouter {
         case "o": return .enterTerminal
         case "n": return .newSession(prefillDir: false)
         case "N": return .newSession(prefillDir: true)
+        case "r": return .openRecent
         case "d": return .killSelected
         case "/": return .startFilter
         case "s": return .enterSelectMode
@@ -198,6 +212,10 @@ enum KeyRouter {
         case (.root, "g"): return .leaderDescend(.git)
         case (.root, "s"): return .leaderDescend(.session)
         case (.root, "a"): return .leaderDescend(.app)
+        case (.root, "t"): return .leaderDescend(.terminal)
+        case (.terminal, "v"): return .splitVertical
+        case (.terminal, "h"): return .splitHorizontal
+        case (.terminal, "x"): return .splitClose
         case (.git, "p"): return .promoteSelected
         case (.git, "b"): return .deleteBranchSelected
         case (.git, "c"): return .cleanupBranches

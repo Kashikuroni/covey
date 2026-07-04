@@ -12,7 +12,21 @@ struct SessionListView: View {
     }
 
     var body: some View {
-        activeList
+        VStack(spacing: 0) {
+            // Zone tab matching the terminal panes' Agent/Terminal headers.
+            HStack {
+                Text("Session")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(model.focus == .sessions ? tk.accent : tk.t4)
+                Spacer()
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(tk.surface)
+            .contentShape(Rectangle())
+            .onTapGesture { model.setFocus(.sessions) }
+            activeList
+        }
     }
 
     private var activeList: some View {

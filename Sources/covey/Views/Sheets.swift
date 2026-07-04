@@ -6,6 +6,7 @@ extension AppModel.Modal: Identifiable {
     public var id: String {
         switch self {
         case .newSession: return "new"
+        case .recent: return "recent"
         case .kill(let name): return "kill-\(name)"
         case .rename(let name): return "rename-\(name)"
         case .renameProject(let dir): return "rename-project-\(dir)"
@@ -14,6 +15,142 @@ extension AppModel.Modal: Identifiable {
         case .cleanup(let dir): return "cleanup-\(dir)"
         case .restart(let name): return "restart-\(name)"
         case .restartAll: return "restart-all"
+        }
+    }
+}
+
+/// Recently-stopped sessions: cards, `/` filter over name+dir, j/k, Enter
+/// relaunches (claude resumes its conversation via the stored resumeCmd).
+struct RecentSheet: View {
+    let model: AppModel
+    @State private var cursor = 0
+    @State private var filter = ""
+    @State private var filtering = false
+    @FocusState private var listFocused: Bool
+    @FocusState private var filterFocused: Bool
+
+    private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
+    private var items: [RecentSession] {
+        filterRecents(model.visibleRecents(), filter: filter)
+    }
+
+    var body: some View {
+        let rows = items
+        let now = Int64(Date().timeIntervalSince1970)
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Recent sessions").font(.headline)
+            if rows.isEmpty {
+                Text("no recently-stopped sessions")
+                    .font(.caption).foregroundStyle(tk.t4)
+                    .frame(maxWidth: .infinity, minHeight: 120)
+            } else {
+                VStack(spacing: 5) {
+                    ForEach(Array(rows.enumerated()), id: \.element.name) { idx, r in
+                        card(r, now: now, current: idx == cursor)
+                            .onTapGesture { relaunch(r) }
+                    }
+                }
+            }
+            if filtering {
+                HStack(spacing: 6) {
+                    Text("/").font(.caption.monospaced()).foregroundStyle(tk.accent)
+                    TextField("filter", text: $filter)
+                        .focused($filterFocused)
+                        .ayuField(tk, focused: filterFocused)
+                        .onSubmit { relaunchAtCursor() }
+                        .onExitCommand {
+                            filter = ""; filtering = false; listFocused = true
+                        }
+                }
+            } else {
+                Text("j/k move · enter restore · / filter · esc close")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+        .padding(20)
+        .frame(width: 480)
+        .focusable()
+        // Sheets live in their own window: the root focusEffectDisabled()
+        // does not reach here, so kill the blue focus ring locally.
+        .focusEffectDisabled()
+        .focused($listFocused)
+        .onAppear { listFocused = true }
+        .onKeyPress(phases: .down) { press in
+            guard !filterFocused else { return .ignored }
+            switch latinize(press.characters.first ?? " ") {
+            case "j": move(1); return .handled
+            case "k": move(-1); return .handled
+            case "/": filtering = true; filterFocused = true; return .handled
+            default: return .ignored
+            }
+        }
+        .onKeyPress(.downArrow) { move(1); return .handled }
+        .onKeyPress(.upArrow) { move(-1); return .handled }
+        .onKeyPress(.return, phases: .down) { _ in
+            guard !filterFocused else { return .ignored }   // onSubmit handles it
+            relaunchAtCursor(); return .handled
+        }
+        .onExitCommand { model.modal = nil }
+        .onChange(of: filter) { _, _ in
+            cursor = min(cursor, max(0, items.count - 1))
+        }
+    }
+
+    private func card(_ r: RecentSession, now: Int64, current: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                AgentIcon(agent: r.agent, tk: tk)
+                Text(r.name)
+                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .foregroundStyle(current ? tk.t1 : tk.t2).lineLimit(1)
+                if r.resumeCmd != nil {
+                    Text("↻").font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(tk.t4)
+                        .help("relaunch resumes the conversation")
+                }
+                Spacer()
+                if let stopped = r.stoppedAt {
+                    Text(humanizeAge(now - stopped))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(tk.t4)
+                }
+            }
+            Text(collapseHome(r.dir))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(tk.t3).lineLimit(1).truncationMode(.head)
+        }
+        .padding(EdgeInsets(top: 7, leading: 11, bottom: 8, trailing: 11))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(current ? tk.cardHover : tk.card,
+                    in: RoundedRectangle(cornerRadius: Tokens.r))
+        .overlay(
+            RoundedRectangle(cornerRadius: Tokens.r)
+                .strokeBorder(current ? tk.bd3 : tk.bd))
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 1)
+                .fill(current ? tk.t1 : .clear)
+                .frame(width: 2)
+                .padding(.vertical, 8)
+        }
+        .contentShape(Rectangle())
+    }
+
+    private func move(_ delta: Int) {
+        let count = items.count
+        guard count > 0 else { return }
+        cursor = ((cursor + delta) % count + count) % count
+    }
+
+    private func relaunchAtCursor() {
+        let rows = items
+        guard rows.indices.contains(cursor) else { return }
+        relaunch(rows[cursor])
+    }
+
+    private func relaunch(_ r: RecentSession) {
+        Task {
+            await model.relaunchRecent(r)
+            model.modal = nil
         }
     }
 }
@@ -60,6 +197,7 @@ struct RestartAllSheet: View {
             Text("Each claude session exits and resumes its conversation. Type yes to confirm.")
                 .font(.caption).foregroundStyle(.secondary)
             TextField("yes", text: $confirmation)
+                .ayuField(Tokens(Theme(raw: model.themeRaw)), focused: true)
                 .onSubmit { if confirmsRestart(confirmation) { run() } }
             if let error {
                 Text("! \(error)").font(.caption).foregroundStyle(.red)
@@ -292,6 +430,7 @@ struct RenameProjectSheet: View {
             Text("Rename project").font(.headline)
             Text(dir).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             TextField("Display name (empty resets)", text: $name)
+                .ayuField(Tokens(Theme(raw: model.themeRaw)), focused: true)
             HStack {
                 Spacer()
                 Button("Cancel") { model.modal = nil }
@@ -348,6 +487,7 @@ struct RenameSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Rename \"\(name)\"").font(.headline)
             TextField("New name", text: $newName)
+                .ayuField(Tokens(Theme(raw: model.themeRaw)), focused: true)
             HStack {
                 Spacer()
                 Button("Cancel") { model.modal = nil }

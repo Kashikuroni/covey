@@ -28,17 +28,22 @@ struct ContentView: View {
         .preferredColorScheme(model.themeRaw == "light" ? .light : .dark)
         .tint(Tokens(Theme(raw: model.themeRaw)).accent)
         .sheet(item: $model.modal) { modal in
-            switch modal {
-            case .newSession: NewSessionSheet(model: model)
-            case .kill(let name): KillSheet(model: model, name: name)
-            case .rename(let name): RenameSheet(model: model, name: name)
-            case .renameProject(let dir): RenameProjectSheet(model: model, dir: dir)
-            case .promote(let name): PromoteSheet(model: model, name: name)
-            case .deleteBranch(let name): DeleteBranchSheet(model: model, name: name)
-            case .cleanup(let dir): CleanupSheet(model: model, dir: dir)
-            case .restart(let name): RestartSheet(model: model, name: name)
-            case .restartAll: RestartAllSheet(model: model)
+            Group {
+                switch modal {
+                case .newSession: NewSessionSheet(model: model)
+                case .recent: RecentSheet(model: model)
+                case .kill(let name): KillSheet(model: model, name: name)
+                case .rename(let name): RenameSheet(model: model, name: name)
+                case .renameProject(let dir): RenameProjectSheet(model: model, dir: dir)
+                case .promote(let name): PromoteSheet(model: model, name: name)
+                case .deleteBranch(let name): DeleteBranchSheet(model: model, name: name)
+                case .cleanup(let dir): CleanupSheet(model: model, dir: dir)
+                case .restart(let name): RestartSheet(model: model, name: name)
+                case .restartAll: RestartAllSheet(model: model)
+                }
             }
+            // Sheets default to the system gray material — paint them ayu.
+            .presentationBackground(tokens.surface)
         }
         .overlay(alignment: .bottom) { toastBar }
         .overlay(alignment: .bottom) {

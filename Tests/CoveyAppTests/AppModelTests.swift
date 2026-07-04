@@ -50,6 +50,22 @@ final class AppModelTests: XCTestCase {
     }
 
     @MainActor
+    func testCreateFullSelectsAndFocusesNewSession() async throws {
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        let err = await model.createFull(name: "fresh", dir: "/usr", agent: "/bin/cat",
+                                         terminal: false, worktree: nil,
+                                         model: nil, effort: nil)
+        XCTAssertNil(err)
+        XCTAssertEqual(model.selected, "fresh")
+        XCTAssertEqual(model.focusedPane, "fresh")
+        XCTAssertEqual(model.focus, .terminal)
+        await model.kill("fresh")
+    }
+
+    @MainActor
     func testKillRemovesSessionAndClearsSelection() async throws {
         let daemon = try TestDaemon()
         defer { daemon.stop() }
@@ -77,8 +93,8 @@ final class AppModelTests: XCTestCase {
         await model.select(a)
 
         var received: [UInt8] = []
-        model.onTerminalOutput = { received.append(contentsOf: $0) }
-        await model.sendInput(Array("ping\n".utf8))
+        model.setTerminalSink(for: a) { received.append(contentsOf: $0) }
+        await model.sendInput(Array("ping\n".utf8), to: a)
         let got = await eventually {
             String(decoding: received, as: UTF8.self).contains("ping")
         }
@@ -98,11 +114,11 @@ final class AppModelTests: XCTestCase {
         _ = await eventually { model.sessions.count == 1 }
         let a = model.sessions[0].name
         await model.select(a)                       // no sink set yet
-        await model.sendInput(Array("marker\n".utf8))
+        await model.sendInput(Array("marker\n".utf8), to: a)
         // Let the echo round-trip and buffer while no sink is attached.
         try await Task.sleep(nanoseconds: 300_000_000)
         var received = ""
-        model.onTerminalOutput = { received += String(decoding: $0, as: UTF8.self) }
+        model.setTerminalSink(for: a) { received += String(decoding: $0, as: UTF8.self) }
         let flushed = await eventually { received.contains("marker") }
         XCTAssertTrue(flushed, "buffered output did not flush to the late sink")
         await model.kill(a)

@@ -2,24 +2,52 @@ import AppKit
 import SwiftUI
 import SwiftTerm
 
+/// First installed Nerd Font, or nil (SwiftTerm keeps its default). Names are
+/// PostScript names across Nerd Fonts v2/v3 packagings.
+func nerdFont(size: CGFloat) -> NSFont? {
+    let candidates = [
+        "JetBrainsMonoNerdFont-Regular",   // v3
+        "JetBrainsMonoNF-Regular",
+        "JetBrainsMono Nerd Font",
+        "MesloLGSNerdFont-Regular",
+        "MesloLGS-NF-Regular",
+        "MesloLGS NF",
+        "HackNerdFont-Regular",
+        "Hack Nerd Font",
+        "FiraCodeNerdFont-Regular",
+        "FiraCode Nerd Font",
+    ]
+    for name in candidates {
+        if let f = NSFont(name: name, size: size) { return f }
+    }
+    return nil
+}
+
 /// SwiftTerm TerminalView bridged into SwiftUI, render-only: the daemon owns
 /// the process. Keystrokes go to the daemon (`send` -> input), bytes come back
-/// through `model.onTerminalOutput`. The hosting view remounts this per
-/// session via `.id(sessionName)`.
+/// through the model's per-name terminal sink. The hosting view remounts this
+/// per session via `.id(sessionName)`.
 struct TerminalRepresentable: NSViewRepresentable {
     let model: AppModel
+    let name: String
 
-    func makeCoordinator() -> Coordinator { Coordinator(model: model) }
+    func makeCoordinator() -> Coordinator { Coordinator(model: model, name: name) }
 
     func makeNSView(context: Context) -> TerminalView {
         let view = CoveyTerminalView(frame: .zero)
         view.terminalDelegate = context.coordinator
+        // Nerd Font when installed: nvim/lazygit icon glyphs live in the
+        // private-use area that stock Menlo lacks (tofu boxes otherwise).
+        if let nerd = nerdFont(size: view.font.pointSize) {
+            view.font = nerd
+        }
         let model = self.model
+        let name = self.name
         // Entering/leaving the alternate buffer invalidates any scrolled-up
         // viewport, so a stale HISTORY badge must clear.
         view.onBufferSwitch = { Task { @MainActor in model.setHistoryMode(false) } }
-        view.onFocusClick = { Task { @MainActor in model.setFocus(.terminal) } }
-        model.onTerminalCommand = { [weak view] command in
+        view.onFocusClick = { Task { @MainActor in model.focusPane(name) } }
+        model.setTerminalCommandHandler(for: name) { [weak view] command in
             guard let view else { return }
             switch command {
             case .focus:
@@ -33,8 +61,16 @@ struct TerminalRepresentable: NSViewRepresentable {
             }
         }
         applyTheme(to: view)
-        model.onTerminalOutput = { [weak view] bytes in
+        model.setTerminalSink(for: name) { [weak view] bytes in
             view?.feed(byteArray: bytes[...])
+        }
+        // A freshly mounted pane that already owns the pane focus grabs the
+        // keyboard (companion created via space t v).
+        if model.focusedPane == name, model.focus == .terminal {
+            DispatchQueue.main.async { [weak view] in
+                guard let view else { return }
+                view.window?.makeFirstResponder(view)
+            }
         }
         return view
     }
@@ -57,7 +93,7 @@ struct TerminalRepresentable: NSViewRepresentable {
         })
     }
 
-    // No teardown of `model.onTerminalOutput` here: sessions switch by remounting
+    // No teardown of the model's sink here: sessions switch by remounting
     // (`.id`), and makeNSView of the new terminal overwrites the sink. Nil-ing it
     // asynchronously on dismantle could race and clear the new view's sink. The
     // old closure captures `[weak view]`, so it harmlessly no-ops after teardown.
@@ -66,17 +102,18 @@ struct TerminalRepresentable: NSViewRepresentable {
     // so an isolated class could not satisfy them. Calls hop to the actor inside.
     final class Coordinator: TerminalViewDelegate {
         let model: AppModel
-        init(model: AppModel) { self.model = model }
+        let name: String
+        init(model: AppModel, name: String) { self.model = model; self.name = name }
 
         func send(source: TerminalView, data: ArraySlice<UInt8>) {
             let bytes = Array(data)
-            Task { @MainActor in await model.sendInput(bytes) }
+            Task { @MainActor in await model.sendInput(bytes, to: name) }
         }
 
         func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
             guard newCols > 0, newRows > 0 else { return }
             let (cols, rows) = (UInt16(newCols), UInt16(newRows))
-            Task { @MainActor in await model.resize(cols: cols, rows: rows) }
+            Task { @MainActor in await model.resize(cols: cols, rows: rows, name: name) }
         }
 
         func scrolled(source: TerminalView, position: Double) {

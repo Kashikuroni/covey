@@ -11,6 +11,7 @@ import CoveyKit
 public final class AppModel {
     public enum Modal: Equatable {
         case newSession
+        case recent
         case kill(String)
         case rename(String)
         case renameProject(String)
@@ -41,6 +42,9 @@ public final class AppModel {
     public private(set) var sessions: [Session] = []       // sorted by created
     public private(set) var statusByName: [String: Status] = [:]
     public private(set) var selected: String?
+    /// Terminal pane that owns the keyboard while focus == .terminal:
+    /// the selected session or its companion shell.
+    public private(set) var focusedPane: String?
     public var modal: Modal?
     public private(set) var toast: String?
     public private(set) var connected = false
@@ -66,9 +70,6 @@ public final class AppModel {
     private(set) var inputMode: InputMode = .normal
     /// Dir to prefill in the New Session sheet (set by `N`).
     public private(set) var newSessionPrefillDir: String?
-    /// Commands for the mounted terminal view (focus/scroll); set by the
-    /// representable like `onTerminalOutput`.
-    public var onTerminalCommand: ((TerminalCommand) -> Void)?
     public private(set) var noteTarget: NoteTarget?
     public private(set) var noteState = NoteUIState()
     public private(set) var promptsByName: [String: [String]] = [:]
@@ -76,19 +77,37 @@ public final class AppModel {
     public private(set) var projectNotes: [String: String] = [:]
     public private(set) var projectNames: [String: String] = [:]
 
-    /// Bytes for the currently attached session's terminal view. The terminal
-    /// view mounts asynchronously after `selected` changes, so output (notably
-    /// the attach backfill) can arrive before the sink exists — those bytes are
-    /// buffered and flushed here the moment the view sets its sink.
-    public var onTerminalOutput: (([UInt8]) -> Void)? {
-        didSet {
-            guard let sink = onTerminalOutput, !outputBuffer.isEmpty else { return }
-            let pending = outputBuffer
-            outputBuffer = []
-            sink(pending)
+    /// Output sinks per session name. A terminal view mounts asynchronously
+    /// after attach, so bytes (notably the attach backfill) can arrive before
+    /// the sink exists — they buffer per name and flush on registration.
+    private var outputSinks: [String: ([UInt8]) -> Void] = [:]
+    private var outputBuffers: [String: [UInt8]] = [:]
+    /// Focus/scroll command handlers per mounted terminal view.
+    private var terminalCommands: [String: (TerminalCommand) -> Void] = [:]
+    /// Names this client is attached to (selected + visible companion).
+    private var attachedNames: Set<String> = []
+
+    public func setTerminalSink(for name: String, _ sink: (([UInt8]) -> Void)?) {
+        if let sink {
+            outputSinks[name] = sink
+            if let pending = outputBuffers.removeValue(forKey: name), !pending.isEmpty {
+                sink(pending)
+            }
+        } else {
+            outputSinks[name] = nil
         }
     }
-    private var outputBuffer: [UInt8] = []
+
+    public func setTerminalCommandHandler(for name: String,
+                                          _ handler: ((TerminalCommand) -> Void)?) {
+        terminalCommands[name] = handler
+    }
+
+    /// Route a view command to the focused pane's terminal (fallback: selected).
+    private func sendTerminalCommand(_ cmd: TerminalCommand) {
+        let target = focusedPane ?? selected
+        if let target { terminalCommands[target]?(cmd) }
+    }
 
     private var client: IPCClient
     private let makeClient: () throws -> IPCClient
@@ -170,16 +189,29 @@ public final class AppModel {
 
     public func select(_ name: String?) async {
         guard name != selected else { return }
-        if let old = selected {
-            try? await client.detach(name: old)
-        }
-        outputBuffer = []          // drop any bytes buffered for the old session
+        for n in attachedNames { try? await client.detach(name: n) }
+        attachedNames = []
+        outputBuffers = [:]        // drop any bytes buffered for old sessions
         selected = name
+        focusedPane = name
         historyMode = false
         if let name {
-            do { try await client.attach(name: name, sinceSeq: 0) }
-            catch { toast = errorText(error) }
+            await attachPane(name)
+            if let comp = companion(of: name) { await attachPane(comp.name) }
         }
+    }
+
+    private func attachPane(_ name: String) async {
+        do {
+            try await client.attach(name: name, sinceSeq: 0)
+            attachedNames.insert(name)
+        } catch { toast = errorText(error) }
+    }
+
+    public func focusPane(_ name: String) {
+        focusedPane = name
+        setFocus(.terminal)
+        terminalCommands[name]?(.focus)
     }
 
     public func create(dir: String, agent: String) async {
@@ -204,7 +236,7 @@ public final class AppModel {
     /// claude. Returns per-session error lines (empty = all good).
     public func restartAllClaude() async -> [String] {
         var errors: [String] = []
-        for s in sessions where s.agent.split(separator: " ").first == "claude" {
+        for s in visibleSessions where s.agent.split(separator: " ").first == "claude" {
             if let err = await restart(s.name) { errors.append("\(s.name): \(err)") }
         }
         return errors
@@ -223,10 +255,13 @@ public final class AppModel {
                            terminal: Bool, worktree: WorktreeSpec?,
                            model: String?, effort: String?) async -> String? {
         do {
-            _ = try await client.create(dir: dir, agent: agent, name: name,
-                                        terminal: terminal ? true : nil,
-                                        worktree: worktree, model: model,
-                                        effort: effort)
+            let s = try await client.create(dir: dir, agent: agent, name: name,
+                                            terminal: terminal ? true : nil,
+                                            worktree: worktree, model: model,
+                                            effort: effort)
+            // Land in the fresh session, keyboard in its terminal.
+            await select(s.name)
+            setFocus(.terminal)
             return nil
         } catch {
             return errorText(error)
@@ -235,17 +270,24 @@ public final class AppModel {
 
     public func rename(_ name: String, to newName: String) async {
         do { try await client.rename(name: name, newName: newName) }
-        catch { toast = errorText(error) }
+        catch { toast = errorText(error); return }
+        if var axes = persisted.splitAxes, let axis = axes.removeValue(forKey: name) {
+            axes[newName] = axis
+            persisted.splitAxes = axes
+            persist()
+        }
+        if name == selected {
+            selected = nil            // select() guard: force the re-attach chain
+            await select(newName)
+        }
     }
 
-    public func sendInput(_ bytes: [UInt8]) async {
-        guard let selected else { return }
-        try? await client.input(name: selected, bytes: bytes)
+    public func sendInput(_ bytes: [UInt8], to name: String) async {
+        try? await client.input(name: name, bytes: bytes)
     }
 
-    public func resize(cols: UInt16, rows: UInt16) async {
-        guard let selected else { return }
-        try? await client.resize(name: selected, cols: cols, rows: rows)
+    public func resize(cols: UInt16, rows: UInt16, name: String) async {
+        try? await client.resize(name: name, cols: cols, rows: rows)
     }
 
     public func reconnect() async {
@@ -280,21 +322,37 @@ public final class AppModel {
     }
 
     public func relaunchRecent(_ r: RecentSession) async {
-        do { _ = try await client.create(dir: r.dir, agent: r.agent, name: r.name,
-                                         resume: r.resumeCmd) }
-        catch { toast = errorText(error) }
+        do {
+            let s = try await client.create(dir: r.dir, agent: r.agent, name: r.name,
+                                            resume: r.resumeCmd)
+            await select(s.name)
+            setFocus(.terminal)
+        } catch { toast = errorText(error) }
+    }
+
+    /// Sessions that get cards/numbers/counts — companions are invisible.
+    public var visibleSessions: [Session] {
+        sessions.filter { $0.companionOf == nil }
+    }
+
+    public func companion(of name: String) -> Session? {
+        sessions.first { $0.companionOf == name }
+    }
+
+    public func splitAxis(for name: String) -> String {
+        persisted.splitAxes?[name] ?? "v"
     }
 
     public var counts: (total: Int, running: Int, waiting: Int) {
         var r = 0, w = 0
-        for s in sessions {
+        for s in visibleSessions {
             switch statusByName[s.name] {
             case .running: r += 1
             case .waiting: w += 1
             default: break
             }
         }
-        return (sessions.count, r, w)
+        return (visibleSessions.count, r, w)
     }
 
     /// Project groups (keyed by sessionRoot, so a worktree session sits with
@@ -302,7 +360,7 @@ public final class AppModel {
     /// appearance); within a group, sessions ordered by `order` (unknown by created).
     public func orderedSessions() -> [(dir: String, sessions: [Session])] {
         orderedDirs().map { dir in
-            let inDir = sessions.filter { sessionRoot($0) == dir }.sorted { a, b in
+            let inDir = visibleSessions.filter { sessionRoot($0) == dir }.sorted { a, b in
                 let ia = order.firstIndex(of: a.name) ?? Int.max
                 let ib = order.firstIndex(of: b.name) ?? Int.max
                 if ia != ib { return ia < ib }
@@ -329,7 +387,7 @@ public final class AppModel {
         filterActive = false
         if selected != nil {
             setFocus(.terminal)
-            onTerminalCommand?(.focus)
+            sendTerminalCommand(.focus)
         }
     }
     public func setHistoryMode(_ on: Bool) { historyMode = on }
@@ -369,10 +427,10 @@ public final class AppModel {
 
     private func orderedDirs() -> [String] {
         var seen = Set<String>(); var dirs: [String] = []
-        for d in projectOrder where sessions.contains(where: { sessionRoot($0) == d }) {
+        for d in projectOrder where visibleSessions.contains(where: { sessionRoot($0) == d }) {
             if seen.insert(d).inserted { dirs.append(d) }
         }
-        for s in sessions where !seen.contains(sessionRoot(s)) {
+        for s in visibleSessions where !seen.contains(sessionRoot(s)) {
             if seen.insert(sessionRoot(s)).inserted { dirs.append(sessionRoot(s)) }
         }
         return dirs
@@ -461,15 +519,18 @@ public final class AppModel {
         case .enterTerminal:
             if selected != nil {
                 setFocus(.terminal)
-                onTerminalCommand?(.focus)
+                sendTerminalCommand(.focus)
             }
         case .exitTerminal:
             setFocus(.sessions)
-            onTerminalCommand?(.blur)
+            sendTerminalCommand(.blur)
         case .newSession(let prefill):
             newSessionPrefillDir = prefill
                 ? sessions.first(where: { $0.name == selected }).map(sessionRoot) : nil
             modal = .newSession
+        case .openRecent:
+            inputMode = .normal
+            modal = .recent
         case .killSelected:
             if let selected { modal = .kill(selected) }
         case .renameSelected:
@@ -492,9 +553,9 @@ public final class AppModel {
         case .moveSelected(let up):
             moveSelectedSession(up: up)
         case .scrollTerminalPage(let up):
-            onTerminalCommand?(.scrollPage(up: up))
+            sendTerminalCommand(.scrollPage(up: up))
         case .scrollTerminalToBottom:
-            onTerminalCommand?(.scrollToBottom)
+            sendTerminalCommand(.scrollToBottom)
         case .showHelp:
             inputMode = .help
         case .toggleSessionNote:
@@ -598,6 +659,64 @@ public final class AppModel {
             guard let s = selectedSession() else { return }
             if s.git == nil { toast = "not a git repo"; return }
             modal = .cleanup(s.dir)
+        case .splitVertical: openSplit(axis: "v")
+        case .splitHorizontal: openSplit(axis: "h")
+        case .splitClose:
+            inputMode = .normal
+            guard let comp = selected.flatMap({ companion(of: $0) }) else {
+                toast = "no split"; return
+            }
+            Task { await kill(comp.name) }
+        case .splitFocusToggle:
+            guard let selected, let comp = companion(of: selected) else { return }
+            focusPane(focusedPane == comp.name ? selected : comp.name)
+        case .cycleFocus(let forward):
+            cycleFocus(forward: forward)
+        }
+    }
+
+    /// ⌃j/⌃k: walk the focus zones in order — session list, agent pane,
+    /// companion shell pane (when split), inspector (when shown) — wrapping.
+    private func cycleFocus(forward: Bool) {
+        var zones: [(id: String, activate: () -> Void)] = [
+            ("sessions", { self.sendTerminalCommand(.blur); self.setFocus(.sessions) })
+        ]
+        if let selected {
+            zones.append(("pane:\(selected)", { self.focusPane(selected) }))
+            if let comp = companion(of: selected) {
+                zones.append(("pane:\(comp.name)", { self.focusPane(comp.name) }))
+            }
+        }
+        if showInspector {
+            zones.append(("inspector", { self.sendTerminalCommand(.blur); self.setFocus(.inspector) }))
+        }
+        let currentID: String
+        switch focus {
+        case .sessions: currentID = "sessions"
+        case .inspector: currentID = "inspector"
+        case .terminal: currentID = "pane:\(focusedPane ?? selected ?? "")"
+        }
+        let idx = zones.firstIndex { $0.id == currentID } ?? 0
+        let next = (idx + (forward ? 1 : -1) + zones.count) % zones.count
+        zones[next].activate()
+    }
+
+    private func openSplit(axis: String) {
+        inputMode = .normal
+        guard let s = selectedSession() else { toast = "no session"; return }
+        if let comp = companion(of: s.name) {
+            focusPane(comp.name)
+            return
+        }
+        var axes = persisted.splitAxes ?? [:]
+        axes[s.name] = axis
+        persisted.splitAxes = axes
+        persist()
+        Task {
+            do {
+                _ = try await client.create(dir: s.dir, agent: "sh", terminal: true,
+                                            companionOf: s.name)
+            } catch { toast = errorText(error) }
         }
     }
 
@@ -721,13 +840,23 @@ public final class AppModel {
             sessions.removeAll { $0.name == session.name }
             sessions.append(session)
             sessions.sort { $0.created < $1.created }
+            // A companion born for the selected session: show it and hand it
+            // the keyboard (space t v flow).
+            if session.companionOf == selected {
+                Task {
+                    await attachPane(session.name)
+                    focusPane(session.name)
+                }
+            }
         case .sessionRemoved(let name):
             sessions.removeAll { $0.name == name }
             statusByName[name] = nil
             promptsByName[name] = nil
+            dropPaneState(name)
             if selected == name { selected = nil }
         case .exited(let name, _):
-            if let s = sessions.first(where: { $0.name == name }) {
+            // Companions never become recents — a dead shell is not resumable.
+            if let s = sessions.first(where: { $0.name == name }), s.companionOf == nil {
                 pushRecent(&recents, RecentSession(name: s.name, dir: s.dir, agent: s.agent,
                                                    resumeCmd: s.resumeCmd,
                                                    stoppedAt: Int64(Date().timeIntervalSince1970)))
@@ -736,6 +865,7 @@ public final class AppModel {
             sessions.removeAll { $0.name == name }
             statusByName[name] = nil
             promptsByName[name] = nil
+            dropPaneState(name)
             if selected == name { selected = nil }
         case let .statusChanged(name, status):
             statusByName[name] = status
@@ -746,14 +876,25 @@ public final class AppModel {
                 sessions[i].git = git
             }
         case let .output(name, _, bytesB64):
-            guard name == selected, let data = Data(base64Encoded: bytesB64) else { return }
+            guard attachedNames.contains(name),
+                  let data = Data(base64Encoded: bytesB64) else { return }
             let bytes = [UInt8](data)
-            if let sink = onTerminalOutput {
+            if let sink = outputSinks[name] {
                 sink(bytes)
             } else {
-                outputBuffer.append(contentsOf: bytes)   // flushed when the view mounts
+                // flushed when the view mounts
+                outputBuffers[name, default: []].append(contentsOf: bytes)
             }
         }
+    }
+
+    /// Forget a dead pane's view plumbing; pane focus falls back to selected.
+    private func dropPaneState(_ name: String) {
+        outputSinks[name] = nil
+        outputBuffers[name] = nil
+        terminalCommands[name] = nil
+        attachedNames.remove(name)
+        if focusedPane == name { focusedPane = selected }
     }
 
     private func errorText(_ error: Error) -> String {

@@ -9,13 +9,8 @@ private let customAgentSlot = "custom…"
 /// row has a live subdir picker (↓/↑ walk, Tab/→ descend) — no Finder panel.
 struct NewSessionSheet: View {
     let model: AppModel
-    enum SheetTab { case new, recent }
-    @State private var sheetTab: SheetTab = .new
-    @State private var recentIdx = 0
-    @FocusState private var recentFocused: Bool
     @State private var name = ""
     @State private var dir = "~/"
-    @State private var terminal = false
     @State private var branchInput = ""
     @State private var branchSelected = 0
     @State private var createWorktree = false
@@ -25,8 +20,6 @@ struct NewSessionSheet: View {
     @State private var worktrees: [String: String] = [:]
     @State private var agentChoice: String
     @State private var customAgent = ""
-    @State private var claudeModel = "default"
-    @State private var effort = "auto"
     @State private var repoRoot: String?
     @State private var branches: [String] = []
     @State private var dirEntries: [String] = []
@@ -34,6 +27,8 @@ struct NewSessionSheet: View {
     @State private var error: String?
     @FocusState private var focus: FormField?
     private let presets: [String]
+
+    private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
 
     init(model: AppModel) {
         self.model = model
@@ -46,11 +41,6 @@ struct NewSessionSheet: View {
 
     private var effectiveAgent: String {
         agentChoice == customAgentSlot ? customAgent : agentChoice
-    }
-
-    /// Claude detection by the command's first word (covers "claude --flag").
-    private var isClaude: Bool {
-        effectiveAgent.split(separator: " ").first == "claude"
     }
 
     private var trimmedBranch: String { branchInput.trimmingCharacters(in: .whitespaces) }
@@ -78,33 +68,17 @@ struct NewSessionSheet: View {
     }
 
     private var fieldSequence: [FormField] {
-        formFieldSequence(terminal: terminal, isRepo: repoRoot != nil,
+        formFieldSequence(isRepo: repoRoot != nil,
                           showWorktreeToggle: showWorktreeToggle,
                           showBase: branchIsNew,
-                          isClaude: isClaude,
                           customAgent: agentChoice == customAgentSlot)
     }
 
-    private var commandPreview: String {
-        if terminal { return ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/sh" }
-        return composeAgentCommand(
-            agent: effectiveAgent,
-            model: isClaude && claudeModel != "default" ? claudeModel : nil,
-            effort: isClaude && effort != "auto" ? effort : nil)
-    }
+    private var commandPreview: String { effectiveAgent }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Picker("", selection: $sheetTab) {
-                Text("New").tag(SheetTab.new)
-                Text("Recent").tag(SheetTab.recent)
-            }
-            .pickerStyle(.segmented).labelsHidden()
-            if sheetTab == .new {
-                newForm
-            } else {
-                recentTab
-            }
+            newForm
         }
         .padding(20)
         .frame(width: 480)
@@ -123,9 +97,6 @@ struct NewSessionSheet: View {
             focus = .name
             refreshDirEntries()
         }
-        .onChange(of: sheetTab) { _, tab in
-            if tab == .recent { recentIdx = 0; recentFocused = true }
-        }
         .task(id: dir) {
             refreshDirEntries()
             let info = await model.gitInfo(dir)
@@ -136,14 +107,6 @@ struct NewSessionSheet: View {
         }
         .onChange(of: branchInput) { _, _ in branchSelected = 0 }
         .onChange(of: baseInput) { _, _ in baseSelected = 0 }
-        .onChange(of: claudeModel) { _, m in
-            let levels = effortLevels(model: m == "default" ? nil : m)
-            if !levels.contains(effort) { effort = "auto" }
-        }
-        .onChange(of: agentChoice) { _, _ in
-            claudeModel = "default"
-            effort = "auto"
-        }
         .onChange(of: focus) { _, new in
             // macOS selects the whole text when a field gains focus; for the
             // path field that would make the first keystroke wipe "~/" — put
@@ -157,74 +120,14 @@ struct NewSessionSheet: View {
         }
     }
 
-    private var recentTab: some View {
-        let items = model.visibleRecents()
-        let now = Int64(Date().timeIntervalSince1970)
-        let tk = Tokens(Theme(raw: model.themeRaw))
-        return Group {
-            if items.isEmpty {
-                Text("no recently-stopped sessions")
-                    .font(.caption).foregroundStyle(tk.t4)
-                    .frame(maxWidth: .infinity, minHeight: 120)
-            } else {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(items.enumerated()), id: \.element.name) { idx, r in
-                        HStack(spacing: 7) {
-                            Text("↻").font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(r.resumeCmd != nil ? tk.t4 : tk.surf4)
-                            Text(r.name).font(.system(size: 12, design: .monospaced))
-                                .foregroundStyle(tk.t2).lineLimit(1)
-                            Text(String(r.agent.split(separator: " ").first ?? ""))
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(tk.t4)
-                            Text(collapseHome(r.dir))
-                                .font(.system(size: 11)).foregroundStyle(tk.t4)
-                                .lineLimit(1).truncationMode(.head)
-                            Spacer()
-                            if let stopped = r.stoppedAt {
-                                Text(humanizeAge(now - stopped))
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .foregroundStyle(tk.t4)
-                            }
-                        }
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(idx == recentIdx ? tk.surf2 : Color.clear,
-                                    in: RoundedRectangle(cornerRadius: Tokens.rSm))
-                        .contentShape(Rectangle())
-                        .onTapGesture { relaunch(items[idx]) }
-                    }
-                }
-                .focusable()
-                .focused($recentFocused)
-                .onKeyPress(.downArrow) {
-                    recentIdx = min(items.count - 1, recentIdx + 1); return .handled
-                }
-                .onKeyPress(.upArrow) {
-                    recentIdx = max(0, recentIdx - 1); return .handled
-                }
-                .onKeyPress(.return) {
-                    if items.indices.contains(recentIdx) { relaunch(items[recentIdx]) }
-                    return .handled
-                }
-            }
-        }
-    }
-
-    private func relaunch(_ r: RecentSession) {
-        Task {
-            await model.relaunchRecent(r)
-            model.modal = nil
-        }
-    }
-
     private var newForm: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("New session").font(.headline)
             TextField("Name (auto if empty)", text: $name)
                 .focused($focus, equals: .name)
+                .ayuField(tk, focused: focus == .name)
                 .onSubmit { advance(from: .name) }
             dirRow
-            toggleRow(.terminal, label: "Plain terminal ($SHELL, no agent)", value: $terminal)
             if repoRoot != nil {
                 branchRow
                 if showWorktreeToggle {
@@ -234,21 +137,13 @@ struct NewSessionSheet: View {
                     baseRow
                 }
             }
-            if !terminal {
-                cycleRow(.agent, label: "Agent",
-                         options: presets + [customAgentSlot], selection: $agentChoice)
-                if agentChoice == customAgentSlot {
-                    TextField("Custom agent command", text: $customAgent)
-                        .focused($focus, equals: .customAgent)
-                        .onSubmit { advance(from: .customAgent) }
-                }
-                if isClaude {
-                    cycleRow(.model, label: "Model",
-                             options: ["default"] + claudeModels, selection: $claudeModel)
-                    cycleRow(.effort, label: "Effort",
-                             options: effortLevels(model: claudeModel == "default" ? nil : claudeModel),
-                             selection: $effort)
-                }
+            cycleRow(.agent, label: "Agent",
+                     options: presets + [customAgentSlot], selection: $agentChoice)
+            if agentChoice == customAgentSlot {
+                TextField("Custom agent command", text: $customAgent)
+                    .focused($focus, equals: .customAgent)
+                    .ayuField(tk, focused: focus == .customAgent)
+                    .onSubmit { advance(from: .customAgent) }
             }
             Text(commandPreview)
                 .font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
@@ -262,7 +157,7 @@ struct NewSessionSheet: View {
                 Button("Cancel") { model.modal = nil }
                 Button("Create") { submit() }
                     .buttonStyle(.glassProminent)
-                    .disabled(dir.isEmpty || (!terminal && effectiveAgent.isEmpty))
+                    .disabled(dir.isEmpty || effectiveAgent.isEmpty)
             }
         }
     }
@@ -273,6 +168,7 @@ struct NewSessionSheet: View {
         VStack(alignment: .leading, spacing: 2) {
             TextField("Directory", text: $dir)
                 .focused($focus, equals: .dir)
+                .ayuField(tk, focused: focus == .dir)
                 .onSubmit { advance(from: .dir) }
                 .onKeyPress(.downArrow) { step($dirSelected, in: dirEntries, 1); return .handled }
                 .onKeyPress(.upArrow) { step($dirSelected, in: dirEntries, -1); return .handled }
@@ -295,6 +191,7 @@ struct NewSessionSheet: View {
             TextField(currentBranch.map { "branch (current: \($0))" } ?? "branch",
                       text: $branchInput)
                 .focused($focus, equals: .branch)
+                .ayuField(tk, focused: focus == .branch)
                 .onSubmit { advance(from: .branch) }
                 .onKeyPress(.downArrow) { step($branchSelected, in: branchEntries, 1); return .handled }
                 .onKeyPress(.upArrow) { step($branchSelected, in: branchEntries, -1); return .handled }
@@ -327,6 +224,7 @@ struct NewSessionSheet: View {
             TextField(currentBranch.map { "base (default: \($0))" } ?? "base",
                       text: $baseInput)
                 .focused($focus, equals: .base)
+                .ayuField(tk, focused: focus == .base)
                 .onSubmit { advance(from: .base) }
                 .onKeyPress(.downArrow) { step($baseSelected, in: baseEntries, 1); return .handled }
                 .onKeyPress(.upArrow) { step($baseSelected, in: baseEntries, -1); return .handled }
@@ -517,15 +415,12 @@ struct NewSessionSheet: View {
         let spec = (name: trimmedName.isEmpty ? nil : trimmedName,
                     dir: expandTilde(cleanDir),
                     agent: effectiveAgent,
-                    terminal: terminal,
-                    worktree: worktree,
-                    model: isClaude && claudeModel != "default" ? claudeModel : nil,
-                    effort: isClaude && effort != "auto" ? effort : nil)
+                    worktree: worktree)
         Task {
             if let err = await model.createFull(name: spec.name, dir: spec.dir,
-                                                agent: spec.agent, terminal: spec.terminal,
-                                                worktree: spec.worktree, model: spec.model,
-                                                effort: spec.effort) {
+                                                agent: spec.agent, terminal: false,
+                                                worktree: spec.worktree, model: nil,
+                                                effort: nil) {
                 error = err
             } else {
                 model.modal = nil

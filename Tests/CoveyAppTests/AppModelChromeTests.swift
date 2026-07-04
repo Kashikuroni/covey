@@ -390,4 +390,13 @@ final class AppModelChromeTests: XCTestCase {
         XCTAssertNil(model.promptsByName["menu"], "kill clears the prompt")
     }
 
+    @MainActor
+    func testOpenRecentShowsModal() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        model.apply(.openRecent)
+        XCTAssertEqual(model.modal, .recent)
+    }
+
 }

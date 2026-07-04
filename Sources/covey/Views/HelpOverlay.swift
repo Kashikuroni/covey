@@ -13,11 +13,14 @@ struct HelpOverlay: View {
             ("enter / o", "focus terminal (recent: relaunch)"),
             ("⌃q", "leave terminal back to the list"),
             ("n / N", "new session (N: same project)"),
+            ("r", "recent sessions"),
             ("d", "kill session"),
             ("K / J", "move session up / down"),
         ]),
         ("view", [
             ("[ ] { }", "resize split"),
+            ("⌃h / ⌃l", "cycle focus: list · agent · shell · inspector"),
+            ("⌃\\", "toggle split pane focus"),
             ("⌃k / ⌃j", "scroll terminal page up / down"),
             ("G / end", "terminal to bottom"),
         ]),
@@ -25,6 +28,7 @@ struct HelpOverlay: View {
             ("g", "git: promote · delete branch · cleanup · return to root · issue (later)"),
             ("s", "session: rename · restart · verify (later) · nvim (later)"),
             ("a", "app: restart all claude · theme · usage log (later)"),
+            ("t", "terminal: split v · split h · close"),
         ]),
     ]
 

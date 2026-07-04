@@ -90,6 +90,19 @@ final class CoveyTerminalView: TerminalView {
         onBufferSwitch?()
     }
 
+    // SwiftTerm lays its legacy scroller out at the .regular width (~15pt)
+    // and the property is private — re-shape it after every layout pass to
+    // a .mini strip hugging the right edge.
+    override func layout() {
+        super.layout()
+        for case let scroller as NSScroller in subviews {
+            scroller.controlSize = .mini
+            let w = NSScroller.scrollerWidth(for: .mini, scrollerStyle: .legacy)
+            scroller.frame = NSRect(x: bounds.width - w, y: scroller.frame.minY,
+                                    width: w, height: scroller.frame.height)
+        }
+    }
+
 
     func sendWheelReport(deltaY: CGFloat, at point: CGPoint) {
         let terminal = getTerminal()

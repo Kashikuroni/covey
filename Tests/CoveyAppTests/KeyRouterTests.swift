@@ -43,6 +43,8 @@ final class KeyRouterTests: XCTestCase {
             (special(.right, ctrl: true), .resizeSplit(8)),
             (key("k", ctrl: true), .scrollTerminalPage(up: true)),
             (key("j", ctrl: true), .scrollTerminalPage(up: false)),
+            (key("l", ctrl: true), .cycleFocus(forward: true)),
+            (key("h", ctrl: true), .cycleFocus(forward: false)),
             (special(.pageUp), .scrollTerminalPage(up: true)),
             (special(.pageDown), .scrollTerminalPage(up: false)),
             (key("?"), .showHelp),
@@ -143,6 +145,33 @@ final class KeyRouterTests: XCTestCase {
     func testLeaderSessionRenameProject() {
         let session = ctx(mode: .leader(.session))
         XCTAssertEqual(KeyRouter.route(key("R"), context: session), .renameProject)
+    }
+
+    func testTerminalSplitChords() {
+        XCTAssertEqual(KeyRouter.route(key("t"), context: ctx(mode: .leader(.root))),
+                       .leaderDescend(.terminal))
+        let leaderT = ctx(mode: .leader(.terminal))
+        XCTAssertEqual(KeyRouter.route(key("v"), context: leaderT), .splitVertical)
+        XCTAssertEqual(KeyRouter.route(key("h"), context: leaderT), .splitHorizontal)
+        XCTAssertEqual(KeyRouter.route(key("x"), context: leaderT), .splitClose)
+        // ⌃\ toggles pane focus from both the list and the live terminal.
+        XCTAssertEqual(KeyRouter.route(key("\\", ctrl: true), context: ctx()),
+                       .splitFocusToggle)
+        XCTAssertEqual(KeyRouter.route(key("\\", ctrl: true), context: ctx(focus: .terminal)),
+                       .splitFocusToggle)
+        // ⌃h/⌃l walk the focus zones — from the terminal too.
+        XCTAssertEqual(KeyRouter.route(key("l", ctrl: true), context: ctx(focus: .terminal)),
+                       .cycleFocus(forward: true))
+        XCTAssertEqual(KeyRouter.route(key("h", ctrl: true), context: ctx(focus: .terminal)),
+                       .cycleFocus(forward: false))
+        XCTAssertEqual(KeyRouter.route(key("l", ctrl: true), context: ctx(focus: .inspector)),
+                       .cycleFocus(forward: true))
+    }
+
+    func testRecentModalKey() {
+        XCTAssertEqual(KeyRouter.route(key("r"), context: ctx()), .openRecent)
+        // In the terminal the key belongs to the agent.
+        XCTAssertNil(KeyRouter.route(key("r"), context: ctx(focus: .terminal)))
     }
 
     func testPromptAnswerAndShiftTab() {

@@ -17,6 +17,7 @@ struct WhichKeyView: View {
             Row(key: "g", label: "git — issue · promote · delete branch · cleanup · return", implemented: true),
             Row(key: "s", label: "session — rename · restart · verify · nvim", implemented: true),
             Row(key: "a", label: "app — usage log · restart claude", implemented: true),
+            Row(key: "t", label: "terminal — split v · split h · close", implemented: true),
         ]
         case .git: return [
             Row(key: "i", label: "create github issue (later)", implemented: false),
@@ -37,6 +38,11 @@ struct WhichKeyView: View {
             Row(key: "l", label: "usage log (later)", implemented: false),
             Row(key: "u", label: "restart all claude sessions", implemented: true),
             Row(key: "t", label: "toggle dark / light theme", implemented: true),
+        ]
+        case .terminal: return [
+            Row(key: "v", label: "vertical split — shell beside agent", implemented: true),
+            Row(key: "h", label: "horizontal split — shell below agent", implemented: true),
+            Row(key: "x", label: "close split", implemented: true),
         ]
         }
     }
@@ -67,6 +73,7 @@ struct WhichKeyView: View {
         case .git: return "space g — git"
         case .session: return "space s — session"
         case .app: return "space a — app"
+        case .terminal: return "space t — terminal"
         }
     }
 }

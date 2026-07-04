@@ -14,15 +14,9 @@ struct StatusBar: View {
                 hintsRow
             }
             Spacer()
-            if model.vimMode {
-                Text(modeLabel).font(.caption).fontWeight(.semibold)
-                    .foregroundStyle(.secondary)
-            }
             if model.historyMode {
                 Text("HISTORY").foregroundStyle(.yellow).font(.caption).fontWeight(.semibold)
             }
-            Text(focusLabel)
-                .foregroundStyle(.secondary).font(.caption)
         }
         .padding(.horizontal, 12).padding(.vertical, 4)
         .background(tk.surface)
@@ -33,8 +27,7 @@ struct StatusBar: View {
             Text("/").font(.caption.monospaced()).foregroundStyle(tk.accent)
             TextField("filter", text: Binding(
                 get: { model.filter }, set: { model.setFilter($0) }))
-                .textFieldStyle(.roundedBorder)
-                .controlSize(.small)
+                .ayuField(tk, focused: filterFocused)
                 .frame(width: 180)
                 .focused($filterFocused)
                 .onAppear { filterFocused = true }
@@ -52,7 +45,7 @@ struct StatusBar: View {
                     default: return .ignored
                     }
                 }
-            Text("\(model.visibleSessionNames().count)/\(model.sessions.count)")
+            Text("\(model.visibleSessionNames().count)/\(model.visibleSessions.count)")
                 .font(.caption.monospaced()).foregroundStyle(tk.t4)
         }
     }
@@ -90,7 +83,7 @@ struct StatusBar: View {
         case .normal:
             guard model.vimMode else { return [("⌘N", "new"), ("⌘F", "filter")] }
             var base: [(String, String)] = [
-                ("n", "new"), ("enter", "attach"), ("d", "kill"),
+                ("n", "new"), ("r", "recent"), ("enter", "attach"), ("d", "kill"),
                 ("space", "menu"), ("/", "filter"), ("?", "help"),
             ]
             if let selected = model.selected,
@@ -101,21 +94,4 @@ struct StatusBar: View {
         }
     }
 
-    private var modeLabel: String {
-        switch model.inputMode {
-        case .normal: return model.focus == .terminal ? "TERM" : "NORMAL"
-        case .leader: return "LEADER"
-        case .selectSession: return "SELECT"
-        case .help: return "HELP"
-        case .note: return "NOTE"
-        }
-    }
-
-    private var focusLabel: String {
-        switch model.focus {
-        case .sessions: return "sessions"
-        case .terminal: return "terminal"
-        case .inspector: return "inspector"
-        }
-    }
 }
