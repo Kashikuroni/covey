@@ -48,6 +48,13 @@ struct TerminalRepresentable: NSViewRepresentable {
         view.nativeBackgroundColor = theme.background
         view.nativeForegroundColor = theme.foreground
         view.caretColor = theme.cursor
+        // 16 ANSI colors; SwiftTerm expects its own Color type (16-bit channels).
+        view.installColors(theme.ansi.map { c in
+            let rgb = c.usingColorSpace(.sRGB) ?? c
+            return SwiftTerm.Color(red: UInt16(rgb.redComponent * 65535),
+                                   green: UInt16(rgb.greenComponent * 65535),
+                                   blue: UInt16(rgb.blueComponent * 65535))
+        })
     }
 
     // No teardown of `model.onTerminalOutput` here: sessions switch by remounting
