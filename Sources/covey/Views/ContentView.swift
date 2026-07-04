@@ -11,6 +11,7 @@ struct ContentView: View {
             if model.showFooter { Divider(); StatusBar(model: model) }
         }
         .preferredColorScheme(model.themeRaw == "light" ? .light : .dark)
+        .tint(Tokens(Theme(raw: model.themeRaw)).accent)
         .sheet(item: $model.modal) { modal in
             switch modal {
             case .newSession: NewSessionSheet(model: model)
@@ -20,6 +21,8 @@ struct ContentView: View {
             case .promote(let name): PromoteSheet(model: model, name: name)
             case .deleteBranch(let name): DeleteBranchSheet(model: model, name: name)
             case .cleanup(let dir): CleanupSheet(model: model, dir: dir)
+            case .restart(let name): RestartSheet(model: model, name: name)
+            case .restartAll: RestartAllSheet(model: model)
             }
         }
         .overlay(alignment: .bottom) { toastBar }
@@ -148,7 +151,7 @@ struct ContentView: View {
                 }
             }
             .padding(10)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+            .glassEffect(.regular, in: .rect(cornerRadius: 8))
             .padding(.bottom, 12)
         }
     }
