@@ -30,7 +30,6 @@ final class KeyRouterTests: XCTestCase {
             (key("g"), .selectFirst), (key("G"), .scrollTerminalToBottom),
             (special(.end), .scrollTerminalToBottom),
             (special(.enter), .enterTerminal), (key("o"), .enterTerminal),
-            (special(.tab), .toggleTab),
             (key("n"), .newSession(prefillDir: false)),
             (key("N"), .newSession(prefillDir: true)),
             (key("d"), .killSelected),
@@ -93,6 +92,10 @@ final class KeyRouterTests: XCTestCase {
         XCTAssertEqual(KeyRouter.route(key("b"), context: git), .deleteBranchSelected)
         XCTAssertEqual(KeyRouter.route(key("c"), context: git), .cleanupBranches)
         XCTAssertEqual(KeyRouter.route(key("i"), context: git), .closeOverlay, "later command closes")
+        XCTAssertEqual(KeyRouter.route(key("u"), context: session), .restartSelected)
+        XCTAssertEqual(KeyRouter.route(key("u"), context: ctx(mode: .leader(.app))),
+                       .restartAllPrompt)
+        XCTAssertEqual(KeyRouter.route(key("r"), context: git), .returnToRoot)
     }
 
     func testSelectSessionMode() {
@@ -148,7 +151,7 @@ final class KeyRouterTests: XCTestCase {
         XCTAssertEqual(KeyRouter.route(.init(char: nil, isShift: true, special: .tab),
                                        context: ctx()), .sendShiftTab)
         // plain tab still toggles tabs, select-mode digits still jump
-        XCTAssertEqual(KeyRouter.route(special(.tab), context: ctx()), .toggleTab)
+        XCTAssertNil(KeyRouter.route(special(.tab), context: ctx()), "plain tab is unbound now")
         XCTAssertEqual(KeyRouter.route(key("2"), context: ctx(mode: .selectSession)),
                        .selectByNumber(2))
     }

@@ -9,6 +9,10 @@ private let customAgentSlot = "custom…"
 /// row has a live subdir picker (↓/↑ walk, Tab/→ descend) — no Finder panel.
 struct NewSessionSheet: View {
     let model: AppModel
+    enum SheetTab { case new, recent }
+    @State private var sheetTab: SheetTab = .new
+    @State private var recentIdx = 0
+    @FocusState private var recentFocused: Bool
     @State private var name = ""
     @State private var dir = "~/"
     @State private var terminal = false
@@ -91,6 +95,130 @@ struct NewSessionSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            Picker("", selection: $sheetTab) {
+                Text("New").tag(SheetTab.new)
+                Text("Recent").tag(SheetTab.recent)
+            }
+            .pickerStyle(.segmented).labelsHidden()
+            if sheetTab == .new {
+                newForm
+            } else {
+                recentTab
+            }
+        }
+        .padding(20)
+        .frame(width: 480)
+        .onKeyPress(.return, phases: .down) { press in
+            guard press.modifiers.contains(.shift) else { return .ignored }
+            submit()
+            return .handled
+        }
+        .onExitCommand { model.modal = nil }
+        .onAppear {
+            if let prefill = model.newSessionPrefillDir {
+                let collapsed = collapseHome(prefill)
+                dir = collapsed.hasSuffix("/") ? collapsed : collapsed + "/"
+            }
+            model.clearNewSessionPrefill()
+            focus = .name
+            refreshDirEntries()
+        }
+        .onChange(of: sheetTab) { _, tab in
+            if tab == .recent { recentIdx = 0; recentFocused = true }
+        }
+        .task(id: dir) {
+            refreshDirEntries()
+            let info = await model.gitInfo(dir)
+            repoRoot = info.repoRoot
+            currentBranch = info.currentBranch
+            branches = info.branches
+            worktrees = info.worktrees
+        }
+        .onChange(of: branchInput) { _, _ in branchSelected = 0 }
+        .onChange(of: baseInput) { _, _ in baseSelected = 0 }
+        .onChange(of: claudeModel) { _, m in
+            let levels = effortLevels(model: m == "default" ? nil : m)
+            if !levels.contains(effort) { effort = "auto" }
+        }
+        .onChange(of: agentChoice) { _, _ in
+            claudeModel = "default"
+            effort = "auto"
+        }
+        .onChange(of: focus) { _, new in
+            // macOS selects the whole text when a field gains focus; for the
+            // path field that would make the first keystroke wipe "~/" — put
+            // the caret at the end instead so typing appends.
+            guard new == .dir else { return }
+            DispatchQueue.main.async {
+                if let editor = NSApp.keyWindow?.firstResponder as? NSTextView {
+                    editor.selectedRange = NSRange(location: editor.string.count, length: 0)
+                }
+            }
+        }
+    }
+
+    private var recentTab: some View {
+        let items = model.visibleRecents()
+        let now = Int64(Date().timeIntervalSince1970)
+        let tk = Tokens(Theme(raw: model.themeRaw))
+        return Group {
+            if items.isEmpty {
+                Text("no recently-stopped sessions")
+                    .font(.caption).foregroundStyle(tk.t4)
+                    .frame(maxWidth: .infinity, minHeight: 120)
+            } else {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(items.enumerated()), id: \.element.name) { idx, r in
+                        HStack(spacing: 7) {
+                            Text("↻").font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(r.resumeCmd != nil ? tk.t4 : tk.surf4)
+                            Text(r.name).font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(tk.t2).lineLimit(1)
+                            Text(String(r.agent.split(separator: " ").first ?? ""))
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(tk.t4)
+                            Text(collapseHome(r.dir))
+                                .font(.system(size: 11)).foregroundStyle(tk.t4)
+                                .lineLimit(1).truncationMode(.head)
+                            Spacer()
+                            if let stopped = r.stoppedAt {
+                                Text(humanizeAge(now - stopped))
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(tk.t4)
+                            }
+                        }
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(idx == recentIdx ? tk.surf2 : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: Tokens.rSm))
+                        .contentShape(Rectangle())
+                        .onTapGesture { relaunch(items[idx]) }
+                    }
+                }
+                .focusable()
+                .focused($recentFocused)
+                .onKeyPress(.downArrow) {
+                    recentIdx = min(items.count - 1, recentIdx + 1); return .handled
+                }
+                .onKeyPress(.upArrow) {
+                    recentIdx = max(0, recentIdx - 1); return .handled
+                }
+                .onKeyPress(.return) {
+                    if items.indices.contains(recentIdx) { relaunch(items[recentIdx]) }
+                    return .handled
+                }
+            }
+        }
+    }
+
+    private func relaunch(_ r: RecentSession) {
+        Task {
+            await model.relaunchRecent(r)
+            model.modal = nil
+        }
+    }
+
+    private var newForm: some View {
+        VStack(alignment: .leading, spacing: 10) {
             Text("New session").font(.headline)
             TextField("Name (auto if empty)", text: $name)
                 .focused($focus, equals: .name)
@@ -133,53 +261,8 @@ struct NewSessionSheet: View {
                 Spacer()
                 Button("Cancel") { model.modal = nil }
                 Button("Create") { submit() }
+                    .buttonStyle(.glassProminent)
                     .disabled(dir.isEmpty || (!terminal && effectiveAgent.isEmpty))
-            }
-        }
-        .padding(20)
-        .frame(width: 480)
-        .onKeyPress(.return, phases: .down) { press in
-            guard press.modifiers.contains(.shift) else { return .ignored }
-            submit()
-            return .handled
-        }
-        .onExitCommand { model.modal = nil }
-        .onAppear {
-            if let prefill = model.newSessionPrefillDir {
-                let collapsed = collapseHome(prefill)
-                dir = collapsed.hasSuffix("/") ? collapsed : collapsed + "/"
-            }
-            model.clearNewSessionPrefill()
-            focus = .name
-            refreshDirEntries()
-        }
-        .task(id: dir) {
-            refreshDirEntries()
-            let info = await model.gitInfo(dir)
-            repoRoot = info.repoRoot
-            currentBranch = info.currentBranch
-            branches = info.branches
-            worktrees = info.worktrees
-        }
-        .onChange(of: branchInput) { _, _ in branchSelected = 0 }
-        .onChange(of: baseInput) { _, _ in baseSelected = 0 }
-        .onChange(of: claudeModel) { _, m in
-            let levels = effortLevels(model: m == "default" ? nil : m)
-            if !levels.contains(effort) { effort = "auto" }
-        }
-        .onChange(of: agentChoice) { _, _ in
-            claudeModel = "default"
-            effort = "auto"
-        }
-        .onChange(of: focus) { _, new in
-            // macOS selects the whole text when a field gains focus; for the
-            // path field that would make the first keystroke wipe "~/" — put
-            // the caret at the end instead so typing appends.
-            guard new == .dir else { return }
-            DispatchQueue.main.async {
-                if let editor = NSApp.keyWindow?.firstResponder as? NSTextView {
-                    editor.selectedRange = NSRange(location: editor.string.count, length: 0)
-                }
             }
         }
     }

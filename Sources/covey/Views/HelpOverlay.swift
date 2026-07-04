@@ -7,7 +7,6 @@ struct HelpOverlay: View {
             ("j / k", "next / previous session"),
             ("g", "first session"),
             ("s then 1-9", "jump to visible session"),
-            ("tab", "active / recent tab"),
             ("/", "filter sessions"),
         ]),
         ("act", [
@@ -23,9 +22,9 @@ struct HelpOverlay: View {
             ("G / end", "terminal to bottom"),
         ]),
         ("leader (space)", [
-            ("g", "git: issue · promote · delete branch · cleanup (later)"),
-            ("s", "session: rename · verify (later) · nvim (later)"),
-            ("a", "app: usage log · restart claude (later)"),
+            ("g", "git: promote · delete branch · cleanup · return to root · issue (later)"),
+            ("s", "session: rename · restart · verify (later) · nvim (later)"),
+            ("a", "app: restart all claude · usage log (later)"),
         ]),
     ]
 
@@ -50,7 +49,7 @@ struct HelpOverlay: View {
         }
         .padding(20)
         .frame(maxWidth: 480)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .glassEffect(.regular, in: .rect(cornerRadius: 10))
         .shadow(radius: 12)
     }
 }

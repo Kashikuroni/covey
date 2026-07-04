@@ -190,12 +190,22 @@ final class AppModelChromeTests: XCTestCase {
         model.apply(.newSession(prefillDir: false))
         XCTAssertEqual(model.modal, .newSession)
         model.modal = nil
-        model.apply(.toggleTab)
-        XCTAssertEqual(model.listTab, .recent)
-        model.apply(.toggleTab)
-        XCTAssertEqual(model.listTab, .active)
         model.apply(.resizeSplit(3))
         XCTAssertEqual(model.splitPct, 41)   // 38 default + 3
+    }
+
+    @MainActor
+    func testSlashActivatesFooterFilterAndEscapeClears() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        XCTAssertFalse(model.filterActive)
+        model.apply(.startFilter)
+        XCTAssertTrue(model.filterActive)
+        model.setFilter("abc")
+        model.filterEscape()
+        XCTAssertFalse(model.filterActive)
+        XCTAssertEqual(model.filter, "")
     }
 
     @MainActor

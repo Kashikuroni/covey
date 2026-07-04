@@ -27,7 +27,6 @@ enum KeyAction: Equatable {
     case selectNext, selectPrev, selectFirst
     case enterTerminal
     case exitTerminal
-    case toggleTab
     case newSession(prefillDir: Bool)
     case killSelected
     case startFilter
@@ -60,6 +59,9 @@ enum KeyAction: Equatable {
     case promoteSelected
     case deleteBranchSelected
     case cleanupBranches
+    case restartSelected
+    case restartAllPrompt
+    case returnToRoot
 }
 
 /// Map a Cyrillic char to the Latin key at the same physical QWERTY position;
@@ -153,7 +155,7 @@ enum KeyRouter {
         case .down: return .selectNext
         case .up: return .selectPrev
         case .enter: return .enterTerminal
-        case .tab: return input.isShift ? .sendShiftTab : .toggleTab
+        case .tab: return input.isShift ? .sendShiftTab : nil
         case .pageUp: return .scrollTerminalPage(up: true)
         case .pageDown: return .scrollTerminalPage(up: false)
         case .end: return .scrollTerminalToBottom
@@ -198,6 +200,9 @@ enum KeyRouter {
         case (.git, "p"): return .promoteSelected
         case (.git, "b"): return .deleteBranchSelected
         case (.git, "c"): return .cleanupBranches
+        case (.git, "r"): return .returnToRoot
+        case (.session, "u"): return .restartSelected
+        case (.app, "u"): return .restartAllPrompt
         case (.session, "r"): return .renameSelected
         case (.session, "R"): return .renameProject
         // Every other command in the tree is a later slice; like the TUI,

@@ -17,6 +17,8 @@ public final class AppModel {
         case promote(String)
         case deleteBranch(String)
         case cleanup(String)
+        case restart(String)
+        case restartAll
     }
 
     public enum NoteTarget: Equatable {
@@ -31,8 +33,6 @@ public final class AppModel {
     }
 
     public enum Focus { case sessions, terminal, inspector }
-
-    public enum ListTab: Equatable { case active, recent }
 
     public enum TerminalCommand: Equatable {
         case focus, blur, scrollPage(up: Bool), scrollToBottom
@@ -61,11 +61,9 @@ public final class AppModel {
     public private(set) var showInspector = false
     public private(set) var sbWidth = 360
     public private(set) var vimMode = false
-    /// Bumped by `requestFilterFocus`; the filter field focuses on change.
-    public private(set) var filterFocusTick = 0
+    /// The footer filter is showing (activated by `/` or ⌘F).
+    public private(set) var filterActive = false
     private(set) var inputMode: InputMode = .normal
-    public private(set) var listTab: ListTab = .active
-    public private(set) var recentSelected: Int?
     /// Dir to prefill in the New Session sheet (set by `N`).
     public private(set) var newSessionPrefillDir: String?
     /// Commands for the mounted terminal view (focus/scroll); set by the
@@ -140,7 +138,8 @@ public final class AppModel {
                 // recents, oldest first so the newest ends on top.
                 for s in lost.sorted(by: { $0.created < $1.created }) {
                     pushRecent(&recents, RecentSession(name: s.name, dir: s.dir, agent: s.agent,
-                                                       resumeCmd: s.resumeCmd))
+                                                       resumeCmd: s.resumeCmd,
+                                                       stoppedAt: Int64(Date().timeIntervalSince1970)))
                 }
                 persist()
                 try? await client.clearLost()
@@ -191,6 +190,24 @@ public final class AppModel {
     public func kill(_ name: String, removeWorktree: Bool = false) async {
         do { try await client.kill(name: name, removeWorktree: removeWorktree ? true : nil) }
         catch { toast = errorText(error) }
+    }
+
+    /// Restart via the daemon; the error text doubles as the sheet's inline
+    /// banner. `dir` overrides the respawn directory (return-to-root).
+    @discardableResult
+    public func restart(_ name: String, dir: String? = nil) async -> String? {
+        do { try await client.restart(name: name, dir: dir); return nil }
+        catch { let msg = errorText(error); toast = msg; return msg }
+    }
+
+    /// The `space a u` bulk restart: every session whose agent's first word is
+    /// claude. Returns per-session error lines (empty = all good).
+    public func restartAllClaude() async -> [String] {
+        var errors: [String] = []
+        for s in sessions where s.agent.split(separator: " ").first == "claude" {
+            if let err = await restart(s.name) { errors.append("\(s.name): \(err)") }
+        }
+        return errors
     }
 
     public func gitInfo(_ dir: String) async
@@ -299,7 +316,22 @@ public final class AppModel {
     }
 
     public func setFilter(_ s: String) { filter = s }
-    public func requestFilterFocus() { filterFocusTick += 1 }
+    /// Esc in the footer filter: clear and give the list back its keys.
+    public func filterEscape() {
+        filter = ""
+        filterActive = false
+    }
+
+    /// Enter in the footer filter: keep the selection, drop the filter and
+    /// jump straight into the selected session's terminal.
+    public func filterCommit() {
+        filter = ""
+        filterActive = false
+        if selected != nil {
+            setFocus(.terminal)
+            onTerminalCommand?(.focus)
+        }
+    }
     public func setHistoryMode(_ on: Bool) { historyMode = on }
     public func setFocus(_ f: Focus) { focus = f }
 
@@ -357,11 +389,6 @@ public final class AppModel {
     public func visibleRecents() -> [RecentSession] {
         let active = Set(sessions.map(\.name))
         return recents.filter { !active.contains($0.name) }
-    }
-
-    public func setListTab(_ tab: ListTab) {
-        listTab = tab
-        recentSelected = tab == .recent ? (visibleRecents().isEmpty ? nil : 0) : nil
     }
 
     public func clearNewSessionPrefill() { newSessionPrefillDir = nil }
@@ -432,21 +459,13 @@ public final class AppModel {
             jump(to: n - 1)
             inputMode = .normal
         case .enterTerminal:
-            if listTab == .recent {
-                let items = visibleRecents()
-                if let idx = recentSelected, idx < items.count {
-                    let r = items[idx]
-                    Task { await relaunchRecent(r) }
-                }
-            } else if selected != nil {
+            if selected != nil {
                 setFocus(.terminal)
                 onTerminalCommand?(.focus)
             }
         case .exitTerminal:
             setFocus(.sessions)
             onTerminalCommand?(.blur)
-        case .toggleTab:
-            setListTab(listTab == .active ? .recent : .active)
         case .newSession(let prefill):
             newSessionPrefillDir = prefill
                 ? sessions.first(where: { $0.name == selected }).map(sessionRoot) : nil
@@ -457,7 +476,7 @@ public final class AppModel {
             inputMode = .normal
             if let selected { modal = .rename(selected) }
         case .startFilter:
-            requestFilterFocus()
+            filterActive = true
         case .openLeader:
             inputMode = .leader(.root)
         case .leaderDescend(let menu):
@@ -536,6 +555,26 @@ public final class AppModel {
         case .sendShiftTab:
             guard let selected else { return }
             Task { try? await client.input(name: selected, bytes: [0x1b, 0x5b, 0x5a]) }
+        case .restartSelected:
+            inputMode = .normal
+            if let selected { modal = .restart(selected) }
+        case .restartAllPrompt:
+            inputMode = .normal
+            modal = .restartAll
+        case .returnToRoot:
+            inputMode = .normal
+            guard let s = selectedSession() else { return }
+            guard isReturnable(s), let root = s.worktreeRepo else {
+                toast = "worktree still alive"; return
+            }
+            if s.agent.split(separator: " ").first == "claude" {
+                // Same pipeline as a plain restart, but respawned in the root.
+                Task { await restart(s.name, dir: root) }
+            } else {
+                // A live shell just cd's back (port of the TUI behavior).
+                let cmd = "cd \(shellSingleQuote(root))\n"
+                Task { try? await client.input(name: s.name, bytes: Array(cmd.utf8)) }
+            }
         case .promoteSelected:
             inputMode = .normal
             guard let s = selectedSession() else { return }
@@ -618,13 +657,6 @@ public final class AppModel {
     }
 
     private func step(by delta: Int) {
-        if listTab == .recent {
-            let count = visibleRecents().count
-            guard count > 0 else { recentSelected = nil; return }
-            let cur = recentSelected ?? -1
-            recentSelected = min(count - 1, max(0, cur + delta))
-            return
-        }
         let names = visibleSessionNames()
         guard !names.isEmpty else { return }
         let cur = selected.flatMap { names.firstIndex(of: $0) } ?? -1
@@ -634,12 +666,6 @@ public final class AppModel {
     }
 
     private func jump(to index: Int) {
-        if listTab == .recent {
-            let count = visibleRecents().count
-            guard count > 0 else { return }
-            recentSelected = min(count - 1, max(0, index))
-            return
-        }
         let names = visibleSessionNames()
         guard !names.isEmpty else { return }
         let name = names[min(names.count - 1, max(0, index))]
@@ -648,7 +674,7 @@ public final class AppModel {
 
     /// Keyboard reorder within the selected session's project group.
     private func moveSelectedSession(up: Bool) {
-        guard listTab == .active, let selected else { return }
+        guard let selected else { return }
         guard let group = orderedSessions().first(where: { g in
             g.sessions.contains { $0.name == selected }
         }) else { return }
@@ -700,7 +726,8 @@ public final class AppModel {
         case .exited(let name, _):
             if let s = sessions.first(where: { $0.name == name }) {
                 pushRecent(&recents, RecentSession(name: s.name, dir: s.dir, agent: s.agent,
-                                                   resumeCmd: s.resumeCmd))
+                                                   resumeCmd: s.resumeCmd,
+                                                   stoppedAt: Int64(Date().timeIntervalSince1970)))
                 persist()
             }
             sessions.removeAll { $0.name == name }
