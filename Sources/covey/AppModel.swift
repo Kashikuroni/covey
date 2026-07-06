@@ -12,6 +12,7 @@ public final class AppModel {
     public enum Modal: Equatable {
         case newSession
         case recent
+        case issue(String)
         case kill(String)
         case rename(String)
         case renameProject(String)
@@ -289,6 +290,9 @@ public final class AppModel {
     public func resize(cols: UInt16, rows: UInt16, name: String) async {
         try? await client.resize(name: name, cols: cols, rows: rows)
     }
+
+    /// Sheets fire-and-forget outcomes (issue created after Esc-hide, …).
+    public func showToast(_ message: String) { toast = message }
 
     public func reconnect() async {
         do {
@@ -659,6 +663,11 @@ public final class AppModel {
             guard let s = selectedSession() else { return }
             if s.git == nil { toast = "not a git repo"; return }
             modal = .cleanup(s.dir)
+        case .createIssue:
+            inputMode = .normal
+            guard let s = selectedSession() else { toast = "no session"; return }
+            if s.git == nil { toast = "not a git repo"; return }
+            modal = .issue(s.dir)
         case .splitVertical: openSplit(axis: "v")
         case .splitHorizontal: openSplit(axis: "h")
         case .splitClose:

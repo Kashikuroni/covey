@@ -32,6 +32,7 @@ struct ContentView: View {
                 switch modal {
                 case .newSession: NewSessionSheet(model: model)
                 case .recent: RecentSheet(model: model)
+                case .issue(let dir): IssueSheet(model: model, dir: dir)
                 case .kill(let name): KillSheet(model: model, name: name)
                 case .rename(let name): RenameSheet(model: model, name: name)
                 case .renameProject(let dir): RenameProjectSheet(model: model, dir: dir)

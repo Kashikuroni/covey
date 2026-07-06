@@ -69,6 +69,7 @@ enum KeyAction: Equatable {
     case splitFocusToggle
     case cycleFocus(forward: Bool)
     case openRecent
+    case createIssue
 }
 
 /// Map a Cyrillic char to the Latin key at the same physical QWERTY position;
@@ -216,6 +217,7 @@ enum KeyRouter {
         case (.terminal, "v"): return .splitVertical
         case (.terminal, "h"): return .splitHorizontal
         case (.terminal, "x"): return .splitClose
+        case (.git, "i"): return .createIssue
         case (.git, "p"): return .promoteSelected
         case (.git, "b"): return .deleteBranchSelected
         case (.git, "c"): return .cleanupBranches

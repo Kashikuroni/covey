@@ -20,7 +20,7 @@ struct WhichKeyView: View {
             Row(key: "t", label: "terminal — split v · split h · close", implemented: true),
         ]
         case .git: return [
-            Row(key: "i", label: "create github issue (later)", implemented: false),
+            Row(key: "i", label: "create github issue", implemented: true),
             Row(key: "p", label: "promote worktree to root", implemented: true),
             Row(key: "b", label: "delete session branch", implemented: true),
             Row(key: "c", label: "cleanup merged branches", implemented: true),

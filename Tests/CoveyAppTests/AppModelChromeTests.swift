@@ -391,6 +391,34 @@ final class AppModelChromeTests: XCTestCase {
     }
 
     @MainActor
+    func testCreateIssueGuards() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+
+        model.apply(.createIssue)
+        XCTAssertEqual(model.toast, "no session")
+
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude",
+                                       argv: ["/bin/cat"], name: "agent")
+        _ = await eventually { model.sessions.count == 1 }
+        await model.select("agent")
+
+        // No git info yet -> guard toast, no modal.
+        model.apply(.createIssue)
+        XCTAssertEqual(model.toast, "not a git repo")
+        XCTAssertNil(model.modal)
+
+        // Git info present -> the composer opens on the session's dir.
+        daemon.gitMonitor.onGitChanged?("agent", GitInfo(branch: "main", added: 0, removed: 0))
+        _ = await eventually { model.sessions.first?.git != nil }
+        model.apply(.createIssue)
+        XCTAssertEqual(model.modal, .issue("/tmp"))
+
+        daemon.registry.kill(name: "agent")
+    }
+
+    @MainActor
     func testOpenRecentShowsModal() async throws {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)

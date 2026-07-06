@@ -25,7 +25,7 @@ struct HelpOverlay: View {
             ("G / end", "terminal to bottom"),
         ]),
         ("leader (space)", [
-            ("g", "git: promote · delete branch · cleanup · return to root · issue (later)"),
+            ("g", "git: promote · delete branch · cleanup · return to root · issue"),
             ("s", "session: rename · restart · verify (later) · nvim (later)"),
             ("a", "app: restart all claude · theme · usage log (later)"),
             ("t", "terminal: split v · split h · close"),

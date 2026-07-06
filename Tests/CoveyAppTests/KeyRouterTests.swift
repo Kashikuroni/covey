@@ -93,7 +93,7 @@ final class KeyRouterTests: XCTestCase {
         XCTAssertEqual(KeyRouter.route(key("p"), context: git), .promoteSelected)
         XCTAssertEqual(KeyRouter.route(key("b"), context: git), .deleteBranchSelected)
         XCTAssertEqual(KeyRouter.route(key("c"), context: git), .cleanupBranches)
-        XCTAssertEqual(KeyRouter.route(key("i"), context: git), .closeOverlay, "later command closes")
+        XCTAssertEqual(KeyRouter.route(key("i"), context: git), .createIssue)
         XCTAssertEqual(KeyRouter.route(key("u"), context: session), .restartSelected)
         XCTAssertEqual(KeyRouter.route(key("u"), context: ctx(mode: .leader(.app))),
                        .restartAllPrompt)
@@ -166,6 +166,11 @@ final class KeyRouterTests: XCTestCase {
                        .cycleFocus(forward: false))
         XCTAssertEqual(KeyRouter.route(key("l", ctrl: true), context: ctx(focus: .inspector)),
                        .cycleFocus(forward: true))
+    }
+
+    func testGitIssueChord() {
+        XCTAssertEqual(KeyRouter.route(key("i"), context: ctx(mode: .leader(.git))),
+                       .createIssue)
     }
 
     func testRecentModalKey() {
