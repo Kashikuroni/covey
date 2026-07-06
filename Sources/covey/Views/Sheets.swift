@@ -16,6 +16,7 @@ extension AppModel.Modal: Identifiable {
         case .cleanup(let dir): return "cleanup-\(dir)"
         case .restart(let name): return "restart-\(name)"
         case .restartAll: return "restart-all"
+        case .themeRestart: return "theme-restart"
         }
     }
 }
@@ -172,6 +173,7 @@ struct IssueSheet: View {
 
     @State private var title = ""
     @State private var bodyText = ""
+    @State private var assignMe = false
     @State private var stage: Stage = .editing
     @FocusState private var titleFocused: Bool
     @FocusState private var bodyFocused: Bool
@@ -245,11 +247,22 @@ struct IssueSheet: View {
                     titleFocused = true
                     return .handled
                 }
+            HStack(spacing: 8) {
+                // Custom checkbox glyph, matching the new-session form's rows.
+                Image(systemName: assignMe ? "checkmark.square.fill" : "square")
+                    .foregroundStyle(assignMe ? Color.accentColor : .secondary)
+                Text("assign to me").font(.callout)
+                Spacer()
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { assignMe.toggle() }
             HStack {
                 Text("⇧enter create · tab field · esc cancel")
                     .font(.caption2).foregroundStyle(.tertiary)
                 Spacer()
                 Button("Cancel") { model.modal = nil }
+                Button("Open in browser…") { submit(web: true) }
+                    .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
                 Button("Create") { submit() }
                     .buttonStyle(.glassProminent)
                     .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -257,15 +270,22 @@ struct IssueSheet: View {
         }
     }
 
-    private func submit() {
+    private func submit(web: Bool = false) {
         let t = title.trimmingCharacters(in: .whitespaces)
         guard !t.isEmpty else { return }
         stage = .creating
         let body = bodyText
         let dir = dir
+        let assignMe = assignMe
         Task { @MainActor in
-            switch await IssueService.create(dir: dir, title: t, body: body) {
+            switch await IssueService.create(dir: dir, title: t, body: body,
+                                             assignMe: assignMe, web: web) {
             case .success(let url):
+                if web {
+                    // The browser owns the draft now; nothing to show here.
+                    if model.modal == .issue(dir) { model.modal = nil }
+                    return
+                }
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(url, forType: .string)
                 if model.modal == .issue(dir) {
@@ -346,6 +366,62 @@ struct RestartAllSheet: View {
     private func run() {
         Task {
             let errors = await model.restartAllClaude()
+            if errors.isEmpty { model.modal = nil }
+            else { error = errors.joined(separator: " · ") }
+        }
+    }
+}
+
+/// Offered after a theme toggle: claude reads its palette once at startup,
+/// so live agents keep the old colors until restarted. Idle agents restart
+/// on confirm (the plan is recomputed then); busy ones are listed, untouched.
+struct ThemeRestartSheet: View {
+    let model: AppModel
+    @State private var error: String?
+
+    var body: some View {
+        let plan = themeRestartPlan(sessions: model.visibleSessions,
+                                    statuses: model.statusByName)
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Apply theme to agents?").font(.headline)
+            Text("Idle agents restart and resume their conversation; busy ones keep the old theme until restarted by hand (space s u).")
+                .font(.caption).foregroundStyle(.secondary)
+            if !plan.idle.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Will restart").font(.caption).foregroundStyle(.secondary)
+                    ForEach(plan.idle, id: \.self) { name in
+                        Text("• \(name)").font(.caption)
+                    }
+                }
+            }
+            if !plan.busy.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Keeps old theme").font(.caption).foregroundStyle(.secondary)
+                    ForEach(plan.busy, id: \.self) { name in
+                        Text("• \(name) — \(model.statusByName[name]?.rawValue ?? "busy")")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            if let error {
+                Text("! \(error)").font(.caption).foregroundStyle(.red)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { model.modal = nil }
+                Button("Restart \(plan.idle.count)") { run() }
+                    .buttonStyle(.glassProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(plan.idle.isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 380)
+    }
+
+    private func run() {
+        Task {
+            let errors = await model.restartIdleClaude()
             if errors.isEmpty { model.modal = nil }
             else { error = errors.joined(separator: " · ") }
         }

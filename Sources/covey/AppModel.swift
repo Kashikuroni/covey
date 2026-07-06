@@ -21,6 +21,7 @@ public final class AppModel {
         case cleanup(String)
         case restart(String)
         case restartAll
+        case themeRestart
     }
 
     public enum NoteTarget: Equatable {
@@ -250,6 +251,30 @@ public final class AppModel {
         var errors: [String] = []
         for s in visibleSessions where s.agent.split(separator: " ").first == "claude" {
             if let err = await restart(s.name) { errors.append("\(s.name): \(err)") }
+        }
+        return errors
+    }
+
+    /// After a theme toggle: claude reads its palette once at startup, so
+    /// live agents keep the old colors until restarted. Offers a restart of
+    /// the idle ones; busy agents are only counted in a toast.
+    public func offerThemeRestart() {
+        let plan = themeRestartPlan(sessions: visibleSessions, statuses: statusByName)
+        if !plan.idle.isEmpty {
+            modal = .themeRestart
+        } else if !plan.busy.isEmpty {
+            toast = "\(plan.busy.count) agent(s) keep old theme — restart when idle (space s u)"
+        }
+    }
+
+    /// Confirm handler of the theme-restart sheet: restarts every claude
+    /// session still idle at confirm time (the plan is recomputed — some may
+    /// have started working since the sheet opened). Returns error lines.
+    public func restartIdleClaude() async -> [String] {
+        let plan = themeRestartPlan(sessions: visibleSessions, statuses: statusByName)
+        var errors: [String] = []
+        for name in plan.idle {
+            if let err = await restart(name) { errors.append("\(name): \(err)") }
         }
         return errors
     }
@@ -640,6 +665,7 @@ public final class AppModel {
         case .toggleTheme:
             inputMode = .normal
             setTheme(themeRaw == "dark" ? "light" : "dark")
+            offerThemeRestart()
         case .returnToRoot:
             inputMode = .normal
             guard let s = selectedSession() else { return }

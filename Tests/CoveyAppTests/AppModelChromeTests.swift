@@ -460,4 +460,104 @@ final class AppModelChromeTests: XCTestCase {
         daemon.registry.kill(name: "agent")
     }
 
+    @MainActor
+    func testToggleThemeWithNoAgentsJustFlips() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        let before = model.themeRaw
+        model.apply(.toggleTheme)
+        XCTAssertNotEqual(model.themeRaw, before)
+        XCTAssertNil(model.modal)
+        XCTAssertNil(model.toast)
+    }
+
+    @MainActor
+    func testToggleThemeBusyClaudeShowsToast() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        // No monitor tick -> no status -> the agent counts as busy.
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude",
+                                       argv: ["/bin/cat"], name: "agent")
+        _ = await eventually { model.sessions.count == 1 }
+        model.apply(.toggleTheme)
+        XCTAssertNil(model.modal)
+        XCTAssertEqual(model.toast,
+                       "1 agent(s) keep old theme — restart when idle (space s u)")
+        daemon.registry.kill(name: "agent")
+    }
+
+    @MainActor
+    func testToggleThemeIdleClaudeOpensModal() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude",
+                                       argv: ["/bin/cat"], name: "agent")
+        _ = await eventually { model.sessions.count == 1 }
+        _ = await eventually {
+            daemon.monitor.tick()
+            return model.statusByName["agent"] == .idle
+        }
+        model.apply(.toggleTheme)
+        XCTAssertEqual(model.modal, .themeRestart)
+        XCTAssertNil(model.toast)
+        daemon.registry.kill(name: "agent")
+    }
+
+    @MainActor
+    func testToggleThemeIdleShellDoesNothing() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        _ = try daemon.registry.create(dir: "/tmp", agent: "sh",
+                                       argv: ["/bin/cat"], name: "shell")
+        _ = await eventually { model.sessions.count == 1 }
+        _ = await eventually {
+            daemon.monitor.tick()
+            return model.statusByName["shell"] == .idle
+        }
+        model.apply(.toggleTheme)
+        XCTAssertNil(model.modal, "shells recolor live via installColors")
+        XCTAssertNil(model.toast)
+        daemon.registry.kill(name: "shell")
+    }
+
+    @MainActor
+    func testRestartIdleClaudeSkipsBusy() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        // Idle: prints a spawn marker, then sits quiet. Busy: renders a
+        // numbered menu -> .waiting.
+        _ = try daemon.registry.create(
+            dir: "/tmp", agent: "claude",
+            argv: ["/bin/sh", "-c", "echo spawned-$$; exec cat"], name: "idler")
+        _ = try daemon.registry.create(
+            dir: "/tmp", agent: "claude",
+            argv: ["/bin/sh", "-c", "printf 'pick:\\n  1. yes\\n  2. no\\n'; exec cat"],
+            name: "busy")
+        _ = await eventually { model.sessions.count == 2 }
+        _ = await eventually {
+            daemon.monitor.tick()
+            return model.statusByName["idler"] == .idle
+                && model.statusByName["busy"] == .waiting
+        }
+        let errors = await model.restartIdleClaude()
+        XCTAssertEqual(errors, [])
+        // The respawned /bin/sh prints a second marker onto the same screen.
+        _ = await eventually {
+            let text = daemon.registry.snapshotScreens()["idler"] ?? ""
+            return text.components(separatedBy: "spawned-").count - 1 == 2
+        }
+        let markers = (daemon.registry.snapshotScreens()["idler"] ?? "")
+            .components(separatedBy: "spawned-").count - 1
+        XCTAssertEqual(markers, 2, "idle agent must have respawned")
+        XCTAssertNotNil(daemon.registry.get(name: "busy"),
+                        "busy agent must not be restarted")
+        daemon.registry.kill(name: "idler")
+        daemon.registry.kill(name: "busy")
+    }
+
 }

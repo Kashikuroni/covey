@@ -41,6 +41,7 @@ struct ContentView: View {
                 case .cleanup(let dir): CleanupSheet(model: model, dir: dir)
                 case .restart(let name): RestartSheet(model: model, name: name)
                 case .restartAll: RestartAllSheet(model: model)
+                case .themeRestart: ThemeRestartSheet(model: model)
                 }
             }
             // Sheets default to the system gray material — paint them ayu.
