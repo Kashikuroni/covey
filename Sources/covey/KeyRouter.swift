@@ -5,10 +5,9 @@ enum InputMode: Equatable {
     case leader(LeaderMenu)
     case selectSession
     case help
-    case note
 }
 
-enum LeaderMenu: Equatable { case root, git, session, app, terminal }
+enum LeaderMenu: Equatable { case root, git, session, terminal, ui }
 
 /// Non-character keys the router cares about.
 enum Special: Equatable {
@@ -42,17 +41,7 @@ enum KeyAction: Equatable {
     case scrollTerminalPage(up: Bool)
     case scrollTerminalToBottom
     case showHelp
-    case toggleSessionNote
-    case toggleProjectNote
-    case noteCursor(down: Bool)
-    case noteToggleTask
-    case noteVisual
-    case noteYank
-    case noteDelete
-    case noteEdit
-    case noteArmClear
-    case noteDefocus
-    case noteEscape
+    case openProjectNote
     case renameProject
     case answerPrompt(Int)
     case sendShiftTab
@@ -70,6 +59,12 @@ enum KeyAction: Equatable {
     case cycleFocus(forward: Bool)
     case openRecent
     case createIssue
+    case inspectorPaneSwap
+    case inspectorSplitToggle
+    case toggleSessionsPanel
+    case toggleInspectorPanel
+    case toggleFooterPanel
+    case toggleHeaderPanel
 }
 
 /// Map a Cyrillic char to the Latin key at the same physical QWERTY position;
@@ -110,6 +105,24 @@ enum KeyRouter {
         }
         guard context.vimMode else { return nil }
 
+        // Inspector zone extras: ⌃j/⌃k swap the split panes, `s` toggles
+        // tabs<->split (list navigation never uses s here).
+        if context.focus == .inspector {
+            if input.isControl, ch == "j" || ch == "k" {
+                return .inspectorPaneSwap
+            }
+            if !input.isControl, ch == "s", context.mode == .normal {
+                return .inspectorSplitToggle
+            }
+        }
+
+        // ⌃h/⌃l walk the focus zones from every zone and mode — the
+        // note/issue tabs are zones of the same cycle.
+        if input.isControl {
+            if ch == "l" { return .cycleFocus(forward: true) }
+            if ch == "h" { return .cycleFocus(forward: false) }
+        }
+
         switch context.mode {
         case .normal:
             return routeNormal(input, ch)
@@ -123,29 +136,6 @@ enum KeyRouter {
             return nil   // anything else is ignored; the mode stays
         case .help:
             return .closeOverlay
-        case .note:
-            return routeNote(input, ch)
-        }
-    }
-
-    private static func routeNote(_ input: KeyInput, _ ch: Character?) -> KeyAction? {
-        switch input.special {
-        case .down: return .noteCursor(down: true)
-        case .up: return .noteCursor(down: false)
-        case .tab: return .noteDefocus
-        case .escape: return .noteEscape
-        default: break
-        }
-        switch ch {
-        case "j": return .noteCursor(down: true)
-        case "k": return .noteCursor(down: false)
-        case " ": return .noteToggleTask
-        case "V": return .noteVisual
-        case "y": return .noteYank
-        case "d": return .noteDelete
-        case "e": return .noteEdit
-        case "c": return .noteArmClear
-        default: return nil
         }
     }
 
@@ -159,9 +149,6 @@ enum KeyRouter {
             switch ch {
             case "k": return .scrollTerminalPage(up: true)
             case "j": return .scrollTerminalPage(up: false)
-            // ⌃h/⌃l walk the focus zones (list -> agent -> shell -> inspector).
-            case "l": return .cycleFocus(forward: true)
-            case "h": return .cycleFocus(forward: false)
             case "\\": return .splitFocusToggle
             default: return nil
             }
@@ -188,8 +175,7 @@ enum KeyRouter {
         case "d": return .killSelected
         case "/": return .startFilter
         case "s": return .enterSelectMode
-        case "t": return .toggleSessionNote
-        case "T": return .toggleProjectNote
+        case "t", "T": return .openProjectNote
         case " ": return .openLeader
         case "K": return .moveSelected(up: true)
         case "J": return .moveSelected(up: false)
@@ -212,8 +198,13 @@ enum KeyRouter {
         switch (menu, ch) {
         case (.root, "g"): return .leaderDescend(.git)
         case (.root, "s"): return .leaderDescend(.session)
-        case (.root, "a"): return .leaderDescend(.app)
         case (.root, "t"): return .leaderDescend(.terminal)
+        case (.root, "u"): return .leaderDescend(.ui)
+        case (.ui, "s"): return .toggleSessionsPanel
+        case (.ui, "i"): return .toggleInspectorPanel
+        case (.ui, "f"): return .toggleFooterPanel
+        case (.ui, "h"): return .toggleHeaderPanel
+        case (.ui, "t"): return .toggleTheme
         case (.terminal, "v"): return .splitVertical
         case (.terminal, "h"): return .splitHorizontal
         case (.terminal, "x"): return .splitClose
@@ -223,8 +214,7 @@ enum KeyRouter {
         case (.git, "c"): return .cleanupBranches
         case (.git, "r"): return .returnToRoot
         case (.session, "u"): return .restartSelected
-        case (.app, "u"): return .restartAllPrompt
-        case (.app, "t"): return .toggleTheme
+        case (.session, "U"): return .restartAllPrompt
         case (.session, "r"): return .renameSelected
         case (.session, "R"): return .renameProject
         // Every other command in the tree is a later slice; like the TUI,

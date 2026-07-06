@@ -82,7 +82,6 @@ final class KeyRouterTests: XCTestCase {
         let root = ctx(mode: .leader(.root))
         XCTAssertEqual(KeyRouter.route(key("g"), context: root), .leaderDescend(.git))
         XCTAssertEqual(KeyRouter.route(key("s"), context: root), .leaderDescend(.session))
-        XCTAssertEqual(KeyRouter.route(key("a"), context: root), .leaderDescend(.app))
         XCTAssertEqual(KeyRouter.route(special(.escape), context: root), .closeOverlay)
         XCTAssertEqual(KeyRouter.route(key("x"), context: root), .closeOverlay, "unbound closes")
         let session = ctx(mode: .leader(.session))
@@ -95,9 +94,8 @@ final class KeyRouterTests: XCTestCase {
         XCTAssertEqual(KeyRouter.route(key("c"), context: git), .cleanupBranches)
         XCTAssertEqual(KeyRouter.route(key("i"), context: git), .createIssue)
         XCTAssertEqual(KeyRouter.route(key("u"), context: session), .restartSelected)
-        XCTAssertEqual(KeyRouter.route(key("u"), context: ctx(mode: .leader(.app))),
-                       .restartAllPrompt)
-        XCTAssertEqual(KeyRouter.route(key("t"), context: ctx(mode: .leader(.app))),
+        XCTAssertEqual(KeyRouter.route(key("U"), context: session), .restartAllPrompt)
+        XCTAssertEqual(KeyRouter.route(key("t"), context: ctx(mode: .leader(.ui))),
                        .toggleTheme)
         XCTAssertEqual(KeyRouter.route(key("r"), context: git), .returnToRoot)
     }
@@ -116,30 +114,11 @@ final class KeyRouterTests: XCTestCase {
         XCTAssertEqual(KeyRouter.route(special(.enter), context: help), .closeOverlay)
     }
 
-    func testNoteToggleKeysInNormalMode() {
-        XCTAssertEqual(KeyRouter.route(key("t"), context: ctx()), .toggleSessionNote)
-        XCTAssertEqual(KeyRouter.route(key("T"), context: ctx()), .toggleProjectNote)
-        XCTAssertEqual(KeyRouter.route(key("е"), context: ctx()), .toggleSessionNote, "ЙЦУКЕН t")
-    }
-
-    func testNoteModeBindings() {
-        let note = ctx(mode: .note)
-        let cases: [(KeyInput, KeyAction)] = [
-            (key("j"), .noteCursor(down: true)), (key("k"), .noteCursor(down: false)),
-            (special(.down), .noteCursor(down: true)), (special(.up), .noteCursor(down: false)),
-            (key(" "), .noteToggleTask),
-            (key("V"), .noteVisual),
-            (key("y"), .noteYank),
-            (key("d"), .noteDelete),
-            (key("e"), .noteEdit),
-            (key("c"), .noteArmClear),
-            (special(.tab), .noteDefocus),
-            (special(.escape), .noteEscape),
-        ]
-        for (input, want) in cases {
-            XCTAssertEqual(KeyRouter.route(input, context: note), want, "\(input)")
-        }
-        XCTAssertNil(KeyRouter.route(key("z"), context: note), "unbound ignored")
+    func testProjectNoteKeysInNormalMode() {
+        // Session notes are gone: both t and T open the project note.
+        XCTAssertEqual(KeyRouter.route(key("t"), context: ctx()), .openProjectNote)
+        XCTAssertEqual(KeyRouter.route(key("T"), context: ctx()), .openProjectNote)
+        XCTAssertEqual(KeyRouter.route(key("е"), context: ctx()), .openProjectNote, "ЙЦУКЕН t")
     }
 
     func testLeaderSessionRenameProject() {
@@ -164,8 +143,41 @@ final class KeyRouterTests: XCTestCase {
                        .cycleFocus(forward: true))
         XCTAssertEqual(KeyRouter.route(key("h", ctrl: true), context: ctx(focus: .terminal)),
                        .cycleFocus(forward: false))
-        XCTAssertEqual(KeyRouter.route(key("l", ctrl: true), context: ctx(focus: .inspector)),
+        // (inside the inspector zone ⌃h/⌃l switch tabs — see
+        // testInspectorZoneChords)
+    }
+
+    func testInspectorZoneChords() {
+        let insp = ctx(focus: .inspector)
+        // ⌃h/⌃l cycle the focus zones EVERYWHERE — the inspector included,
+        // and from note mode too (note/issue are zones of the global cycle).
+        XCTAssertEqual(KeyRouter.route(key("l", ctrl: true), context: insp),
                        .cycleFocus(forward: true))
+        XCTAssertEqual(KeyRouter.route(key("h", ctrl: true), context: insp),
+                       .cycleFocus(forward: false))
+        XCTAssertEqual(KeyRouter.route(key("j", ctrl: true), context: insp),
+                       .inspectorPaneSwap)
+        XCTAssertEqual(KeyRouter.route(key("k", ctrl: true), context: insp),
+                       .inspectorPaneSwap)
+        XCTAssertEqual(KeyRouter.route(key("s"), context: insp), .inspectorSplitToggle)
+        // Outside the zone the old meanings stay.
+        XCTAssertEqual(KeyRouter.route(key("l", ctrl: true), context: ctx()),
+                       .cycleFocus(forward: true))
+        XCTAssertEqual(KeyRouter.route(key("s"), context: ctx()), .enterSelectMode)
+    }
+
+    func testUiLeaderGroup() {
+        XCTAssertEqual(KeyRouter.route(key("u"), context: ctx(mode: .leader(.root))),
+                       .leaderDescend(.ui))
+        let u = ctx(mode: .leader(.ui))
+        XCTAssertEqual(KeyRouter.route(key("s"), context: u), .toggleSessionsPanel)
+        XCTAssertEqual(KeyRouter.route(key("i"), context: u), .toggleInspectorPanel)
+        XCTAssertEqual(KeyRouter.route(key("f"), context: u), .toggleFooterPanel)
+        XCTAssertEqual(KeyRouter.route(key("h"), context: u), .toggleHeaderPanel)
+        XCTAssertEqual(KeyRouter.route(key("t"), context: u), .toggleTheme)
+        // The old app group is gone.
+        XCTAssertEqual(KeyRouter.route(key("a"), context: ctx(mode: .leader(.root))),
+                       .closeOverlay)
     }
 
     func testGitIssueChord() {

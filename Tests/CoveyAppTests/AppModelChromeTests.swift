@@ -256,40 +256,22 @@ final class AppModelChromeTests: XCTestCase {
     }
 
     @MainActor
-    func testNoteToggleFlowAndEditing() async throws {
+    func testOpenProjectNoteEntersInspectorNoteZone() async throws {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
         await model.start()
+
+        model.apply(.openProjectNote)
+        XCTAssertEqual(model.toast, "no session")
+
         await model.create(dir: "/a", agent: "/bin/cat")
         _ = await eventually { model.sessions.count == 1 }
         let name = model.sessions[0].name
         await model.select(name)
-        model.apply(.toggleSessionNote)
-        XCTAssertEqual(model.noteTarget, .session(name))
-        XCTAssertEqual(model.inputMode, .note)
-        XCTAssertTrue(model.showInspector, "opening a note reveals the inspector")
-        model.apply(.toggleSessionNote)
-        XCTAssertNil(model.noteTarget, "second t closes")
-        XCTAssertEqual(model.inputMode, .normal)
-        model.apply(.toggleProjectNote)
-        XCTAssertEqual(model.noteTarget, .project("/a"))
-        model.setNoteText("- [ ] one\n- [ ] two")
-        model.apply(.noteToggleTask)
-        XCTAssertEqual(taskCounts(model.noteText()).done, 1)
-        model.apply(.noteCursor(down: true))
-        model.apply(.noteVisual)
-        model.apply(.noteCursor(down: false))
-        model.apply(.noteDelete)
-        XCTAssertEqual(taskCounts(model.noteText()).total, 0, "visual delete removes both")
-        model.setNoteText("- [ ] x")
-        model.apply(.noteArmClear)
-        model.apply(.noteCursor(down: true))   // any non-y key disarms, does nothing else
-        XCTAssertEqual(model.noteText(), "- [ ] x")
-        model.apply(.noteArmClear)
-        model.apply(.noteYank)                 // armed + y wipes
-        XCTAssertEqual(model.noteText(), "")
-        model.apply(.noteEscape)
-        XCTAssertNil(model.noteTarget)
+        model.apply(.openProjectNote)
+        XCTAssertTrue(model.showInspector, "opening the note reveals the inspector")
+        XCTAssertEqual(model.inspectorTab, .note)
+        XCTAssertEqual(model.focus, .inspector)
         await model.kill(name)
     }
 
@@ -391,7 +373,7 @@ final class AppModelChromeTests: XCTestCase {
     }
 
     @MainActor
-    func testCreateIssueGuards() async throws {
+    func testCreateIssueOpensInspectorIssueTab() async throws {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
         await model.start()
@@ -403,19 +385,101 @@ final class AppModelChromeTests: XCTestCase {
                                        argv: ["/bin/cat"], name: "agent")
         _ = await eventually { model.sessions.count == 1 }
         await model.select("agent")
-
-        // No git info yet -> guard toast, no modal.
         model.apply(.createIssue)
         XCTAssertEqual(model.toast, "not a git repo")
-        XCTAssertNil(model.modal)
 
-        // Git info present -> the composer opens on the session's dir.
         daemon.gitMonitor.onGitChanged?("agent", GitInfo(branch: "main", added: 0, removed: 0))
         _ = await eventually { model.sessions.first?.git != nil }
+        let tickBefore = model.issueFocusTick
         model.apply(.createIssue)
-        XCTAssertEqual(model.modal, .issue("/tmp"))
+        XCTAssertNil(model.modal)
+        XCTAssertTrue(model.showInspector)
+        XCTAssertEqual(model.inspectorTab, .issue)
+        XCTAssertEqual(model.focus, .inspector)
+        XCTAssertEqual(model.issueFocusTick, tickBefore + 1)
 
         daemon.registry.kill(name: "agent")
+    }
+
+    @MainActor
+    func testInspectorTabsSplitAndWindowToggles() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+
+        XCTAssertEqual(model.inspectorTab, .note)
+        model.apply(.inspectorPaneSwap)
+        XCTAssertEqual(model.inspectorTab, .issue, "pane swap flips the active pane")
+        model.apply(.inspectorPaneSwap)
+        XCTAssertEqual(model.inspectorTab, .note)
+        model.selectInspectorTab(.issue)
+        XCTAssertEqual(model.inspectorTab, .issue)
+
+        XCTAssertFalse(model.inspectorSplit)
+        model.apply(.inspectorSplitToggle)
+        XCTAssertTrue(model.inspectorSplit)
+
+        let sessionsShown = model.showSessions
+        model.apply(.toggleSessionsPanel)
+        XCTAssertEqual(model.showSessions, !sessionsShown)
+        let footerShown = model.showFooter
+        model.apply(.toggleFooterPanel)
+        XCTAssertEqual(model.showFooter, !footerShown)
+        let headerShown = model.showHeader
+        model.apply(.toggleHeaderPanel)
+        XCTAssertEqual(model.showHeader, !headerShown)
+
+        // Hiding the inspector while focused inside returns to sessions.
+        model.setShowInspector(true)
+        model.setFocus(.inspector)
+        model.apply(.toggleInspectorPanel)
+        XCTAssertFalse(model.showInspector)
+        XCTAssertEqual(model.focus, .sessions)
+    }
+
+    @MainActor
+    func testCycleFocusWalksInspectorTabsAsZones() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude",
+                                       argv: ["/bin/cat"], name: "agent")
+        _ = await eventually { model.sessions.count == 1 }
+        await model.select("agent")
+        model.setShowInspector(true)
+
+        model.setFocus(.sessions)
+        model.apply(.cycleFocus(forward: true))   // -> agent pane
+        XCTAssertEqual(model.focus, .terminal)
+        model.apply(.cycleFocus(forward: true))   // -> inspector, note zone
+        XCTAssertEqual(model.focus, .inspector)
+        XCTAssertEqual(model.inspectorTab, .note)
+        let tickBefore = model.issueFocusTick
+        model.apply(.cycleFocus(forward: true))   // -> inspector, issue zone
+        XCTAssertEqual(model.focus, .inspector)
+        XCTAssertEqual(model.inspectorTab, .issue)
+        XCTAssertEqual(model.issueFocusTick, tickBefore + 1,
+                       "issue zone always lands in the form")
+        model.apply(.cycleFocus(forward: true))   // wrap -> sessions
+        XCTAssertEqual(model.focus, .sessions)
+        model.apply(.cycleFocus(forward: false))  // back -> issue zone
+        XCTAssertEqual(model.focus, .inspector)
+        XCTAssertEqual(model.inspectorTab, .issue)
+
+        daemon.registry.kill(name: "agent")
+    }
+
+    @MainActor
+    func testIssueDraftPerProjectRoot() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        XCTAssertEqual(model.issueDraft(forRoot: "/repo"), IssueDraft())
+        model.setIssueDraft(IssueDraft(title: "t", body: "b", assignMe: true),
+                            forRoot: "/repo")
+        XCTAssertEqual(model.issueDraft(forRoot: "/repo").title, "t")
+        model.clearIssueDraft(forRoot: "/repo")
+        XCTAssertEqual(model.issueDraft(forRoot: "/repo"), IssueDraft())
     }
 
     @MainActor

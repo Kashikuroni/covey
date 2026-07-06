@@ -54,32 +54,31 @@ struct StatusBar: View {
     private var hintsRow: some View {
         HStack(spacing: 10) {
             ForEach(hintPairs, id: \.0) { key, label in
-                HStack(spacing: 4) {
-                    kbd(key)
-                    Text(label).font(.caption).foregroundStyle(tk.t4)
-                }
+                KbdBadge(key: key, label: label, tk: tk)
             }
         }
     }
 
-    private func kbd(_ s: String) -> some View {
-        Text(s)
-            .font(.system(size: 10, design: .monospaced))
-            .foregroundStyle(tk.t2)
-            .padding(.horizontal, 6).padding(.vertical, 1)
-            .background(tk.surf2, in: RoundedRectangle(cornerRadius: 3))
-            .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(tk.bd2))
-    }
-
     private var hintPairs: [(String, String)] {
         if model.focus == .terminal { return [("⌃q", "back to list")] }
+        if model.focus == .inspector {
+            // App-level hints only; the editor's own footer carries the
+            // per-mode vim hints. While typing, most app keys are dead —
+            // do not lie about them.
+            if model.inspectorVimBadge == "INSERT" || model.inspectorEditing {
+                return [("esc", "leave insert")]
+            }
+            if model.inspectorTab == .issue {
+                return [("⌘ M", "assign"), ("⌘ O", "browser"), ("enter", "create"),
+                        ("⌃h/⌃l", "zones")]
+            }
+            return [("space", "menu"), ("s", "tabs / split"),
+                    ("⌃h/⌃l", "zones"), ("⌃j/⌃k", "panes")]
+        }
         switch model.inputMode {
         case .leader: return [("esc", "close"), ("⌫", "back")]
         case .selectSession: return [("1-9", "jump"), ("esc", "cancel")]
         case .help: return [("any key", "closes")]
-        case .note:
-            return [("space", "toggle"), ("e", "edit"), ("d", "delete"),
-                    ("V", "select"), ("y", "yank"), ("esc", "close")]
         case .normal:
             guard model.vimMode else { return [("⌘N", "new"), ("⌘F", "filter")] }
             var base: [(String, String)] = [

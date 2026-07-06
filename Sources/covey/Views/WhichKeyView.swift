@@ -16,8 +16,8 @@ struct WhichKeyView: View {
         case .root: return [
             Row(key: "g", label: "git — issue · promote · delete branch · cleanup · return", implemented: true),
             Row(key: "s", label: "session — rename · restart · verify · nvim", implemented: true),
-            Row(key: "a", label: "app — usage log · restart claude", implemented: true),
             Row(key: "t", label: "terminal — split v · split h · close", implemented: true),
+            Row(key: "u", label: "ui — panels · theme", implemented: true),
         ]
         case .git: return [
             Row(key: "i", label: "create github issue", implemented: true),
@@ -28,21 +28,24 @@ struct WhichKeyView: View {
         ]
         case .session: return [
             Row(key: "r", label: "rename session", implemented: true),
-            Row(key: "R", label: "rename project (later)", implemented: false),
+            Row(key: "R", label: "rename project", implemented: true),
             Row(key: "u", label: "restart session", implemented: true),
+            Row(key: "U", label: "restart all claude sessions", implemented: true),
             Row(key: "v", label: "verify / cancel (later)", implemented: false),
             Row(key: "V", label: "verification details (later)", implemented: false),
             Row(key: "e", label: "nvim in agent dir (later)", implemented: false),
-        ]
-        case .app: return [
-            Row(key: "l", label: "usage log (later)", implemented: false),
-            Row(key: "u", label: "restart all claude sessions", implemented: true),
-            Row(key: "t", label: "toggle dark / light theme", implemented: true),
         ]
         case .terminal: return [
             Row(key: "v", label: "vertical split — shell beside agent", implemented: true),
             Row(key: "h", label: "horizontal split — shell below agent", implemented: true),
             Row(key: "x", label: "close split", implemented: true),
+        ]
+        case .ui: return [
+            Row(key: "s", label: "toggle session list", implemented: true),
+            Row(key: "i", label: "toggle inspector", implemented: true),
+            Row(key: "f", label: "toggle footer", implemented: true),
+            Row(key: "h", label: "toggle header", implemented: true),
+            Row(key: "t", label: "toggle dark / light theme", implemented: true),
         ]
         }
     }
@@ -72,8 +75,8 @@ struct WhichKeyView: View {
         case .root: return "space —"
         case .git: return "space g — git"
         case .session: return "space s — session"
-        case .app: return "space a — app"
         case .terminal: return "space t — terminal"
+        case .ui: return "space u — ui"
         }
     }
 }

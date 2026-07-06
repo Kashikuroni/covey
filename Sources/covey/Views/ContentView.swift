@@ -32,7 +32,6 @@ struct ContentView: View {
                 switch modal {
                 case .newSession: NewSessionSheet(model: model)
                 case .recent: RecentSheet(model: model)
-                case .issue(let dir): IssueSheet(model: model, dir: dir)
                 case .kill(let name): KillSheet(model: model, name: name)
                 case .rename(let name): RenameSheet(model: model, name: name)
                 case .renameProject(let dir): RenameProjectSheet(model: model, dir: dir)
@@ -68,6 +67,29 @@ struct ContentView: View {
                 }
                 // ⌘-anything else belongs to the menu system.
                 guard !event.modifierFlags.contains(.command) else { return event }
+                // Inspector zone chords must escape its text fields: ⌃h/l/j/k
+                // never type text (the zone's emacs bindings are sacrificed).
+                if model.focus == .inspector,
+                   event.modifierFlags.intersection([.command, .shift, .option, .control]) == .control,
+                   let raw = event.charactersIgnoringModifiers?.first,
+                   ["h", "l", "j", "k"].contains(latinize(raw)) {
+                    let context = KeyRouter.Context(mode: model.inputMode,
+                                                    focus: model.focus,
+                                                    vimMode: model.vimMode,
+                                                    sheetOpen: model.modal != nil)
+                    if let action = KeyRouter.route(keyInput(from: event), context: context) {
+                        model.apply(action)
+                        return nil
+                    }
+                }
+                // The inspector zone owns its plain keys (vim editors and the
+                // preview are not NSTextViews): only the zone chords above and
+                // the space leader stay global here.
+                let plainChar = event.charactersIgnoringModifiers?.first.map(latinize)
+                if model.focus == .inspector, model.inputMode == .normal,
+                   plainChar != " " {
+                    return event
+                }
                 // While a text field edits (filter, sheets), keys are its own.
                 if let responder = event.window?.firstResponder, responder is NSTextView {
                     return event

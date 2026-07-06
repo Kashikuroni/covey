@@ -72,11 +72,8 @@ struct UsageChip: View {
     }
 
     private func badge(_ text: Text) -> some View {
-        // Muted ayu body color: plain white reads as an extra accent in the
-        // dark theme. The percentage keeps its own threshold color.
-        text
-            .foregroundStyle(tk.t3)
-            .padding(.horizontal, 6).padding(.vertical, 2)
-            .glassEffect(.regular, in: .rect(cornerRadius: 4))
+        // Plain minimal text — no chip chrome. Muted ayu body color; the
+        // percentage keeps its own threshold color.
+        text.foregroundStyle(tk.t3)
     }
 }

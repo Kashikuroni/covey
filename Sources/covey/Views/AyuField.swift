@@ -27,3 +27,23 @@ extension View {
         modifier(AyuFieldModifier(tk: tk, focused: focused))
     }
 }
+
+/// Flat ayu button, no glass shadow: prominent = accent fill (bg-colored
+/// text), plain = surf2 fill with a hairline border.
+struct AyuButton: ButtonStyle {
+    let tk: Tokens
+    let prominent: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.callout)
+            .foregroundStyle(prominent ? tk.bg : tk.t2)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(prominent ? tk.accent : tk.surf2,
+                        in: RoundedRectangle(cornerRadius: 5))
+            .overlay(RoundedRectangle(cornerRadius: 5)
+                .strokeBorder(prominent ? .clear : tk.bd2))
+            .opacity(configuration.isPressed ? 0.75 : 1)
+    }
+}

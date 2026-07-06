@@ -8,6 +8,14 @@ func parseIssueURL(_ stdout: String) -> String? {
     }.last { !$0.isEmpty }
 }
 
+/// The gh invocation for a new issue; pure so tests pin the flag layout.
+func issueCreateArgs(title: String, body: String, assignMe: Bool, web: Bool) -> [String] {
+    var args = ["gh", "issue", "create", "--title", title, "--body", body]
+    if assignMe { args += ["--assignee", "@me"] }
+    if web { args.append("--web") }
+    return args
+}
+
 /// Terminal outcome of a gh call. A dedicated type because `Result`'s
 /// failure must be an `Error` (a bare `String` is not).
 enum IssueOutcome: Equatable {
@@ -18,14 +26,17 @@ enum IssueOutcome: Equatable {
 /// Files a GitHub issue with the `gh` CLI (port of git.rs
 /// spawn_issue_create). A network call — always awaited off the UI.
 enum IssueService {
-    /// .success = the created issue's URL; .failure = a display-ready error.
-    static func create(dir: String, title: String, body: String) async -> IssueOutcome {
+    /// .success = the created issue's URL (or gh's confirmation for --web);
+    /// .failure = a display-ready error.
+    static func create(dir: String, title: String, body: String,
+                       assignMe: Bool = false, web: Bool = false) async -> IssueOutcome {
         await Task.detached {
             let notFound = "gh CLI not found — install it (brew install gh), then `gh auth login`"
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             // Arguments go straight to gh — nothing passes through a shell.
-            p.arguments = ["gh", "issue", "create", "--title", title, "--body", body]
+            p.arguments = issueCreateArgs(title: title, body: body,
+                                          assignMe: assignMe, web: web)
             p.currentDirectoryURL = URL(fileURLWithPath: dir)
             let out = Pipe(), err = Pipe()
             p.standardOutput = out
@@ -43,6 +54,8 @@ enum IssueService {
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 return .failure(message: msg.isEmpty ? "gh issue create failed" : msg)
             }
+            // --web only opens the composer; there is no URL to harvest.
+            if web { return .success(url: "") }
             guard let url = parseIssueURL(String(decoding: stdout, as: UTF8.self)) else {
                 return .failure(message: "issue created, but gh printed no URL — check GitHub")
             }

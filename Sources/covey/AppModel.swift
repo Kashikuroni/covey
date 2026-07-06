@@ -12,7 +12,6 @@ public final class AppModel {
     public enum Modal: Equatable {
         case newSession
         case recent
-        case issue(String)
         case kill(String)
         case rename(String)
         case renameProject(String)
@@ -22,17 +21,6 @@ public final class AppModel {
         case restart(String)
         case restartAll
         case themeRestart
-    }
-
-    public enum NoteTarget: Equatable {
-        case session(String), project(String)
-    }
-
-    public struct NoteUIState: Equatable {
-        public var cursor = 0
-        public var visualAnchor: Int?
-        public var editing = false
-        public var clearArmed = false
     }
 
     public enum Focus { case sessions, terminal, inspector }
@@ -76,6 +64,19 @@ public final class AppModel {
     public private(set) var showFooter = true
     public private(set) var showHeader = true
     public private(set) var showInspector = false
+    public enum InspectorTab: Equatable { case note, issue }
+    public private(set) var inspectorTab: InspectorTab = .note
+    public private(set) var inspectorSplit = false
+    /// Transient: a pane sets it while its editor/field owns the keyboard
+    /// (drives the INSERT/NORMAL badge).
+    public var inspectorEditing = false
+    /// Vim mode badge from the issue body editor ("NORMAL"/"INSERT"/...);
+    /// nil when the editor is not mounted.
+    public var inspectorVimBadge: String?
+    /// Bumped by space g i; IssuePane focuses the title field on change.
+    public private(set) var issueFocusTick = 0
+    /// Bumped on entering the note zone; the note editor grabs the keys.
+    public private(set) var noteFocusTick = 0
     public private(set) var sbWidth = 360
     public private(set) var vimMode = false
     /// The footer filter is showing (activated by `/` or ⌘F).
@@ -83,8 +84,6 @@ public final class AppModel {
     private(set) var inputMode: InputMode = .normal
     /// Dir to prefill in the New Session sheet (set by `N`).
     public private(set) var newSessionPrefillDir: String?
-    public private(set) var noteTarget: NoteTarget?
-    public private(set) var noteState = NoteUIState()
     public private(set) var promptsByName: [String: [String]] = [:]
     public private(set) var notes: [String: String] = [:]
     public private(set) var projectNotes: [String: String] = [:]
@@ -154,6 +153,7 @@ public final class AppModel {
         showFooter = persisted.showFooter ?? true
         showHeader = persisted.showHeader ?? true
         showInspector = persisted.showInspector ?? false
+        inspectorSplit = persisted.inspectorSplit ?? false
         sbWidth = persisted.sbWidth ?? 360
         vimMode = persisted.vimMode ?? true
         notes = persisted.notes
@@ -175,6 +175,11 @@ public final class AppModel {
                 }
                 persist()
                 try? await client.clearLost()
+            }
+            // Land on the first session instead of a "select a session"
+            // placeholder — saves the launch click.
+            if selected == nil, let first = visibleSessionNames().first {
+                await select(first)
             }
         } catch {
             connected = false
@@ -510,35 +515,6 @@ public final class AppModel {
         projectNames[dir] ?? projectDefaultName(dir)
     }
 
-    public func noteText() -> String {
-        switch noteTarget {
-        case .session(let name): return notes[name] ?? ""
-        case .project(let dir): return projectNotes[dir] ?? ""
-        case nil: return ""
-        }
-    }
-
-    public func setNoteText(_ text: String) {
-        switch noteTarget {
-        case .session(let name): setNote(session: name, text: text)
-        case .project(let dir): setProjectNote(dir: dir, text: text)
-        case nil: break
-        }
-    }
-
-    public func noteTitle() -> String {
-        switch noteTarget {
-        case .session(let name): return name
-        case .project(let dir): return displayName(forDir: dir)
-        case nil: return ""
-        }
-    }
-
-    public func setNoteEditing(_ on: Bool) {
-        noteState.editing = on
-        inputMode = on ? .normal : .note   // edit: NSTextView owns keys
-    }
-
     /// tmux.rs send_choice port: the digit plus Enter.
     public func answerPrompt(_ n: Int, session: String? = nil) {
         guard let target = session ?? selected,
@@ -598,54 +574,12 @@ public final class AppModel {
             sendTerminalCommand(.scrollToBottom)
         case .showHelp:
             inputMode = .help
-        case .toggleSessionNote:
-            toggleNote(target: selected.map { .session($0) })
-        case .toggleProjectNote:
-            let root = sessions.first(where: { $0.name == selected }).map(sessionRoot)
-            toggleNote(target: root.map { .project($0) })
-        case .noteCursor(let down):
-            if disarmClearIfNeeded() { return }
-            let total = taskCounts(noteText()).total
-            guard total > 0 else { return }
-            let next = noteState.cursor + (down ? 1 : -1)
-            noteState.cursor = min(total - 1, max(0, next))
-        case .noteToggleTask:
-            if disarmClearIfNeeded() { return }
-            for ord in selectionOrdinals() { setNoteText(toggleTask(noteText(), ordinal: ord)) }
-        case .noteVisual:
-            if disarmClearIfNeeded() { return }
-            noteState.visualAnchor = noteState.visualAnchor == nil ? noteState.cursor : nil
-        case .noteYank:
-            if noteState.clearArmed {
-                noteState.clearArmed = false
-                setNoteText("")
-                noteState.cursor = 0
-                noteState.visualAnchor = nil
-                return
-            }
-            let list = selectedAsNumbered(noteText(), ordinals: selectionOrdinals())
-            if !list.isEmpty {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(list, forType: .string)
-            }
-            noteState.visualAnchor = nil
-        case .noteDelete:
-            if disarmClearIfNeeded() { return }
-            setNoteText(removeTasks(noteText(), ordinals: Set(selectionOrdinals())))
-            noteState.visualAnchor = nil
-            clampNoteCursor()
-        case .noteEdit:
-            if disarmClearIfNeeded() { return }
-            setNoteEditing(true)
-        case .noteArmClear:
-            noteState.clearArmed = true
-        case .noteDefocus:
+        case .openProjectNote:
             inputMode = .normal
-        case .noteEscape:
-            if noteState.clearArmed { noteState.clearArmed = false; return }
-            if noteState.visualAnchor != nil { noteState.visualAnchor = nil; return }
-            noteTarget = nil
-            inputMode = .normal
+            guard selectedSession() != nil else { toast = "no session"; return }
+            if !showInspector { setShowInspector(true) }
+            setFocus(.inspector)
+            selectInspectorTab(.note)
         case .renameProject:
             inputMode = .normal
             if let root = sessions.first(where: { $0.name == selected }).map(sessionRoot) {
@@ -700,11 +634,32 @@ public final class AppModel {
             guard let s = selectedSession() else { return }
             if s.git == nil { toast = "not a git repo"; return }
             modal = .cleanup(s.dir)
+        case .inspectorPaneSwap:
+            selectInspectorTab(inspectorTab == .note ? .issue : .note)
+        case .inspectorSplitToggle:
+            inspectorSplit.toggle()
+            persist()
+        case .toggleSessionsPanel:
+            inputMode = .normal
+            setShowSessions(!showSessions)
+        case .toggleInspectorPanel:
+            inputMode = .normal
+            if showInspector, focus == .inspector { setFocus(.sessions) }
+            setShowInspector(!showInspector)
+        case .toggleFooterPanel:
+            inputMode = .normal
+            setShowFooter(!showFooter)
+        case .toggleHeaderPanel:
+            inputMode = .normal
+            setShowHeader(!showHeader)
         case .createIssue:
             inputMode = .normal
             guard let s = selectedSession() else { toast = "no session"; return }
             if s.git == nil { toast = "not a git repo"; return }
-            modal = .issue(s.dir)
+            if !showInspector { setShowInspector(true) }
+            inspectorTab = .issue
+            setFocus(.inspector)
+            issueFocusTick += 1
         case .splitVertical: openSplit(axis: "v")
         case .splitHorizontal: openSplit(axis: "h")
         case .splitClose:
@@ -721,8 +676,9 @@ public final class AppModel {
         }
     }
 
-    /// ⌃j/⌃k: walk the focus zones in order — session list, agent pane,
-    /// companion shell pane (when split), inspector (when shown) — wrapping.
+    /// ⌃h/⌃l: walk the focus zones in order — session list, agent pane,
+    /// companion shell pane (when split), inspector note, inspector issue
+    /// (when the drawer is shown) — wrapping.
     private func cycleFocus(forward: Bool) {
         var zones: [(id: String, activate: () -> Void)] = [
             ("sessions", { self.sendTerminalCommand(.blur); self.setFocus(.sessions) })
@@ -734,12 +690,22 @@ public final class AppModel {
             }
         }
         if showInspector {
-            zones.append(("inspector", { self.sendTerminalCommand(.blur); self.setFocus(.inspector) }))
+            zones.append(("inspector:note", {
+                self.sendTerminalCommand(.blur)
+                self.setFocus(.inspector)
+                self.selectInspectorTab(.note)
+            }))
+            zones.append(("inspector:issue", {
+                self.sendTerminalCommand(.blur)
+                self.setFocus(.inspector)
+                self.selectInspectorTab(.issue)
+            }))
         }
         let currentID: String
         switch focus {
         case .sessions: currentID = "sessions"
-        case .inspector: currentID = "inspector"
+        case .inspector:
+            currentID = inspectorTab == .note ? "inspector:note" : "inspector:issue"
         case .terminal: currentID = "pane:\(focusedPane ?? selected ?? "")"
         }
         let idx = zones.firstIndex { $0.id == currentID } ?? 0
@@ -770,6 +736,35 @@ public final class AppModel {
         sessions.first { $0.name == selected }
     }
 
+    public func sessionRootOfSelected() -> String? {
+        selectedSession().map(sessionRoot)
+    }
+
+    public func selectInspectorTab(_ tab: InspectorTab) {
+        inspectorTab = tab
+        // Both zones are always "in the editor": hand the keyboard over at
+        // once (the zone chords escape the fields via the key monitor).
+        if tab == .issue { issueFocusTick += 1 } else { noteFocusTick += 1 }
+    }
+
+    // MARK: - issue drafts (persisted per project root)
+
+    public func issueDraft(forRoot root: String) -> IssueDraft {
+        persisted.issueDrafts?[root] ?? IssueDraft()
+    }
+
+    public func setIssueDraft(_ draft: IssueDraft, forRoot root: String) {
+        var drafts = persisted.issueDrafts ?? [:]
+        drafts[root] = draft
+        persisted.issueDrafts = drafts
+        persist()
+    }
+
+    public func clearIssueDraft(forRoot root: String) {
+        persisted.issueDrafts?[root] = nil
+        persist()
+    }
+
     // MARK: - git action passthroughs (errors surface inline in the sheets)
 
     public func promote(name: String) async -> String? {
@@ -789,39 +784,6 @@ public final class AppModel {
     public func cleanupBranches(dir: String, branches: [String]) async -> String? {
         do { try await client.cleanupBranches(dir: dir, branches: branches); return nil }
         catch { return errorText(error) }
-    }
-
-    private func toggleNote(target: NoteTarget?) {
-        guard let target else { return }
-        if noteTarget == target {
-            noteTarget = nil
-            inputMode = .normal
-            return
-        }
-        noteTarget = target
-        noteState = NoteUIState()
-        inputMode = .note
-        if !showInspector { setShowInspector(true) }
-    }
-
-    private func selectionOrdinals() -> [Int] {
-        if let anchor = noteState.visualAnchor {
-            let lo = min(anchor, noteState.cursor)
-            let hi = max(anchor, noteState.cursor)
-            return Array(lo...hi)
-        }
-        return [noteState.cursor]
-    }
-
-    private func clampNoteCursor() {
-        let total = taskCounts(noteText()).total
-        noteState.cursor = max(0, min(noteState.cursor, total - 1))
-    }
-
-    /// TUI semantics: while clear is armed, any key other than `y` only disarms.
-    private func disarmClearIfNeeded() -> Bool {
-        if noteState.clearArmed { noteState.clearArmed = false; return true }
-        return false
     }
 
     private func step(by delta: Int) {
@@ -865,6 +827,7 @@ public final class AppModel {
         persisted.showFooter = showFooter
         persisted.showHeader = showHeader
         persisted.showInspector = showInspector
+        persisted.inspectorSplit = inspectorSplit
         persisted.sbWidth = sbWidth
         persisted.vimMode = vimMode
         persisted.notes = notes

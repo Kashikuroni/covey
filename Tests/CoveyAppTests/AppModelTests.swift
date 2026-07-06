@@ -50,6 +50,19 @@ final class AppModelTests: XCTestCase {
     }
 
     @MainActor
+    func testStartSelectsFirstSession() async throws {
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        _ = try daemon.registry.create(dir: "/tmp", agent: "sh",
+                                       argv: ["/bin/cat"], name: "first")
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        XCTAssertEqual(model.selected, "first",
+                       "launch lands on the first session, not on a placeholder")
+        daemon.registry.kill(name: "first")
+    }
+
+    @MainActor
     func testCreateFullSelectsAndFocusesNewSession() async throws {
         let daemon = try TestDaemon()
         defer { daemon.stop() }

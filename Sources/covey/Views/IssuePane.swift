@@ -1,0 +1,156 @@
+import SwiftUI
+import AppKit
+import CoveyKit
+
+/// GitHub-issue composer living in the inspector: per-project draft,
+/// ⌘-chords with footer hints, async gh stages. `gh issue create --web`
+/// pre-fills the browser form from the same fields.
+struct IssuePane: View {
+    @Bindable var model: AppModel
+
+    enum Stage: Equatable {
+        case editing, creating
+        case done(String)
+        case failed(String)
+    }
+
+    @State private var stage: Stage = .editing
+    @FocusState private var titleFocused: Bool
+    @FocusState private var bodyFocused: Bool
+
+    private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
+    private var root: String? { model.sessionRootOfSelected() }
+    private var dir: String? { model.sessions.first { $0.name == model.selected }?.dir }
+
+    private var draft: IssueDraft {
+        root.map { model.issueDraft(forRoot: $0) } ?? IssueDraft()
+    }
+
+    private func update(_ transform: (inout IssueDraft) -> Void) {
+        guard let root else { return }
+        var d = model.issueDraft(forRoot: root)
+        transform(&d)
+        model.setIssueDraft(d, forRoot: root)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if root == nil {
+                Text("select a session in a git repo")
+                    .font(.caption).foregroundStyle(tk.t4)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                switch stage {
+                case .editing: editor
+                case .creating:
+                    Text("creating issue…").font(.headline)
+                    Text("esc hide — gh keeps running")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                    Spacer()
+                case .done(let url):
+                    Label("issue created", systemImage: "checkmark")
+                        .font(.headline).foregroundStyle(tk.ok)
+                    Text(url).font(.caption.monospaced()).textSelection(.enabled)
+                    Text("(copied to clipboard)")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                    Button("New issue") { stage = .editing }
+                    Spacer()
+                case .failed(let err):
+                    Label("issue not created", systemImage: "xmark")
+                        .font(.headline).foregroundStyle(tk.err)
+                    Text(err).font(.caption).foregroundStyle(tk.err)
+                        .textSelection(.enabled)
+                    Button("Back") { stage = .editing }
+                    Spacer()
+                }
+            }
+        }
+        .padding(8)
+        .onChange(of: model.issueFocusTick) { _, _ in
+            stage = .editing
+            titleFocused = true
+        }
+        .onChange(of: titleFocused) { _, _ in syncEditing() }
+        .onChange(of: bodyFocused) { _, _ in syncEditing() }
+    }
+
+    private func syncEditing() {
+        // The body's badge is the vim editor's business; INSERT here only
+        // reflects the plain title field.
+        model.inspectorEditing = titleFocused
+    }
+
+    private var editor: some View {
+        Group {
+            Text("in: \(collapseHome(root ?? ""))")
+                .font(.caption.monospaced()).foregroundStyle(tk.t3).lineLimit(1)
+            TextField("Title", text: Binding(
+                get: { draft.title },
+                set: { v in update { $0.title = v } }))
+                .focused($titleFocused)
+                .ayuField(tk, focused: titleFocused)
+                .onSubmit { submit() }
+            VimEditor(text: Binding(
+                get: { draft.body },
+                set: { v in update { $0.body = v } }),
+                      modeBadge: Binding(
+                get: { model.inspectorVimBadge ?? "" },
+                set: { model.inspectorVimBadge = $0.isEmpty ? nil : $0 }),
+                      tk: tk,
+                      onSwitchField: { _ in
+                bodyFocused = false
+                titleFocused = true
+            })
+            .focused($bodyFocused)
+            .frame(height: 140)
+            HStack(spacing: 8) {
+                Image(systemName: draft.assignMe ? "checkmark.square.fill" : "square")
+                    .foregroundStyle(draft.assignMe ? Color.accentColor : .secondary)
+                Text("Assign to me").font(.callout)
+                Spacer()
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { update { $0.assignMe.toggle() } }
+            HStack {
+                Spacer()
+                Button("Open in browser…") { submit(web: true) }
+                    .buttonStyle(AyuButton(tk: tk, prominent: false))
+                    .keyboardShortcut("o", modifiers: .command)
+                    .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty)
+                Button("Create") { submit() }
+                    .buttonStyle(AyuButton(tk: tk, prominent: true))
+                    .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            // ⌘M rides a hidden button: the visible checkbox is not a Button.
+            Button("") { update { $0.assignMe.toggle() } }
+                .keyboardShortcut("m", modifiers: .command)
+                .hidden().frame(width: 0, height: 0)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func submit(web: Bool = false) {
+        guard let root, let dir else { return }
+        let d = model.issueDraft(forRoot: root)
+        let title = d.title.trimmingCharacters(in: .whitespaces)
+        guard !title.isEmpty else { return }
+        stage = .creating
+        Task { @MainActor in
+            switch await IssueService.create(dir: dir, title: title, body: d.body,
+                                             assignMe: d.assignMe, web: web) {
+            case .success(let url):
+                if web {
+                    stage = .editing   // draft stays; the browser owns it now
+                    return
+                }
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(url, forType: .string)
+                model.clearIssueDraft(forRoot: root)
+                stage = .done(url)
+                model.showToast("issue created — URL copied")
+            case .failure(let err):
+                stage = .failed(err)
+            }
+        }
+    }
+}
