@@ -194,6 +194,29 @@ final class SessionRegistryTests: XCTestCase {
         reg.kill(name: "cl")
     }
 
+    func testRestartKeepsCompanionAlive() throws {
+        let reg = SessionRegistry()
+        let parent = try reg.create(dir: "/usr", agent: "claude",
+                                    argv: ["/bin/cat"], name: "agent")
+        _ = try reg.create(dir: "/usr", agent: "sh", argv: ["/bin/cat"],
+                           name: "agent+sh", companionOf: parent.name)
+        let restarted = expectation(description: "restarted")
+        reg.onRestarted = { s in
+            XCTAssertEqual(s.name, "agent")
+            restarted.fulfill()
+        }
+        reg.onExit = { name, _ in XCTFail("restart must not emit exit (got \(name))") }
+        reg.onSessionRemoved = { name in XCTFail("restart must not remove \(name)") }
+        try reg.restart(name: "agent")
+        wait(for: [restarted], timeout: 5)
+        XCTAssertEqual(reg.companionName(of: "agent"), "agent+sh",
+                       "companion must survive the parent's restart")
+        XCTAssertNotNil(reg.get(name: "agent+sh"))
+        reg.onExit = nil
+        reg.onSessionRemoved = nil
+        reg.kill(name: "agent")
+    }
+
     func testExitRefreshesResumeCmdFromOutput() throws {
         // claude prints its resume hint on exit; the registry re-reads it so
         // recents (and the next restart) carry the post-/clear uuid.

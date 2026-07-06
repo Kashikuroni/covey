@@ -137,7 +137,9 @@ public final class SessionRegistry {
     /// Kills the session's child and respawns it in place once it exits:
     /// claude resumes its conversation, anything else reruns its argv. `dir`
     /// overrides the respawn directory (return-to-root). The entry, screen and
-    /// name survive; no exited/sessionRemoved events fire.
+    /// name survive; no exited/sessionRemoved events fire. Unlike `kill`, the
+    /// companion shell is left alone — the parent's name stays valid across
+    /// the respawn, so the companionOf link never dangles.
     public func restart(name: String, dir: String? = nil) throws {
         lock.lock()
         guard let entry = entries[name] else {
@@ -153,7 +155,7 @@ public final class SessionRegistry {
         lock.lock()
         pendingRestart[name] = target
         lock.unlock()
-        kill(name: name)
+        withEntry(name)?.process.kill()
     }
 
     /// Updates a live session's cached git info (transient; not persisted).
