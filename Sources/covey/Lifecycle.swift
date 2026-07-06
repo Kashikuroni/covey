@@ -27,3 +27,16 @@ func isReturnable(_ s: Session,
 func shellSingleQuote(_ s: String) -> String {
     "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
 }
+
+/// Splits live claude sessions into restartable (idle) and kept (busy) for
+/// the theme-restart offer. Missing status counts as busy — the monitor has
+/// not ruled yet, and a needless restart is worse than a stale palette.
+func themeRestartPlan(sessions: [Session],
+                      statuses: [String: Status]) -> (idle: [String], busy: [String]) {
+    var idle: [String] = [], busy: [String] = []
+    for s in sessions where s.agent.split(separator: " ").first == "claude" {
+        if statuses[s.name] == .idle { idle.append(s.name) }
+        else { busy.append(s.name) }
+    }
+    return (idle, busy)
+}

@@ -28,4 +28,30 @@ final class LifecycleTests: XCTestCase {
         XCTAssertEqual(shellSingleQuote("/a b"), "'/a b'")
         XCTAssertEqual(shellSingleQuote("a'b"), "'a'\\''b'")
     }
+
+    func testThemeRestartPlanSplitsIdleFromBusy() {
+        func sess(_ name: String, _ agent: String) -> Session {
+            Session(name: name, dir: "/tmp", cwd: "/tmp", agent: agent, created: 0)
+        }
+        let sessions = [sess("a", "claude"), sess("b", "claude opus"),
+                        sess("c", "claude"), sess("d", "claude"), sess("e", "sh")]
+        let statuses: [String: Status] = ["a": .idle, "b": .idle, "c": .running,
+                                          "d": .waiting, "e": .idle]
+        let plan = themeRestartPlan(sessions: sessions, statuses: statuses)
+        XCTAssertEqual(plan.idle, ["a", "b"], "multi-word claude agent still counts")
+        XCTAssertEqual(plan.busy, ["c", "d"], "waiting is busy; sh is not claude")
+    }
+
+    func testThemeRestartPlanMissingStatusIsBusy() {
+        let s = Session(name: "a", dir: "/tmp", cwd: "/tmp", agent: "claude", created: 0)
+        let plan = themeRestartPlan(sessions: [s], statuses: [:])
+        XCTAssertEqual(plan.idle, [])
+        XCTAssertEqual(plan.busy, ["a"])
+    }
+
+    func testThemeRestartPlanEmptyInput() {
+        let plan = themeRestartPlan(sessions: [], statuses: [:])
+        XCTAssertTrue(plan.idle.isEmpty)
+        XCTAssertTrue(plan.busy.isEmpty)
+    }
 }
