@@ -6,6 +6,12 @@ import PackageDescription
 let package = Package(
     name: "covey",
     platforms: [.macOS(.v26)],
+    products: [
+        // Exported for the XcodeGen app-bundle targets (project.yml);
+        // SPM executables/tests keep working without them.
+        .library(name: "CoveyKit", targets: ["CoveyKit"]),
+        .library(name: "CoveydCore", targets: ["CoveydCore"])
+    ],
     dependencies: [
         .package(url: "https://github.com/migueldeicaza/SwiftTerm", from: "1.13.0")
     ],
