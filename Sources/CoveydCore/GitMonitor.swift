@@ -20,7 +20,9 @@ public final class GitMonitor {
 
     public func start() {
         let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now() + 1, repeating: interval)
+        // First pass immediately: cards should not wait out the interval
+        // after a daemon start.
+        t.schedule(deadline: .now(), repeating: interval)
         t.setEventHandler { [weak self] in self?.tickBody() }
         timer = t
         t.resume()
@@ -36,12 +38,37 @@ public final class GitMonitor {
         queue.sync { tickBody() }
     }
 
+    /// Drop the remembered reading for `name` so the next tick re-emits even
+    /// an unchanged value. A restart wipes the registry's transient git info
+    /// while the reading stays stable — without this the session never gets
+    /// its git info back.
+    public func forget(name: String) {
+        queue.sync { prev[name] = nil }
+    }
+
+    /// Read one session now (async on the monitor queue) instead of waiting
+    /// out the poll interval — create/restart call this so the card's git
+    /// line appears immediately.
+    public func poke(name: String, dir: String) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            let info = GitOps.readGitInfo(dir)
+            if (self.prev[name] ?? nil) != info {
+                self.prev[name] = info
+                self.onGitChanged?(name, info)
+            }
+        }
+    }
+
     private func tickBody() {
         var next: [String: GitInfo?] = [:]
         for (name, dir) in snapshot() {
             let info = GitOps.readGitInfo(dir)
             next[name] = info
-            if prev[name] != info {
+            // Normalize the missing-key case: an absent entry and a nil
+            // reading are the same "no git info" — emitting a change there
+            // races real events and wipes fresh info.
+            if (prev[name] ?? nil) != info {
                 onGitChanged?(name, info)
             }
         }

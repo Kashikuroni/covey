@@ -45,4 +45,55 @@ final class GitMonitorTests: XCTestCase {
         monitor.tick()
         XCTAssertEqual(count(), 2, "pruned session emits nothing")
     }
+
+    // Restart regression: the registry drops session.git on respawn, but the
+    // monitor's prev map still holds the old value — without forget() the
+    // unchanged reading never re-emits and the card stays git-less forever.
+    func testForgetReemitsUnchangedInfo() {
+        let monitor = GitMonitor(snapshot: { [(name: "s", dir: self.repo)] })
+        let lock = NSLock()
+        var events = 0
+        monitor.onGitChanged = { _, _ in lock.lock(); events += 1; lock.unlock() }
+        func count() -> Int { lock.lock(); defer { lock.unlock() }; return events }
+        monitor.tick()
+        XCTAssertEqual(count(), 1)
+        monitor.tick()
+        XCTAssertEqual(count(), 1, "stable info stays silent")
+        monitor.forget(name: "s")
+        monitor.tick()
+        XCTAssertEqual(count(), 2, "forget forces a re-emit")
+    }
+
+    // A non-repo dir reads as nil; with no previous entry that is NOT a
+    // change — emitting here raced manual/monitor events and wiped git info.
+    func testNonRepoNeverEmitsNilOnFirstSight() {
+        let monitor = GitMonitor(snapshot: { [(name: "s", dir: "/tmp")] })
+        let lock = NSLock()
+        var events = 0
+        monitor.onGitChanged = { _, _ in lock.lock(); events += 1; lock.unlock() }
+        monitor.tick()
+        monitor.poke(name: "s", dir: "/tmp")
+        monitor.tick()
+        Thread.sleep(forTimeInterval: 0.3)   // let the async poke drain
+        lock.lock(); defer { lock.unlock() }
+        XCTAssertEqual(events, 0, "nil reading with no prev entry is not a change")
+    }
+
+    // Create/restart must not wait out the 5s poll interval: poke reads one
+    // session immediately (async on the monitor queue).
+    func testPokeEmitsWithoutTick() {
+        let monitor = GitMonitor(snapshot: { [] })
+        let lock = NSLock()
+        var last: GitInfo??
+        monitor.onGitChanged = { _, g in lock.lock(); last = g; lock.unlock() }
+        monitor.poke(name: "s", dir: repo)
+        let deadline = Date().addingTimeInterval(3)
+        while Date() < deadline {
+            lock.lock(); let done = last != nil; lock.unlock()
+            if done { break }
+            usleep(20_000)
+        }
+        lock.lock(); defer { lock.unlock() }
+        XCTAssertEqual(last??.branch, "main", "poke reads and emits immediately")
+    }
 }

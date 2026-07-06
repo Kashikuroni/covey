@@ -7,6 +7,7 @@ import CoveyKit
 public final class IPCServer {
     private let registry: SessionRegistry
     private let monitor: StatusMonitor
+    private let gitMonitor: GitMonitor?
     private let server = DispatchQueue(label: "covey.ipc")
     private var sinks: [Int: ClientSink] = [:]
     private var subscribers: [String: Set<Int>] = [:]
@@ -15,6 +16,7 @@ public final class IPCServer {
                 gitMonitor: GitMonitor? = nil) {
         self.registry = registry
         self.monitor = monitor
+        self.gitMonitor = gitMonitor
         gitMonitor?.onGitChanged = { [weak self, weak registry] name, git in
             registry?.updateGit(name: name, git: git)
             self?.broadcast(.event(.gitChanged(name: name, git: git)))
@@ -31,11 +33,16 @@ public final class IPCServer {
         registry.onSessionRemoved = { [weak self] name in
             self?.broadcast(.event(.sessionRemoved(name: name)))
         }
-        registry.onRestarted = { [weak self] s in
+        registry.onRestarted = { [weak self, weak gitMonitor] s in
             guard let self else { return }
             // The respawn created a new PTYProcess — re-bind the output fanout
             // to it; subscribers are keyed by name and survive untouched.
             self.attachOutputFanout(for: s.name)
+            // The respawn wiped the session's transient git info; make the
+            // monitor re-emit even if the on-disk reading did not change,
+            // and re-read right away (the dir may have changed too).
+            gitMonitor?.forget(name: s.name)
+            gitMonitor?.poke(name: s.name, dir: s.dir)
             self.broadcast(.event(.sessionAdded(session: s)))   // client upserts
         }
         registry.onExit = { [weak self] name, code in
@@ -117,6 +124,8 @@ public final class IPCServer {
                                             companionOf: companionOf)
                 }
                 attachOutputFanout(for: s.name)
+                // The card's git line should not wait out the poll interval.
+                gitMonitor?.poke(name: s.name, dir: s.dir)
                 reply(.session(s))
             } catch let e as RegistryError {
                 reply(errorResult(e))
