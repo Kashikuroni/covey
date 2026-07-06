@@ -427,4 +427,37 @@ final class AppModelChromeTests: XCTestCase {
         XCTAssertEqual(model.modal, .recent)
     }
 
+    // A sheet dismissal steals the terminal's first responder: closing any
+    // modal while the terminal zone owns the keyboard must re-focus it.
+    @MainActor
+    func testModalDismissRefocusesTerminalPane() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude",
+                                       argv: ["/bin/cat"], name: "agent")
+        _ = await eventually { model.sessions.count == 1 }
+
+        var commands: [AppModel.TerminalCommand] = []
+        model.setTerminalCommandHandler(for: "agent") { commands.append($0) }
+        await model.select("agent")
+        model.focusPane("agent")
+        commands = []
+
+        model.modal = .recent
+        model.modal = nil
+        _ = await eventually { commands.contains(.focus) }
+        XCTAssertTrue(commands.contains(.focus), "dismiss must hand the keyboard back")
+
+        // Not in the terminal zone -> no spurious focus grab.
+        model.setFocus(.sessions)
+        commands = []
+        model.modal = .recent
+        model.modal = nil
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertFalse(commands.contains(.focus))
+
+        daemon.registry.kill(name: "agent")
+    }
+
 }

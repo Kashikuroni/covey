@@ -46,7 +46,18 @@ public final class AppModel {
     /// Terminal pane that owns the keyboard while focus == .terminal:
     /// the selected session or its companion shell.
     public private(set) var focusedPane: String?
-    public var modal: Modal?
+    public var modal: Modal? {
+        didSet {
+            // A sheet lives in its own key window; its dismissal reshuffles
+            // the main window's first responder. If the terminal zone owns
+            // the keyboard, hand it back — after the dismissal settles.
+            guard modal == nil, oldValue != nil, focus == .terminal else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.modal == nil, self.focus == .terminal else { return }
+                self.sendTerminalCommand(.focus)
+            }
+        }
+    }
     public private(set) var toast: String?
     public private(set) var connected = false
     public private(set) var themeRaw: String = "dark"
