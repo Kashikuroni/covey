@@ -47,6 +47,17 @@ public func humanizeAge(_ secs: Int64) -> String {
     return "\(s / 86_400)d"
 }
 
+/// The issue composer's per-project draft: survives closing the pane and
+/// GUI restarts; cleared after a successful `gh issue create`.
+public struct IssueDraft: Codable, Equatable {
+    public var title: String
+    public var body: String
+    public var assignMe: Bool
+    public init(title: String = "", body: String = "", assignMe: Bool = false) {
+        self.title = title; self.body = body; self.assignMe = assignMe
+    }
+}
+
 /// Persisted UI state (`~/.covey/state.json`). Owned by the GUI. Optional scalars
 /// are omitted from JSON when nil (Swift synthesizes `encodeIfPresent`); empty
 /// collections round-trip as `[]`/`{}`.
@@ -72,6 +83,10 @@ public struct PersistedState: Codable, Equatable {
     public var vimMode: Bool?
     /// Split axis per parent session name ("v"/"h") for the companion pane.
     public var splitAxes: [String: String]?
+    /// Issue composer drafts keyed by project root.
+    public var issueDrafts: [String: IssueDraft]?
+    /// The inspector's note/issue vertical split mode.
+    public var inspectorSplit: Bool?
     public var lastVersion: String?
 
     public init(
@@ -84,6 +99,8 @@ public struct PersistedState: Codable, Equatable {
         showSessions: Bool? = nil, showFooter: Bool? = nil, showHeader: Bool? = nil,
         showInspector: Bool? = nil, vimMode: Bool? = nil,
         splitAxes: [String: String]? = nil,
+        issueDrafts: [String: IssueDraft]? = nil,
+        inspectorSplit: Bool? = nil,
         lastVersion: String? = nil
     ) {
         self.theme = theme; self.splitPct = splitPct; self.recents = recents
@@ -95,6 +112,8 @@ public struct PersistedState: Codable, Equatable {
         self.showHeader = showHeader
         self.showInspector = showInspector; self.vimMode = vimMode
         self.splitAxes = splitAxes
+        self.issueDrafts = issueDrafts
+        self.inspectorSplit = inspectorSplit
         self.lastVersion = lastVersion
     }
 }

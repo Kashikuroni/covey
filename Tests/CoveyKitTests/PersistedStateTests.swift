@@ -31,6 +31,17 @@ final class PersistedStateTests: XCTestCase {
         XCTAssertEqual(back.splitAxes, ["agent": "h"])
     }
 
+    func testIssueDraftsAndInspectorSplitRoundTrip() throws {
+        var st = PersistedState()
+        st.issueDrafts = ["/repo": IssueDraft(title: "t", body: "b", assignMe: true)]
+        st.inspectorSplit = true
+        let back = try JSONDecoder().decode(PersistedState.self,
+                                            from: JSONEncoder().encode(st))
+        XCTAssertEqual(back.issueDrafts?["/repo"],
+                       IssueDraft(title: "t", body: "b", assignMe: true))
+        XCTAssertEqual(back.inspectorSplit, true)
+    }
+
     func testPushRecentDedupesNewestFirst() {
         var r: [RecentSession] = []
         pushRecent(&r, RecentSession(name: "a", dir: "/w", agent: "sh"))
