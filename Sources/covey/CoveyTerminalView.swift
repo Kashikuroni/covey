@@ -22,6 +22,44 @@ final class CoveyTerminalView: TerminalView {
         return .mouseReport
     }
 
+    private var wheelAccumulator = WheelAccumulator()
+
+    /// Precise viewport scrolling for the normal buffer: trackpad pixels
+    /// accumulate into whole lines (momentum events arrive through the
+    /// same path, so inertia comes from macOS for free); a discrete
+    /// mouse-wheel notch scrolls the Terminal.app-standard 3 lines.
+    func scrollViewport(deltaY: CGFloat, precise: Bool) {
+        let lines: Int
+        if precise {
+            let rowHeight = getOptimalFrameSize().height
+                / CGFloat(getTerminal().rows)
+            lines = wheelAccumulator.add(pixels: deltaY, rowHeight: rowHeight)
+        } else {
+            lines = deltaY > 0 ? 3 : -3
+        }
+        if lines > 0 { scrollUp(lines: lines) }
+        else if lines < 0 { scrollDown(lines: -lines) }
+    }
+
+    /// Monitor body, extracted for tests: raw AppKit deltas in, one routed
+    /// action out. TUI routes (mouseReport/arrows) use the legacy line delta
+    /// and must IGNORE events where it rounds to zero: a trackpad momentum
+    /// tail emits ~1s of such events, and mapping their sign naively turns
+    /// them into a burst of wheel-DOWN reports that yanks a fresh upward
+    /// scroll in claude's chat straight back to the bottom.
+    func routeWheel(deltaY: CGFloat, scrollingDeltaY: CGFloat,
+                    precise: Bool, at point: CGPoint) {
+        switch wheelRoute() {
+        case .viewport:
+            scrollViewport(deltaY: precise ? scrollingDeltaY : deltaY,
+                           precise: precise)
+        case .mouseReport:
+            if deltaY != 0 { sendWheelReport(deltaY: deltaY, at: point) }
+        case .arrows:
+            if deltaY != 0 { sendWheelArrows(deltaY: deltaY) }
+        }
+    }
+
     // MacTerminalView seals scrollWheel (`public override`, not `open`), so wheel
     // events are intercepted with a local monitor before AppKit delivers them.
     private var wheelMonitor: Any?
@@ -35,19 +73,15 @@ final class CoveyTerminalView: TerminalView {
         } else if wheelMonitor == nil {
             installMouseMonitor()
             wheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-                guard let self, event.window === self.window, event.deltaY != 0 else { return event }
+                guard let self, event.window === self.window,
+                      event.deltaY != 0 || event.scrollingDeltaY != 0 else { return event }
                 let point = self.convert(event.locationInWindow, from: nil)
                 guard self.bounds.contains(point) else { return event }
-                switch self.wheelRoute() {
-                case .viewport:
-                    return event                    // TerminalView scrolls the viewport
-                case .mouseReport:
-                    self.sendWheelReport(deltaY: event.deltaY, at: point)
-                    return nil
-                case .arrows:
-                    self.sendWheelArrows(deltaY: event.deltaY)
-                    return nil
-                }
+                self.routeWheel(deltaY: event.deltaY,
+                                scrollingDeltaY: event.scrollingDeltaY,
+                                precise: event.hasPreciseScrollingDeltas,
+                                at: point)
+                return nil
             }
         }
     }

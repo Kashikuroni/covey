@@ -26,6 +26,70 @@ final class CoveyTerminalViewTests: XCTestCase {
         return (view, probe)
     }
 
+    private func fillScrollback(_ view: CoveyTerminalView, lines: Int = 200) {
+        for i in 0..<lines { view.feed(text: "line \(i)\r\n") }
+    }
+
+    func testPreciseDeltasScrollOneLinePerRowHeight() {
+        let (view, _) = makeView()
+        fillScrollback(view)
+        let bottom = view.getTerminal().buffer.yDisp
+        let rowHeight = view.getOptimalFrameSize().height
+            / CGFloat(view.getTerminal().rows)
+        view.scrollViewport(deltaY: rowHeight * 0.5, precise: true)
+        XCTAssertEqual(view.getTerminal().buffer.yDisp, bottom)     // sub-line: no move
+        view.scrollViewport(deltaY: rowHeight * 0.6, precise: true)
+        XCTAssertEqual(view.getTerminal().buffer.yDisp, bottom - 1) // crossed one row
+    }
+
+    // Regression: the slice-9 "one line short of bottom" snap (scroller-drag
+    // truncation fix) must NOT fire for wheel scrolling — it yanked a slow
+    // one-line scroll straight back to the bottom, and inline claude's
+    // constant repaints re-fired it with a visible delay.
+    @MainActor
+    func testWheelScrollOneLineFromBottomIsNotSnappedBack() async throws {
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        let coordinator = TerminalRepresentable.Coordinator(model: model, name: "s")
+        let view = CoveyTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        view.terminalDelegate = coordinator
+        fillScrollback(view)
+        let bottom = view.getTerminal().buffer.yDisp
+        let rowHeight = view.getOptimalFrameSize().height
+            / CGFloat(view.getTerminal().rows)
+        view.scrollViewport(deltaY: rowHeight * 1.1, precise: true)
+        XCTAssertEqual(view.getTerminal().buffer.yDisp, bottom - 1)
+        // Let a wrongly-scheduled async snap run, then re-check the position.
+        try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(view.getTerminal().buffer.yDisp, bottom - 1)
+    }
+
+    // Regression: momentum-tail events (line delta rounded to 0, pixel delta
+    // nonzero) must NOT reach the TUI as wheel reports — a zero delta maps
+    // to the DOWN button and a ~1s burst of them scrolled claude's chat
+    // back to the bottom after every flick.
+    func testZeroLineDeltaSendsNoWheelReport() {
+        let (view, probe) = makeView()
+        view.feed(text: "\u{1b}[?1049h\u{1b}[?1006h\u{1b}[?1003h")
+        view.routeWheel(deltaY: 0, scrollingDeltaY: -4, precise: true,
+                        at: CGPoint(x: 10, y: 10))
+        XCTAssertTrue(probe.sent.isEmpty)
+        view.routeWheel(deltaY: 2, scrollingDeltaY: 20, precise: true,
+                        at: CGPoint(x: 10, y: 10))
+        XCTAssertTrue(String(decoding: probe.sent, as: UTF8.self).contains("<64;"))
+    }
+
+    func testMouseNotchScrollsThreeLines() {
+        let (view, _) = makeView()
+        fillScrollback(view)
+        let bottom = view.getTerminal().buffer.yDisp
+        view.scrollViewport(deltaY: 1, precise: false)
+        XCTAssertEqual(view.getTerminal().buffer.yDisp, bottom - 3)
+        view.scrollViewport(deltaY: -1, precise: false)
+        XCTAssertEqual(view.getTerminal().buffer.yDisp, bottom)
+    }
+
     func testRouteViewportInNormalBuffer() {
         let (view, _) = makeView()
         XCTAssertEqual(view.wheelRoute(), .viewport)

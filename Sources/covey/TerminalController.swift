@@ -23,6 +23,16 @@ func nerdFont(size: CGFloat) -> NSFont? {
     return nil
 }
 
+/// URL for a terminal-reported link click. Only web schemes open: a TUI
+/// can emit arbitrary OSC 8 targets, and file:/javascript: must not get
+/// click-to-open semantics.
+func linkURL(from link: String) -> URL? {
+    guard let url = URL(string: link),
+          let scheme = url.scheme?.lowercased(),
+          scheme == "http" || scheme == "https" else { return nil }
+    return url
+}
+
 /// SwiftTerm TerminalView bridged into SwiftUI, render-only: the daemon owns
 /// the process. Keystrokes go to the daemon (`send` -> input), bytes come back
 /// through the model's per-name terminal sink. The hosting view remounts this
@@ -64,6 +74,9 @@ struct TerminalRepresentable: NSViewRepresentable {
         model.setTerminalSink(for: name) { [weak view] bytes in
             view?.feed(byteArray: bytes[...])
         }
+        // A structural remount (split toggle) built a fresh emulator: ask the
+        // daemon to replay the session state (preamble + backfill) into it.
+        model.paneViewMounted(name)
         // A freshly mounted pane that already owns the pane focus grabs the
         // keyboard (companion created via space t v).
         if model.focusedPane == name, model.focus == .terminal {
@@ -127,9 +140,14 @@ struct TerminalRepresentable: NSViewRepresentable {
             // SwiftTerm's scroll(toPosition:) truncates, so a scrollbar drag can
             // land one line short of the live bottom and pin the HISTORY badge;
             // snap that last line (scroll(toPosition: 1.0) hits the exact bottom
-            // and re-fires scrolled with 1.0).
+            // and re-fires scrolled with 1.0). Only while the left button is
+            // down (an actual scroller drag): wheel scrolling moves in exact
+            // single lines and must be able to REST one line up, and inline
+            // claude's constant repaints re-fire scrolled — snapping there
+            // yanks a slow upward scroll straight back to the bottom.
             if linesShortOfBottom(position: position,
-                                  yDisp: source.getTerminal().buffer.yDisp) == 1 {
+                                  yDisp: source.getTerminal().buffer.yDisp) == 1,
+               NSEvent.pressedMouseButtons & 1 == 1 {
                 DispatchQueue.main.async { [weak source] in source?.scroll(toPosition: 1.0) }
                 return
             }
@@ -141,7 +159,12 @@ struct TerminalRepresentable: NSViewRepresentable {
         // The daemon owns process state; the rest of the delegate is unused.
         func setTerminalTitle(source: TerminalView, title: String) {}
         func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
-        func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {}
+        // Inline-mode claude doesn't own the mouse, so the GUI opens link
+        // clicks (alt-screen TUIs handled them via mouse reporting).
+        func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
+            guard let url = linkURL(from: link) else { return }
+            DispatchQueue.main.async { NSWorkspace.shared.open(url) }
+        }
         func bell(source: TerminalView) {}
         func clipboardCopy(source: TerminalView, content: Data) {}
         func clipboardRead(source: TerminalView) -> Data? { nil }

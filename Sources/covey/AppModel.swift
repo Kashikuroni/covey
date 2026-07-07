@@ -219,11 +219,39 @@ public final class AppModel {
         }
     }
 
+    /// Names whose attach replay was already consumed by a mounted view. A
+    /// SECOND mount for such a name is a structural remount (split toggle
+    /// rebuilds TerminalPaneView's branch): the fresh emulator never saw the
+    /// session's one-shot DECSETs, so it needs the attach replay again or
+    /// wheel routing degrades to `.viewport` until an app restart.
+    private var viewMountedSinceAttach: Set<String> = []
+
     private func attachPane(_ name: String) async {
+        // Mark attached BEFORE the RPC: the daemon writes the backfill
+        // output event ahead of the reply, so apply(.output) can run during
+        // this await — a name not yet marked would drop its own backfill.
+        attachedNames.insert(name)
+        viewMountedSinceAttach.remove(name)
         do {
             try await client.attach(name: name, sinceSeq: 0)
-            attachedNames.insert(name)
-        } catch { toast = errorText(error) }
+        } catch {
+            attachedNames.remove(name)
+            toast = errorText(error)
+        }
+    }
+
+    /// Called from makeNSView. The first mount after an attach just consumes
+    /// the pending replay; any later mount re-requests it from the daemon.
+    public func paneViewMounted(_ name: String) {
+        guard attachedNames.contains(name) else { return }
+        if viewMountedSinceAttach.contains(name) {
+            Task {
+                do { try await client.attach(name: name, sinceSeq: 0) }
+                catch { toast = errorText(error) }
+            }
+        } else {
+            viewMountedSinceAttach.insert(name)
+        }
     }
 
     public func focusPane(_ name: String) {
@@ -903,6 +931,7 @@ public final class AppModel {
         outputBuffers[name] = nil
         terminalCommands[name] = nil
         attachedNames.remove(name)
+        viewMountedSinceAttach.remove(name)
         if focusedPane == name { focusedPane = selected }
     }
 
