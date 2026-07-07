@@ -1,6 +1,17 @@
 import Foundation
 import CoveydCore
 
+// A Finder-spawned daemon (Covey.app bundle) inherits the bare system PATH,
+// where ~/.local/bin and Homebrew binaries don't resolve — every agent
+// session would die instantly with exit 127. Children inherit this env.
+setenv("PATH", enrichedPATH(ProcessInfo.processInfo.environment["PATH"],
+                            home: NSHomeDirectory()), 1)
+// Same Finder problem for terminal capabilities: children probe TERM /
+// COLORTERM / LANG, and a bare environment demotes TUIs to monochrome.
+for (key, value) in terminalEnvDefaults(ProcessInfo.processInfo.environment) {
+    setenv(key, value, 0)
+}
+
 // Resolve ~/.covey/coveyd.sock
 let home = FileManager.default.homeDirectoryForCurrentUser
 let dir = home.appendingPathComponent(".covey", isDirectory: true)
