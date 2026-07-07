@@ -18,6 +18,18 @@ struct TerminalPaneView: View {
                     paneHeader("Agent", name: name)
                     pane(name)
                 }
+            } else if let root = model.selectedProjectRoot {
+                paneHeader("Agent", name: "")
+                Spacer()
+                VStack(spacing: 6) {
+                    Text(model.displayName(forDir: root))
+                        .font(.title3).foregroundStyle(.secondary)
+                    Text(collapseHome(root))
+                        .font(.caption.monospaced()).foregroundStyle(.tertiary)
+                    Text("N — new session")
+                        .font(.caption).foregroundStyle(.tertiary)
+                }
+                Spacer()
             } else {
                 paneHeader("Agent", name: "")
                 Spacer()

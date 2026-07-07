@@ -126,6 +126,16 @@ final class KeyRouterTests: XCTestCase {
         XCTAssertEqual(KeyRouter.route(key("R"), context: session), .renameProject)
     }
 
+    func testProjectLeaderGroup() {
+        XCTAssertEqual(KeyRouter.route(key("p"), context: ctx(mode: .leader(.root))),
+                       .leaderDescend(.project))
+        let p = ctx(mode: .leader(.project))
+        XCTAssertEqual(KeyRouter.route(key("a"), context: p), .addProject)
+        XCTAssertEqual(KeyRouter.route(key("d"), context: p), .removeProject)
+        XCTAssertEqual(KeyRouter.route(key("z"), context: p), .closeOverlay,
+                       "unbound key closes the leader")
+    }
+
     func testTerminalSplitChords() {
         XCTAssertEqual(KeyRouter.route(key("t"), context: ctx(mode: .leader(.root))),
                        .leaderDescend(.terminal))

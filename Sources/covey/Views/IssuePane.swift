@@ -19,8 +19,10 @@ struct IssuePane: View {
     @FocusState private var bodyFocused: Bool
 
     private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
-    private var root: String? { model.sessionRootOfSelected() }
-    private var dir: String? { model.sessions.first { $0.name == model.selected }?.dir }
+    private var root: String? { model.inspectorRoot }
+    private var dir: String? {
+        model.sessions.first { $0.name == model.selected }?.dir ?? model.selectedProjectRoot
+    }
 
     private var draft: IssueDraft {
         root.map { model.issueDraft(forRoot: $0) } ?? IssueDraft()
@@ -36,7 +38,7 @@ struct IssuePane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if root == nil {
-                Text("select a session in a git repo")
+                Text("no project — space p a adds one")
                     .font(.caption).foregroundStyle(tk.t4)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {

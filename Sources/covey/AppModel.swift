@@ -88,6 +88,18 @@ public final class AppModel {
     public private(set) var notes: [String: String] = [:]
     public private(set) var projectNotes: [String: String] = [:]
     public private(set) var projectNames: [String: String] = [:]
+    public private(set) var projects: [String] = []
+    /// Selected empty-project ghost row; mutually exclusive with `selected`.
+    public private(set) var selectedProjectRoot: String?
+    /// Injectable folder picker (NSOpenPanel in production; stubbed in tests).
+    public var pickProjectFolder: () -> String? = {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Add Project"
+        return panel.runModal() == .OK ? panel.url?.path : nil
+    }
 
     /// Output sinks per session name. A terminal view mounts asynchronously
     /// after attach, so bytes (notably the attach backfill) can arrive before
@@ -159,6 +171,7 @@ public final class AppModel {
         notes = persisted.notes
         projectNotes = persisted.projectNotes
         projectNames = persisted.projectNames
+        projects = persisted.projects ?? []
         do {
             let (list, statuses, lost) = try await client.list()
             sessions = list.sorted { $0.created < $1.created }
@@ -211,6 +224,7 @@ public final class AppModel {
         attachedNames = []
         outputBuffers = [:]        // drop any bytes buffered for old sessions
         selected = name
+        if name != nil { selectedProjectRoot = nil }
         focusedPane = name
         historyMode = false
         if let name {
@@ -500,11 +514,16 @@ public final class AppModel {
 
     private func orderedDirs() -> [String] {
         var seen = Set<String>(); var dirs: [String] = []
-        for d in projectOrder where visibleSessions.contains(where: { sessionRoot($0) == d }) {
+        let live = visibleSessions.map(sessionRoot)
+        let known = Set(live).union(projects)
+        for d in projectOrder where known.contains(d) {
             if seen.insert(d).inserted { dirs.append(d) }
         }
-        for s in visibleSessions where !seen.contains(sessionRoot(s)) {
-            if seen.insert(sessionRoot(s)).inserted { dirs.append(sessionRoot(s)) }
+        for d in live where !seen.contains(d) {
+            if seen.insert(d).inserted { dirs.append(d) }
+        }
+        for d in projects where !seen.contains(d) {
+            if seen.insert(d).inserted { dirs.append(d) }
         }
         return dirs
     }
@@ -513,6 +532,23 @@ public final class AppModel {
     public func visibleSessionNames() -> [String] {
         orderedSessions().flatMap { group in
             group.sessions.map(\.name).filter { fuzzyMatch(filter, $0) }
+        }
+    }
+
+    /// A navigable sidebar row: a session card or an empty project's ghost row.
+    public enum ListRow: Equatable {
+        case session(String)
+        case ghost(String)
+    }
+
+    /// Flat visible ordering including ghost rows — what j/k walks. Ghosts
+    /// hide while the fuzzy filter is active (it matches session names only).
+    public func visibleRows() -> [ListRow] {
+        orderedSessions().flatMap { group -> [ListRow] in
+            let names = group.sessions.map(\.name).filter { fuzzyMatch(filter, $0) }
+            if !names.isEmpty { return names.map(ListRow.session) }
+            if group.sessions.isEmpty, filter.isEmpty { return [.ghost(group.dir)] }
+            return []
         }
     }
 
@@ -569,8 +605,7 @@ public final class AppModel {
             setFocus(.sessions)
             sendTerminalCommand(.blur)
         case .newSession(let prefill):
-            newSessionPrefillDir = prefill
-                ? sessions.first(where: { $0.name == selected }).map(sessionRoot) : nil
+            newSessionPrefillDir = prefill ? inspectorRoot : nil
             modal = .newSession
         case .openRecent:
             inputMode = .normal
@@ -604,15 +639,13 @@ public final class AppModel {
             inputMode = .help
         case .openProjectNote:
             inputMode = .normal
-            guard selectedSession() != nil else { toast = "no session"; return }
+            guard inspectorRoot != nil else { toast = "no project"; return }
             if !showInspector { setShowInspector(true) }
             setFocus(.inspector)
             selectInspectorTab(.note)
         case .renameProject:
             inputMode = .normal
-            if let root = sessions.first(where: { $0.name == selected }).map(sessionRoot) {
-                modal = .renameProject(root)
-            }
+            if let root = inspectorRoot { modal = .renameProject(root) }
         case .answerPrompt(let n):
             answerPrompt(n)
         case .sendShiftTab:
@@ -682,8 +715,8 @@ public final class AppModel {
             setShowHeader(!showHeader)
         case .createIssue:
             inputMode = .normal
-            guard let s = selectedSession() else { toast = "no session"; return }
-            if s.git == nil { toast = "not a git repo"; return }
+            guard inspectorRoot != nil else { toast = "no project"; return }
+            if let s = selectedSession(), s.git == nil { toast = "not a git repo"; return }
             if !showInspector { setShowInspector(true) }
             inspectorTab = .issue
             setFocus(.inspector)
@@ -701,6 +734,13 @@ public final class AppModel {
             focusPane(focusedPane == comp.name ? selected : comp.name)
         case .cycleFocus(let forward):
             cycleFocus(forward: forward)
+        case .addProject:
+            inputMode = .normal
+            if let dir = pickProjectFolder() { addProject(dir) }
+        case .removeProject:
+            inputMode = .normal
+            guard let root = inspectorRoot else { toast = "no project"; return }
+            removeProject(root)
         }
     }
 
@@ -764,8 +804,35 @@ public final class AppModel {
         sessions.first { $0.name == selected }
     }
 
-    public func sessionRootOfSelected() -> String? {
-        selectedSession().map(sessionRoot)
+    /// The root the inspector panes (note/issue) operate on: an explicitly
+    /// selected project wins, else the selected session's project root.
+    public var inspectorRoot: String? {
+        selectedProjectRoot ?? selectedSession().map(sessionRoot)
+    }
+
+    public func selectProject(_ root: String) async {
+        await select(nil)
+        // Re-check after the await: a concurrent removeProject must not let a
+        // stale deferred selection resurrect an unregistered project.
+        guard projects.contains(root) else { return }
+        selectedProjectRoot = root
+    }
+
+    public func addProject(_ dir: String) {
+        let root = projectRoot(dir)
+        if !projects.contains(root) {
+            projects.append(root)
+            persist()
+        }
+        Task { await selectProject(root) }
+    }
+
+    public func removeProject(_ root: String) {
+        guard projects.contains(root) else { toast = "project not registered"; return }
+        projects.removeAll { $0 == root }
+        if selectedProjectRoot == root { selectedProjectRoot = nil }
+        persist()
+        toast = "project removed"
     }
 
     public func selectInspectorTab(_ tab: InspectorTab) {
@@ -814,20 +881,31 @@ public final class AppModel {
         catch { return errorText(error) }
     }
 
+    private func rowIsCurrent(_ row: ListRow) -> Bool {
+        switch row {
+        case .session(let name): return name == selected
+        case .ghost(let root): return selected == nil && root == selectedProjectRoot
+        }
+    }
+
+    private func activate(_ row: ListRow) {
+        switch row {
+        case .session(let name): Task { await select(name) }
+        case .ghost(let root): Task { await selectProject(root) }
+        }
+    }
+
     private func step(by delta: Int) {
-        let names = visibleSessionNames()
-        guard !names.isEmpty else { return }
-        let cur = selected.flatMap { names.firstIndex(of: $0) } ?? -1
-        let next = min(names.count - 1, max(0, cur + delta))
-        let name = names[next]
-        Task { await select(name) }
+        let rows = visibleRows()
+        guard !rows.isEmpty else { return }
+        let cur = rows.firstIndex(where: rowIsCurrent) ?? -1
+        activate(rows[min(rows.count - 1, max(0, cur + delta))])
     }
 
     private func jump(to index: Int) {
-        let names = visibleSessionNames()
-        guard !names.isEmpty else { return }
-        let name = names[min(names.count - 1, max(0, index))]
-        Task { await select(name) }
+        let rows = visibleRows()
+        guard !rows.isEmpty else { return }
+        activate(rows[min(rows.count - 1, max(0, index))])
     }
 
     /// Keyboard reorder within the selected session's project group.
@@ -861,6 +939,7 @@ public final class AppModel {
         persisted.notes = notes
         persisted.projectNotes = projectNotes
         persisted.projectNames = projectNames
+        persisted.projects = projects
         store.save(persisted)
     }
 

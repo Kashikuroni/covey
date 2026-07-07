@@ -8,7 +8,7 @@ struct NotePane: View {
     @Bindable var model: AppModel
 
     private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
-    private var root: String? { model.sessionRootOfSelected() }
+    private var root: String? { model.inspectorRoot }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -38,7 +38,7 @@ struct NotePane: View {
                 .padding(.horizontal, 6)
                 .padding(.bottom, 6)
             } else {
-                Text("select a session")
+                Text("no project — space p a adds one")
                     .font(.caption).foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }

@@ -7,7 +7,7 @@ enum InputMode: Equatable {
     case help
 }
 
-enum LeaderMenu: Equatable { case root, git, session, terminal, ui }
+enum LeaderMenu: Equatable { case root, git, session, terminal, ui, project }
 
 /// Non-character keys the router cares about.
 enum Special: Equatable {
@@ -65,6 +65,8 @@ enum KeyAction: Equatable {
     case toggleInspectorPanel
     case toggleFooterPanel
     case toggleHeaderPanel
+    case addProject
+    case removeProject
 }
 
 /// Map a Cyrillic char to the Latin key at the same physical QWERTY position;
@@ -200,6 +202,7 @@ enum KeyRouter {
         case (.root, "s"): return .leaderDescend(.session)
         case (.root, "t"): return .leaderDescend(.terminal)
         case (.root, "u"): return .leaderDescend(.ui)
+        case (.root, "p"): return .leaderDescend(.project)
         case (.ui, "s"): return .toggleSessionsPanel
         case (.ui, "i"): return .toggleInspectorPanel
         case (.ui, "f"): return .toggleFooterPanel
@@ -217,6 +220,8 @@ enum KeyRouter {
         case (.session, "U"): return .restartAllPrompt
         case (.session, "r"): return .renameSelected
         case (.session, "R"): return .renameProject
+        case (.project, "a"): return .addProject
+        case (.project, "d"): return .removeProject
         // Every other command in the tree is a later slice; like the TUI,
         // an unbound key closes the leader.
         default: return .closeOverlay

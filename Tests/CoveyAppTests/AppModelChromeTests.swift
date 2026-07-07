@@ -262,7 +262,7 @@ final class AppModelChromeTests: XCTestCase {
         await model.start()
 
         model.apply(.openProjectNote)
-        XCTAssertEqual(model.toast, "no session")
+        XCTAssertEqual(model.toast, "no project")
 
         await model.create(dir: "/a", agent: "/bin/cat")
         _ = await eventually { model.sessions.count == 1 }
@@ -379,7 +379,7 @@ final class AppModelChromeTests: XCTestCase {
         await model.start()
 
         model.apply(.createIssue)
-        XCTAssertEqual(model.toast, "no session")
+        XCTAssertEqual(model.toast, "no project")
 
         _ = try daemon.registry.create(dir: "/tmp", agent: "claude",
                                        argv: ["/bin/cat"], name: "agent")

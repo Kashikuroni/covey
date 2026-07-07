@@ -18,6 +18,7 @@ struct WhichKeyView: View {
             Row(key: "s", label: "session — rename · restart · verify · nvim", implemented: true),
             Row(key: "t", label: "terminal — split v · split h · close", implemented: true),
             Row(key: "u", label: "ui — panels · theme", implemented: true),
+            Row(key: "p", label: "project — add · remove", implemented: true),
         ]
         case .git: return [
             Row(key: "i", label: "create github issue", implemented: true),
@@ -46,6 +47,10 @@ struct WhichKeyView: View {
             Row(key: "f", label: "toggle footer", implemented: true),
             Row(key: "h", label: "toggle header", implemented: true),
             Row(key: "t", label: "toggle dark / light theme", implemented: true),
+        ]
+        case .project: return [
+            Row(key: "a", label: "add project — folder picker", implemented: true),
+            Row(key: "d", label: "remove project — notes survive", implemented: true),
         ]
         }
     }
@@ -77,6 +82,7 @@ struct WhichKeyView: View {
         case .session: return "space s — session"
         case .terminal: return "space t — terminal"
         case .ui: return "space u — ui"
+        case .project: return "space p — project"
         }
     }
 }

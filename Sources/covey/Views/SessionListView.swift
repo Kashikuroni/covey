@@ -66,6 +66,18 @@ struct SessionListView: View {
                             .listRowSeparator(.hidden)
                     }
                     .listSectionSeparator(.hidden)
+                } else if group.sessions.isEmpty, !filtering {
+                    Section {
+                        ghostRow(dir: group.dir)
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 4, leading: 0,
+                                                      bottom: 4, trailing: 0))
+                    } header: {
+                        projectHeader(group: group, rows: [])
+                            .listRowSeparator(.hidden)
+                    }
+                    .listSectionSeparator(.hidden)
                 }
             }
         }
@@ -91,6 +103,28 @@ struct SessionListView: View {
         }
     }
 
+    /// Empty registered project: a selectable stub row in place of cards.
+    private func ghostRow(dir: String) -> some View {
+        let selected = model.selectedProjectRoot == dir && model.selected == nil
+        return HStack {
+            Text("no sessions — N to start")
+                .font(mono(11)).foregroundStyle(tk.t4)
+            Spacer()
+        }
+        .padding(EdgeInsets(top: 7, leading: 11, bottom: 8, trailing: 11))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(selected ? tk.cardHover : tk.card,
+                    in: RoundedRectangle(cornerRadius: Tokens.r))
+        .overlay(
+            RoundedRectangle(cornerRadius: Tokens.r)
+                .strokeBorder(selected ? tk.bd3 : tk.bd,
+                              style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+        .contentShape(Rectangle())
+        .onTapGesture { Task { await model.selectProject(dir) } }
+        .contextMenu {
+            Button("Remove project") { model.removeProject(dir) }
+        }
+    }
 
     private func card(_ session: Session) -> some View {
         let selected = model.selected == session.name
