@@ -83,4 +83,16 @@ final class PersistedStateTests: XCTestCase {
         XCTAssertEqual(r.count, maxRecents)
         XCTAssertEqual(r.first?.name, "s\(maxRecents + 4)")  // last pushed is first
     }
+
+    func testProjectsRoundTripAndOmittedWhenNil() throws {
+        var st = PersistedState()
+        st.projects = ["/repo/x", "/repo/y"]
+        let back = try JSONDecoder().decode(PersistedState.self,
+                                            from: JSONEncoder().encode(st))
+        XCTAssertEqual(back.projects, ["/repo/x", "/repo/y"])
+        // Absent in old files: decodes to nil, encodes to nothing.
+        let empty = try JSONDecoder().decode(PersistedState.self,
+                                             from: JSONEncoder().encode(PersistedState()))
+        XCTAssertNil(empty.projects)
+    }
 }

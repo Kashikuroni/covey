@@ -87,6 +87,9 @@ public struct PersistedState: Codable, Equatable {
     public var issueDrafts: [String: IssueDraft]?
     /// The inspector's note/issue vertical split mode.
     public var inspectorSplit: Bool?
+    /// Registered project roots: projects the sidebar shows even with
+    /// zero live sessions (the note -> issue -> session pipeline entry).
+    public var projects: [String]?
     public var lastVersion: String?
 
     public init(
@@ -101,6 +104,7 @@ public struct PersistedState: Codable, Equatable {
         splitAxes: [String: String]? = nil,
         issueDrafts: [String: IssueDraft]? = nil,
         inspectorSplit: Bool? = nil,
+        projects: [String]? = nil,
         lastVersion: String? = nil
     ) {
         self.theme = theme; self.splitPct = splitPct; self.recents = recents
@@ -114,6 +118,7 @@ public struct PersistedState: Codable, Equatable {
         self.splitAxes = splitAxes
         self.issueDrafts = issueDrafts
         self.inspectorSplit = inspectorSplit
+        self.projects = projects
         self.lastVersion = lastVersion
     }
 }
