@@ -204,10 +204,18 @@ public final class IPCServer {
         case let .attach(name, sinceSeq):
             guard registry.get(name: name) != nil else { return notFound(name) }
             subscribers[name, default: []].insert(sink.id)
-            if let bf = registry.backfill(name: name, since: sinceSeq ?? 0), !bf.bytes.isEmpty {
-                sink.send(.event(.output(name: name, seq: bf.fromSeq,
-                                         bytesB64: Data(bf.bytes).base64EncodedString())))
+            // A fresh GUI emulator needs the session's private-mode state
+            // (alt screen, mouse tracking) before the raw tail: those DECSETs
+            // were emitted once at process start and are usually evicted from
+            // the ring, leaving a re-attached terminal in the normal buffer.
+            let preamble = registry.statePreamble(name: name) ?? []
+            let bf = registry.backfill(name: name, since: sinceSeq ?? 0)
+            let payload = preamble + (bf?.bytes ?? [])
+            if !payload.isEmpty {
+                sink.send(.event(.output(name: name, seq: bf?.fromSeq ?? 0,
+                                         bytesB64: Data(payload).base64EncodedString())))
             }
+            registry.kick(name: name)
             reply(.ok)
 
         case let .detach(name):

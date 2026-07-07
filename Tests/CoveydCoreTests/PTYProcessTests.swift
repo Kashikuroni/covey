@@ -51,6 +51,19 @@ final class PTYProcessTests: XCTestCase {
         p.kill()
     }
     
+    func testKickDeliversSigwinch() throws {
+        let p = PTYProcess()
+        let ready = expectOutput(p, contains: "READY")
+        try p.spawn(argv: ["/bin/sh", "-c",
+                           "trap 'echo WINCHED' WINCH; echo READY; while :; do sleep 0.2; done"],
+                    cols: 80, rows: 24)
+        wait(for: [ready], timeout: 5)
+        let winched = expectOutput(p, contains: "WINCHED")
+        p.kick()
+        wait(for: [winched], timeout: 5)
+        p.kill()
+    }
+
     func testCwdIsRespected() throws {
         let p = PTYProcess()
         let exp = expectOutput(p, contains: "/usr")

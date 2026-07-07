@@ -38,6 +38,31 @@ public final class ScreenModel: TerminalDelegate {
         return rows.joined(separator: "\n")
     }
 
+    /// DECSET bytes that put a fresh terminal emulator into this session's
+    /// current private-mode state (alt screen, mouse tracking, bracketed
+    /// paste, application cursor keys). Sent as an attach preamble: these
+    /// modes are emitted once at process start and are usually evicted from
+    /// the raw scrollback ring, so a re-attached GUI would otherwise stay in
+    /// the normal buffer and mis-route wheel events. The mouse protocol is
+    /// assumed SGR (1006): SwiftTerm keeps the actual encoding private, and
+    /// claude/vim/lazygit all request SGR.
+    public func statePreamble() -> [UInt8] {
+        lock.lock(); defer { lock.unlock() }
+        var seq = ""
+        if terminal.isCurrentBufferAlternate { seq += "\u{1b}[?1049h" }
+        switch terminal.mouseMode {
+        case .off: break
+        case .x10: seq += "\u{1b}[?9h"
+        case .vt200: seq += "\u{1b}[?1000h"
+        case .buttonEventTracking: seq += "\u{1b}[?1002h"
+        case .anyEvent: seq += "\u{1b}[?1003h"
+        }
+        if terminal.mouseMode != .off { seq += "\u{1b}[?1006h" }
+        if terminal.bracketedPasteMode { seq += "\u{1b}[?2004h" }
+        if terminal.applicationCursor { seq += "\u{1b}[?1h" }
+        return Array(seq.utf8)
+    }
+
     // MARK: - TerminalDelegate (the daemon never answers back to the app)
     public func send(source: Terminal, data: ArraySlice<UInt8>) {}
 }

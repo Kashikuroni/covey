@@ -39,6 +39,42 @@ final class ScreenModelTests: XCTestCase {
         XCTAssertTrue(screen.visibleText().components(separatedBy: "\n").contains(line))
     }
 
+    func testStatePreambleEmptyOnFreshModel() {
+        XCTAssertEqual(ScreenModel().statePreamble(), [])
+    }
+
+    func testStatePreambleRestoresAltMouseAndPaste() {
+        let screen = ScreenModel()
+        screen.feed(bytes("\u{1b}[?1049h\u{1b}[?1002h\u{1b}[?1006h\u{1b}[?2004h"))
+        XCTAssertEqual(screen.statePreamble(),
+                       bytes("\u{1b}[?1049h\u{1b}[?1002h\u{1b}[?1006h\u{1b}[?2004h"))
+    }
+
+    func testStatePreambleDropsResetModes() {
+        let screen = ScreenModel()
+        screen.feed(bytes("\u{1b}[?1049h\u{1b}[?1002h\u{1b}[?2004h"))
+        screen.feed(bytes("\u{1b}[?1049l\u{1b}[?1002l"))
+        XCTAssertEqual(screen.statePreamble(), bytes("\u{1b}[?2004h"))
+    }
+
+    // The preamble source must be the parsed terminal, not a byte scanner:
+    // a DECSET torn across two pty chunks still counts.
+    func testStatePreambleSurvivesChunkSplit() {
+        let screen = ScreenModel()
+        screen.feed(bytes("\u{1b}[?10"))
+        screen.feed(bytes("49h"))
+        XCTAssertEqual(screen.statePreamble(), bytes("\u{1b}[?1049h"))
+    }
+
+    // No 1006 in the input, 1006 in the output: the SGR assumption from the
+    // design spec is deliberate.
+    func testStatePreambleAnyEventMouseAndApplicationCursor() {
+        let screen = ScreenModel()
+        screen.feed(bytes("\u{1b}[?1003h\u{1b}[?1h"))
+        XCTAssertEqual(screen.statePreamble(),
+                       bytes("\u{1b}[?1003h\u{1b}[?1006h\u{1b}[?1h"))
+    }
+
     // tmux capture-pane parity: without it a menu at the top of a mostly
     // blank 24-row screen falls outside parsePrompt's last-20-lines window.
     func testTrailingBlankRowsAreTrimmed() {

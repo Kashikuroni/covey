@@ -254,6 +254,17 @@ public final class SessionRegistry {
     public func backfill(name: String, since seq: Int) -> (bytes: [UInt8], fromSeq: Int, gapped: Bool)? {
         withEntry(name)?.process.backfill(since: seq)
     }
+
+    /// DECSET preamble reproducing the session's current terminal modes
+    /// (see ScreenModel.statePreamble). nil when the session doesn't exist.
+    public func statePreamble(name: String) -> [UInt8]? {
+        withEntry(name)?.screen.statePreamble()
+    }
+
+    /// SIGWINCH nudge so a freshly attached client gets a full repaint.
+    public func kick(name: String) {
+        withEntry(name)?.process.kick()
+    }
     
     /// Visible screen text of every live session, for status inference.
     public func snapshotScreens() -> [String: String] {

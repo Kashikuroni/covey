@@ -82,6 +82,39 @@ final class IPCServerTests: XCTestCase {
         server.handle(Request(id: 4, op: .kill(name: "s1", removeWorktree: nil)), from: sink)
     }
 
+    func testAttachPrefixesStatePreambleToBackfill() {
+        let registry = SessionRegistry()
+        let server = IPCServer(registry: registry,
+                               monitor: StatusMonitor(snapshot: { registry.snapshotScreens() }))
+        let sink = FakeSink(id: 1)
+        server.register(sink)
+        // The stream flips alt screen + mouse on; in real sessions those
+        // one-shot DECSETs age out of the 1 MB ring, so the preamble must
+        // come from parsed state, not from the backfill still holding them.
+        server.handle(Request(id: 1, op: .create(
+            dir: "/usr", agent: "sh",
+            argv: ["/bin/sh", "-c", "printf '\\033[?1049h\\033[?1002h\\033[?1006hFRAME'; exec cat"],
+            name: "tui", terminal: nil, worktree: nil, model: nil,
+            effort: nil, resume: nil, companionOf: nil)), from: sink)
+        waitUntil({ registry.statePreamble(name: "tui")?.isEmpty == false },
+                  "modes parsed before attach")
+        server.handle(Request(id: 2, op: .attach(name: "tui", sinceSeq: nil)), from: sink)
+        // Strict check: the backfill itself STARTS with the same DECSETs the
+        // preamble synthesizes, so the payload must contain them twice —
+        // synthesized preamble first, untouched backfill right after. A
+        // plain hasPrefix(preamble) would pass even without the fix.
+        let preamble = "\u{1b}[?1049h\u{1b}[?1002h\u{1b}[?1006h"
+        waitUntil({ sink.captured.contains {
+            if case .event(.output("tui", _, let b64)) = $0,
+               let d = Data(base64Encoded: b64) {
+                return String(decoding: d, as: UTF8.self)
+                    .hasPrefix(preamble + preamble + "FRAME")
+            }
+            return false
+        } }, "first output = preamble + backfill")
+        server.handle(Request(id: 3, op: .kill(name: "tui", removeWorktree: nil)), from: sink)
+    }
+
     func testTickBroadcastsWaitingAndListCarriesStatuses() {
         let registry = SessionRegistry()
         let monitor = StatusMonitor(snapshot: { registry.snapshotScreens() })

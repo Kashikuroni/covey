@@ -149,6 +149,17 @@ public final class PTYProcess {
         }
     }
     
+    /// Nudges the child into a full repaint. TIOCSWINSZ with an unchanged
+    /// size does not signal, so attach sends an explicit SIGWINCH to the
+    /// process group after replaying backfill: a freshly mounted GUI
+    /// emulator needs one complete frame, not the torn tail of the ring.
+    public func kick() {
+        queue.async { [weak self] in
+            guard let self, self.pid > 0, !self.reaped else { return }
+            _ = Darwin.kill(-self.pid, SIGWINCH)
+        }
+    }
+
     public func kill() {
         queue.async { [weak self] in
             guard let self, self.pid > 0, !self.reaped else { return }

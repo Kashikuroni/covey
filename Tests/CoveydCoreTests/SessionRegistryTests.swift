@@ -33,6 +33,40 @@ final class SessionRegistryTests: XCTestCase {
         XCTAssertTrue(reg.list().isEmpty)
     }
     
+    func testStatePreambleReflectsSessionModes() throws {
+        let reg = SessionRegistry()
+        let s = try reg.create(dir: "/usr", agent: "sh", argv: [
+            "/bin/sh", "-c", "printf '\\033[?1049h\\033[?1002h\\033[?1006h'; exec cat",
+        ])
+        waitUntil({ reg.statePreamble(name: s.name)?.isEmpty == false },
+                  "modes parsed from the session stream")
+        XCTAssertEqual(reg.statePreamble(name: s.name),
+                       bytes("\u{1b}[?1049h\u{1b}[?1002h\u{1b}[?1006h"))
+        XCTAssertNil(reg.statePreamble(name: "ghost"))
+        reg.kill(name: s.name)
+    }
+
+    func testKickReachesSessionProcess() throws {
+        let reg = SessionRegistry()
+        let s = try reg.create(dir: "/usr", agent: "sh", argv: [
+            "/bin/sh", "-c",
+            "trap 'echo WINCHED' WINCH; echo READY; while :; do sleep 0.2; done",
+        ])
+        var collected = [UInt8]()
+        let lock = NSLock()
+        reg.attachOutput(name: s.name) { chunk, _ in
+            lock.lock(); collected += chunk; lock.unlock()
+        }
+        func output() -> String {
+            lock.lock(); defer { lock.unlock() }
+            return String(decoding: collected, as: UTF8.self)
+        }
+        waitUntil({ output().contains("READY") }, "trap installed")
+        reg.kick(name: s.name)
+        waitUntil({ output().contains("WINCHED") }, "SIGWINCH delivered")
+        reg.kill(name: s.name)
+    }
+
     func testTwoSessionsIndependentOutput() throws {
         let reg = SessionRegistry()
         let s1 = try reg.create(dir: "/usr", agent: "sh", argv: ["/bin/cat"])
