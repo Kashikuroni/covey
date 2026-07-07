@@ -52,6 +52,30 @@ final class AppModelUsageTests: XCTestCase {
         let refreshed = await eventually { model.plan == "Pro" && model.usageError == nil }
         XCTAssertTrue(refreshed)
     }
+
+    @MainActor
+    func testLimitCrossingPersistsMarker() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let statePath = "\(NSTemporaryDirectory())covey-limit-\(UInt32.random(in: 0..<UInt32.max)).json"
+        let acc = Account(usage: Usage(
+            fiveHour: UsageWindow(utilization: 82, resetUnix: 1_008_000),
+            sevenDay: nil, sevenDaySonnet: nil))
+        let client = IPCClient(path: daemon.path); try client.connect()
+        let model = AppModel(
+            client: client,
+            makeClient: { let c = IPCClient(path: daemon.path); try c.connect(); return c },
+            store: StateStore(path: statePath, debounce: 0.05),
+            fetchAccount: { acc },
+            usageInterval: 0.05)
+        await model.start()
+        let persisted = await eventually {
+            guard let data = FileManager.default.contents(atPath: statePath),
+                  let st = try? JSONDecoder().decode(PersistedState.self, from: data)
+            else { return false }
+            return st.usageNotified == ["5h": 1_008_000]
+        }
+        XCTAssertTrue(persisted)
+    }
 }
 
 /// Mutable holder so the fetch closure can return changing values across ticks.
