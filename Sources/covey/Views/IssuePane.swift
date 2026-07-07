@@ -43,24 +43,30 @@ struct IssuePane: View {
                 switch stage {
                 case .editing: editor
                 case .creating:
-                    Text("creating issue…").font(.headline)
-                    Text("esc hide — gh keeps running")
-                        .font(.caption2).foregroundStyle(.tertiary)
+                    statusCard(tint: tk.wait, title: "creating issue…", spinner: true) {
+                        Text("esc hide — gh keeps running")
+                            .font(.caption2).foregroundStyle(tk.t4)
+                    }
                     Spacer()
                 case .done(let url):
-                    Label("issue created", systemImage: "checkmark")
-                        .font(.headline).foregroundStyle(tk.ok)
-                    Text(url).font(.caption.monospaced()).textSelection(.enabled)
-                    Text("(copied to clipboard)")
-                        .font(.caption2).foregroundStyle(.tertiary)
+                    statusCard(icon: "checkmark", tint: tk.ok, title: "issue created") {
+                        Text(url).font(.caption.monospaced()).foregroundStyle(tk.t2)
+                            .textSelection(.enabled).lineLimit(2)
+                        Text("URL copied to clipboard")
+                            .font(.caption2).foregroundStyle(tk.t4)
+                    }
                     Button("New issue") { stage = .editing }
+                        .buttonStyle(AyuButton(tk: tk, prominent: false))
                     Spacer()
                 case .failed(let err):
-                    Label("issue not created", systemImage: "xmark")
-                        .font(.headline).foregroundStyle(tk.err)
-                    Text(err).font(.caption).foregroundStyle(tk.err)
-                        .textSelection(.enabled)
+                    statusCard(icon: "xmark", tint: tk.err, title: "issue not created") {
+                        // Raw gh stderr — mono and dimmed, the card border
+                        // carries the severity instead of a wall of red.
+                        Text(err).font(.caption.monospaced()).foregroundStyle(tk.t2)
+                            .textSelection(.enabled).lineLimit(8)
+                    }
                     Button("Back") { stage = .editing }
+                        .buttonStyle(AyuButton(tk: tk, prominent: false))
                     Spacer()
                 }
             }
@@ -72,6 +78,31 @@ struct IssuePane: View {
         }
         .onChange(of: titleFocused) { _, _ in syncEditing() }
         .onChange(of: bodyFocused) { _, _ in syncEditing() }
+    }
+
+    /// gh-outcome card in the pane idiom: surf2 fill, hairline border tinted
+    /// by the outcome, tiered text — same family as ayuField/AyuButton.
+    private func statusCard(icon: String? = nil, tint: Color, title: String,
+                            spinner: Bool = false,
+                            @ViewBuilder content: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                if spinner {
+                    ProgressView().controlSize(.mini)
+                } else if let icon {
+                    Image(systemName: icon)
+                        .font(.caption.weight(.bold)).foregroundStyle(tint)
+                }
+                Text(title)
+                    .font(.callout.weight(.semibold)).foregroundStyle(tk.t1)
+            }
+            content()
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tk.surf2, in: RoundedRectangle(cornerRadius: Tokens.r))
+        .overlay(RoundedRectangle(cornerRadius: Tokens.r)
+            .strokeBorder(tint.opacity(0.35)))
     }
 
     private func syncEditing() {
