@@ -13,3 +13,6 @@ xcuserdata/
 # XcodeGen artifacts (regenerate: xcodegen generate)
 /Covey.xcodeproj
 /App/Info.plist
+
+.claude/ 
+docs/
