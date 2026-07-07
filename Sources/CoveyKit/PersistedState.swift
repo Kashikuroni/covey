@@ -87,6 +87,9 @@ public struct PersistedState: Codable, Equatable {
     public var issueDrafts: [String: IssueDraft]?
     /// The inspector's note/issue vertical split mode.
     public var inspectorSplit: Bool?
+    /// Usage-limit alert markers: window key ("5h"/"7d") -> resetUnix of the
+    /// window cycle already alerted (0 when resets_at was absent).
+    public var usageNotified: [String: Int64]?
     public var lastVersion: String?
 
     public init(
@@ -101,6 +104,7 @@ public struct PersistedState: Codable, Equatable {
         splitAxes: [String: String]? = nil,
         issueDrafts: [String: IssueDraft]? = nil,
         inspectorSplit: Bool? = nil,
+        usageNotified: [String: Int64]? = nil,
         lastVersion: String? = nil
     ) {
         self.theme = theme; self.splitPct = splitPct; self.recents = recents
@@ -114,6 +118,7 @@ public struct PersistedState: Codable, Equatable {
         self.splitAxes = splitAxes
         self.issueDrafts = issueDrafts
         self.inspectorSplit = inspectorSplit
+        self.usageNotified = usageNotified
         self.lastVersion = lastVersion
     }
 }

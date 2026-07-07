@@ -83,4 +83,18 @@ final class PersistedStateTests: XCTestCase {
         XCTAssertEqual(r.count, maxRecents)
         XCTAssertEqual(r.first?.name, "s\(maxRecents + 4)")  // last pushed is first
     }
+
+    func testUsageNotifiedRoundTripAndOmittedWhenNil() throws {
+        var st = PersistedState()
+        st.usageNotified = ["5h": 1_760_000_000, "7d": 0]
+        let back = try JSONDecoder().decode(PersistedState.self,
+                                            from: JSONEncoder().encode(st))
+        XCTAssertEqual(back.usageNotified, ["5h": 1_760_000_000, "7d": 0])
+        // Absent in old files: decodes to nil, encodes to nothing.
+        let empty = try JSONDecoder().decode(PersistedState.self,
+                                             from: JSONEncoder().encode(PersistedState()))
+        XCTAssertNil(empty.usageNotified)
+        let json = String(data: try JSONEncoder().encode(PersistedState()), encoding: .utf8)!
+        XCTAssertFalse(json.contains("usageNotified"))
+    }
 }
