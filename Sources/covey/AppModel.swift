@@ -948,6 +948,16 @@ public final class AppModel {
         usage = acc.usage
         plan = acc.plan
         usageError = acc.usageError
+        // Failed fetch (nil usage) must not touch alert markers: the
+        // current window's dedup survives network gaps.
+        guard let usage = acc.usage else { return }
+        let old = persisted.usageNotified ?? [:]
+        let (alerts, marks) = limitAlerts(usage: usage, notified: old, now: Date())
+        for alert in alerts { Notifier.post(alert) }
+        if marks != old {
+            persisted.usageNotified = marks
+            persist()
+        }
     }
 
     private func apply(_ event: DaemonEvent) {

@@ -54,6 +54,7 @@ struct CoveyApp: App {
                                      store: store,
                                      fetchAccount: UsageService.fetchAccount)
                     await m.start()
+                    Notifier.requestPermission()
                     model = m
                 } catch {
                     startupError = "\(error)"
