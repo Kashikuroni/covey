@@ -14,13 +14,14 @@ struct WhichKeyView: View {
     private var rows: [Row] {
         switch menu {
         case .root: return [
-            Row(key: "g", label: "git — issue · promote · delete branch · cleanup · return", implemented: true),
+            Row(key: "g", label: "git — issue · list · promote · delete branch · cleanup · return", implemented: true),
             Row(key: "s", label: "session — rename · restart · verify · nvim", implemented: true),
             Row(key: "t", label: "terminal — split v · split h · close", implemented: true),
-            Row(key: "u", label: "ui — panels · theme", implemented: true),
+            Row(key: "u", label: "ui — panels · theme · inspector split", implemented: true),
         ]
         case .git: return [
             Row(key: "i", label: "create github issue", implemented: true),
+            Row(key: "l", label: "list issues", implemented: true),
             Row(key: "p", label: "promote worktree to root", implemented: true),
             Row(key: "b", label: "delete session branch", implemented: true),
             Row(key: "c", label: "cleanup merged branches", implemented: true),
@@ -46,6 +47,7 @@ struct WhichKeyView: View {
             Row(key: "f", label: "toggle footer", implemented: true),
             Row(key: "h", label: "toggle header", implemented: true),
             Row(key: "t", label: "toggle dark / light theme", implemented: true),
+            Row(key: "v", label: "inspector tabs / split", implemented: true),
         ]
         }
     }

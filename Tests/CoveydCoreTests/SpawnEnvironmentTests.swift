@@ -1,4 +1,5 @@
 import XCTest
+import CoveyKit
 @testable import CoveydCore
 
 final class SpawnEnvironmentTests: XCTestCase {

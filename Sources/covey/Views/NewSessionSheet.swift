@@ -93,6 +93,9 @@ struct NewSessionSheet: View {
                 let collapsed = collapseHome(prefill)
                 dir = collapsed.hasSuffix("/") ? collapsed : collapsed + "/"
             }
+            if let prefillName = model.newSessionPrefillName {
+                name = prefillName
+            }
             model.clearNewSessionPrefill()
             focus = .name
             refreshDirEntries()

@@ -84,10 +84,17 @@ struct ContentView: View {
                 }
                 // The inspector zone owns its plain keys (vim editors and the
                 // preview are not NSTextViews): only the zone chords above and
-                // the space leader stay global here.
+                // the space leader stay global here. The label checklist's
+                // Space toggle sacrifices the leader instead, but only while
+                // the issue editor screen owns the inspector.
                 let plainChar = event.charactersIgnoringModifiers?.first.map(latinize)
+                let issueEditOwnsSpace: Bool = {
+                    guard model.issueScreen == .browser else { return false }
+                    if case .edit = model.issueBrowser.screen { return true }
+                    return false
+                }()
                 if model.focus == .inspector, model.inputMode == .normal,
-                   plainChar != " " {
+                   plainChar != " " || issueEditOwnsSpace {
                     return event
                 }
                 // While a text field edits (filter, sheets), keys are its own.

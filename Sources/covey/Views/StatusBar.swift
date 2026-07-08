@@ -69,10 +69,23 @@ struct StatusBar: View {
                 return [("esc", "leave insert")]
             }
             if model.inspectorTab == .issue {
-                return [("⌘ M", "assign"), ("⌘ O", "browser"), ("enter", "create"),
-                        ("⌃h/⌃l", "zones")]
+                if model.issueScreen == .composer {
+                    return [("⌘ M", "assign"), ("⌘ O", "browser"), ("enter", "create"),
+                            ("esc", "issues"), ("⌃h/⌃l", "zones")]
+                }
+                switch model.issueBrowser.screen {
+                case .list:
+                    return [("enter", "view"), ("s", "session"), ("n", "new"),
+                            ("o", "state"), ("/", "search"), ("e/c/x", "edit/close/del")]
+                case .detail:
+                    return [("e", "edit"), ("s", "session"), ("g", "session ↗"),
+                            ("c", "close/reopen"), ("x", "delete"), ("b", "browser"),
+                            ("esc", "list")]
+                case .edit:
+                    return [("enter", "save"), ("esc", "cancel")]
+                }
             }
-            return [("space", "menu"), ("s", "tabs / split"),
+            return [("space", "menu"),
                     ("⌃h/⌃l", "zones"), ("⌃j/⌃k", "panes")]
         }
         switch model.inputMode {

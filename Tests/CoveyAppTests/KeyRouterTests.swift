@@ -159,7 +159,11 @@ final class KeyRouterTests: XCTestCase {
                        .inspectorPaneSwap)
         XCTAssertEqual(KeyRouter.route(key("k", ctrl: true), context: insp),
                        .inspectorPaneSwap)
-        XCTAssertEqual(KeyRouter.route(key("s"), context: insp), .inspectorSplitToggle)
+        // The old plain-`s` split toggle is gone (it was dead code — the
+        // ContentView monitor hands plain inspector keys to the views);
+        // the toggle lives on `space u v` now.
+        XCTAssertNotEqual(KeyRouter.route(key("s"), context: insp),
+                          .inspectorSplitToggle)
         // Outside the zone the old meanings stay.
         XCTAssertEqual(KeyRouter.route(key("l", ctrl: true), context: ctx()),
                        .cycleFocus(forward: true))
@@ -175,6 +179,7 @@ final class KeyRouterTests: XCTestCase {
         XCTAssertEqual(KeyRouter.route(key("f"), context: u), .toggleFooterPanel)
         XCTAssertEqual(KeyRouter.route(key("h"), context: u), .toggleHeaderPanel)
         XCTAssertEqual(KeyRouter.route(key("t"), context: u), .toggleTheme)
+        XCTAssertEqual(KeyRouter.route(key("v"), context: u), .inspectorSplitToggle)
         // The old app group is gone.
         XCTAssertEqual(KeyRouter.route(key("a"), context: ctx(mode: .leader(.root))),
                        .closeOverlay)
@@ -183,6 +188,13 @@ final class KeyRouterTests: XCTestCase {
     func testGitIssueChord() {
         XCTAssertEqual(KeyRouter.route(key("i"), context: ctx(mode: .leader(.git))),
                        .createIssue)
+    }
+
+    func testGitLeaderRoutesIssueList() {
+        let ctx = KeyRouter.Context(mode: .leader(.git), focus: .sessions,
+                                    vimMode: true, sheetOpen: false)
+        XCTAssertEqual(KeyRouter.route(KeyInput(char: "l"), context: ctx),
+                       .openIssueList)
     }
 
     func testRecentModalKey() {

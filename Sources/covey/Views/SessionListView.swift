@@ -15,9 +15,8 @@ struct SessionListView: View {
         VStack(spacing: 0) {
             // Zone tab matching the terminal panes' Agent/Terminal headers.
             HStack {
-                Text("Session")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(model.focus == .sessions ? tk.accent : tk.t4)
+                zoneTitle("Session", badge: 1,
+                          active: model.focus == .sessions, tk: tk)
                 Spacer()
             }
             .padding(.horizontal, 8)
@@ -107,8 +106,8 @@ struct SessionListView: View {
                         .font(mono(10)).foregroundStyle(tk.t4)
                 }
                 Spacer()
-                Text(statusLabel(status))
-                    .font(mono(11)).foregroundStyle(statusLabelColor(status))
+                Text(sessionStatusLabel(status))
+                    .font(mono(11)).foregroundStyle(sessionStatusTint(status, tk: tk))
                 AgentIcon(agent: session.agent, tk: tk)
             }
             Group {
@@ -171,19 +170,4 @@ struct SessionListView: View {
         .shadow(color: tk.shadowColor, radius: Tokens.shadowRadius, y: Tokens.shadowY)
     }
 
-    private func statusLabel(_ status: Status) -> String {
-        switch status {
-        case .running: return "running"
-        case .waiting: return "waiting"
-        case .idle: return "idle"
-        }
-    }
-
-    private func statusLabelColor(_ status: Status) -> Color {
-        switch status {
-        case .running: return tk.run.opacity(0.8)
-        case .waiting: return tk.wait
-        case .idle: return tk.t4
-        }
-    }
 }

@@ -65,4 +65,33 @@ final class NoteModelTests: XCTestCase {
                        "1. indented done\n2. first")
         XCTAssertEqual(selectedAsNumbered(sample, ordinals: [99]), "")
     }
+
+    func testParseRuleQuoteFence() {
+        XCTAssertEqual(parseNote("---"), [.rule])
+        XCTAssertEqual(parseNote("***"), [.rule])
+        XCTAssertEqual(parseNote("___"), [.rule])
+        XCTAssertEqual(parseNote("--"), [.text("--")])          // < 3 chars
+        XCTAssertEqual(parseNote("- - -"), [.bullet("- -")])     // mixed -> not a rule
+        XCTAssertEqual(parseNote("> quoted"), [.quote("quoted")])
+        XCTAssertEqual(parseNote(">bare"), [.quote("bare")])
+        let fenced = parseNote("```swift\nlet x = 1\n\n```")
+        XCTAssertEqual(fenced, [.codeFence, .code("let x = 1"), .code(""), .codeFence])
+    }
+
+    func testParseNoteLineCountInvariant() {
+        let buf = "# h\n```\ncode\n---\n> q\n```\n---\n> q\ntext"
+        XCTAssertEqual(parseNote(buf).count, buf.components(separatedBy: "\n").count)
+        // Inside the fence nothing else is recognized.
+        XCTAssertEqual(parseNote(buf)[3], .code("---"))
+    }
+
+    func testInlineMD() {
+        let bold = inlineMD("a **b** c")
+        XCTAssertTrue(bold.runs.contains {
+            $0.inlinePresentationIntent?.contains(.stronglyEmphasized) == true })
+        let code = inlineMD("x `y` z")
+        XCTAssertTrue(code.runs.contains {
+            $0.inlinePresentationIntent?.contains(.code) == true })
+        XCTAssertEqual(String(inlineMD("no markup").characters), "no markup")
+    }
 }

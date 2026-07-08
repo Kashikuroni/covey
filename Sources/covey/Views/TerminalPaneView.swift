@@ -15,11 +15,11 @@ struct TerminalPaneView: View {
                     splitBody(main: name, companion: comp.name,
                               vertical: model.splitAxis(for: name) == "v")
                 } else {
-                    paneHeader("Agent", name: name)
+                    paneHeader("Agent", badge: 2, name: name)
                     pane(name)
                 }
             } else {
-                paneHeader("Agent", name: "")
+                paneHeader("Agent", badge: 2, name: "")
                 Spacer()
                 Text("no session selected").foregroundStyle(.secondary)
                 Spacer()
@@ -37,14 +37,14 @@ struct TerminalPaneView: View {
                 : AnyLayout(VStackLayout(spacing: 0))
             layout {
                 VStack(spacing: 0) {
-                    paneHeader("Agent", name: main)
+                    paneHeader("Agent", badge: 2, name: main)
                     pane(main)
                 }
                 .frame(width: vertical ? first : nil,
                        height: vertical ? nil : first)
                 splitDivider(vertical: vertical, total: total)
                 VStack(spacing: 0) {
-                    paneHeader("Terminal", name: companion)
+                    paneHeader("Terminal", badge: 5, name: companion)
                     pane(companion)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -54,12 +54,10 @@ struct TerminalPaneView: View {
     }
 
     /// Tiny per-pane tab: the focused pane's label lights up in accent.
-    private func paneHeader(_ label: String, name: String) -> some View {
+    private func paneHeader(_ label: String, badge: Int, name: String) -> some View {
         let active = model.focus == .terminal && model.focusedPane == name
         return HStack {
-            Text(label)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(active ? tk.accent : tk.t4)
+            zoneTitle(label, badge: badge, active: active, tk: tk)
             Spacer()
         }
         .padding(.horizontal, 8)

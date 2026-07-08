@@ -8,6 +8,10 @@ enum NoteLine: Equatable {
     case bullet(String)
     case text(String)
     case blank
+    case rule                 // --- / *** / ___ divider
+    case quote(String)        // "> " blockquote, marker stripped
+    case codeFence            // ``` delimiter line
+    case code(String)         // raw line inside a fence
 }
 
 /// If `line` is a checkbox task, returns `(done, text)` with the `- [ ] `
@@ -29,8 +33,19 @@ func parseTask(_ line: String) -> (done: Bool, text: String)? {
 }
 
 /// Parse a whole note buffer into typed lines (split on "\n").
+/// INVARIANT: exactly one NoteLine per input line — the note preview maps
+/// buffer lines to the vim cursor 1:1, fences included.
 func parseNote(_ buf: String) -> [NoteLine] {
-    buf.components(separatedBy: "\n").map(parseLine)
+    var inFence = false
+    return buf.components(separatedBy: "\n").map { line in
+        let trimmed = String(line.drop(while: { $0 == " " || $0 == "\t" }))
+        if trimmed.hasPrefix("```") {
+            inFence.toggle()
+            return .codeFence
+        }
+        if inFence { return .code(line) }
+        return parseLine(line)
+    }
 }
 
 private func parseLine(_ line: String) -> NoteLine {
@@ -42,6 +57,16 @@ private func parseLine(_ line: String) -> NoteLine {
         let text = String(trimmed.dropFirst(trimmed.prefix(while: { $0 == "#" }).count))
             .drop(while: { $0 == " " })
         return .heading(level: level, text: String(text))
+    }
+    // Rules before bullets: "---" must not read as an empty bullet, while
+    // "- - -" (spaced) stays a bullet — single repeated character only.
+    if trimmed.count >= 3, let first = trimmed.first, "-*_".contains(first),
+       trimmed.allSatisfy({ $0 == first }) {
+        return .rule
+    }
+    if trimmed.hasPrefix(">") {
+        let body = trimmed.dropFirst().drop(while: { $0 == " " })
+        return .quote(String(body))
     }
     if trimmed.hasPrefix("- ") { return .bullet(String(trimmed.dropFirst(2))) }
     if trimmed.hasPrefix("* ") { return .bullet(String(trimmed.dropFirst(2))) }

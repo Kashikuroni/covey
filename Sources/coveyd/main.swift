@@ -1,4 +1,5 @@
 import Foundation
+import CoveyKit
 import CoveydCore
 
 // A Finder-spawned daemon (Covey.app bundle) inherits the bare system PATH,

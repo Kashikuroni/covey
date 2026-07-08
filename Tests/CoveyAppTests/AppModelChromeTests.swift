@@ -396,9 +396,33 @@ final class AppModelChromeTests: XCTestCase {
         XCTAssertTrue(model.showInspector)
         XCTAssertEqual(model.inspectorTab, .issue)
         XCTAssertEqual(model.focus, .inspector)
-        XCTAssertEqual(model.issueFocusTick, tickBefore + 1)
+        // The tick bump is deferred by one runloop turn (see AppModel's
+        // .createIssue case) so a fresh IssuePane mount still observes an
+        // .onChange fire — await it instead of asserting synchronously.
+        let bumped = await eventually { model.issueFocusTick == tickBefore + 1 }
+        XCTAssertTrue(bumped)
 
         daemon.registry.kill(name: "agent")
+    }
+
+    @MainActor
+    func testOpenIssueListGuards() async throws {
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        model.apply(.openIssueList)
+        XCTAssertEqual(model.toast, "no session")   // guard fires, nothing opens
+        XCTAssertNotEqual(model.focus, .inspector)
+    }
+
+    @MainActor
+    func testNewSessionFromIssueWithoutSessionIsNoop() async throws {
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        model.newSessionFromIssue(number: 5, title: "t")
+        XCTAssertNil(model.modal)
+        XCTAssertNil(model.newSessionPrefillName)
     }
 
     @MainActor
@@ -458,8 +482,9 @@ final class AppModelChromeTests: XCTestCase {
         model.apply(.cycleFocus(forward: true))   // -> inspector, issue zone
         XCTAssertEqual(model.focus, .inspector)
         XCTAssertEqual(model.inspectorTab, .issue)
-        XCTAssertEqual(model.issueFocusTick, tickBefore + 1,
-                       "issue zone always lands in the form")
+        // Deferred one runloop turn (selectInspectorTab) — await it.
+        let bumped = await eventually { model.issueFocusTick == tickBefore + 1 }
+        XCTAssertTrue(bumped, "issue zone always lands in the form")
         model.apply(.cycleFocus(forward: true))   // wrap -> sessions
         XCTAssertEqual(model.focus, .sessions)
         model.apply(.cycleFocus(forward: false))  // back -> issue zone
@@ -624,4 +649,29 @@ final class AppModelChromeTests: XCTestCase {
         daemon.registry.kill(name: "busy")
     }
 
+
+    @MainActor
+    func testFocusZoneGuards() async throws {
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        model.focusZone(.agent)
+        XCTAssertEqual(model.toast, "no session")
+        model.focusZone(.note)
+        XCTAssertEqual(model.toast, "inspector hidden — space u i")
+        model.focusZone(.issues)
+        XCTAssertEqual(model.toast, "inspector hidden — space u i")
+        model.focusZone(.terminalSplit)
+        XCTAssertEqual(model.toast, "no split — space t v / h")
+        XCTAssertNotEqual(model.focus, .inspector)   // guards never move focus
+    }
+
+    @MainActor
+    func testFocusZoneSession() async throws {
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        model.focusZone(.session)
+        XCTAssertEqual(model.focus, .sessions)
+    }
 }

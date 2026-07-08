@@ -98,13 +98,16 @@ struct CoveyApp: App {
                     get: { model?.showInspector ?? false },
                     set: { model?.setShowInspector($0) }))
                 Divider()
-                Button("Focus Sessions") { model?.setFocus(.sessions) }
+                Button("Focus Session") { model?.focusZone(.session) }
                     .keyboardShortcut("1", modifiers: .command)
-                Button("Focus Terminal") { model?.setFocus(.terminal) }
+                Button("Focus Agent") { model?.focusZone(.agent) }
                     .keyboardShortcut("2", modifiers: .command)
-                Button("Focus Inspector") { model?.setFocus(.inspector) }
+                Button("Focus Note") { model?.focusZone(.note) }
                     .keyboardShortcut("3", modifiers: .command)
-                    .disabled(model?.showInspector != true)
+                Button("Focus Issues") { model?.focusZone(.issues) }
+                    .keyboardShortcut("4", modifiers: .command)
+                Button("Focus Terminal") { model?.focusZone(.terminalSplit) }
+                    .keyboardShortcut("5", modifiers: .command)
                 Divider()
                 Toggle("Vim Mode", isOn: Binding(
                     get: { model?.vimMode ?? false },
