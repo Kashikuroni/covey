@@ -16,6 +16,7 @@ extension AppModel.Modal: Identifiable {
         case .restart(let name): return "restart-\(name)"
         case .restartAll: return "restart-all"
         case .themeRestart: return "theme-restart"
+        case .addProject: return "add-project"
         }
     }
 }
@@ -563,5 +564,120 @@ struct RenameSheet: View {
         .padding(20)
         .frame(width: 360)
         .onAppear { newName = name }
+    }
+}
+
+/// Keyboard-first "add project": a path input with a live subdir picker
+/// (↓/↑ walk, Tab/→ descend), mirroring the new-session directory row — no
+/// Finder panel. Enter registers the directory as a project and selects it.
+struct AddProjectSheet: View {
+    let model: AppModel
+    @State private var dir = "~/"
+    @State private var entries: [String] = []
+    @State private var selected = 0
+    @State private var error: String?
+    @FocusState private var focused: Bool
+
+    private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Add project").font(.headline)
+            VStack(alignment: .leading, spacing: 2) {
+                TextField("Directory", text: $dir)
+                    .focused($focused)
+                    .ayuField(tk, focused: focused)
+                    .onSubmit { submit() }
+                    .onKeyPress(.downArrow) { step(1); return .handled }
+                    .onKeyPress(.upArrow) { step(-1); return .handled }
+                    .onKeyPress(.tab) { descend() ? .handled : .ignored }
+                    .onKeyPress(.rightArrow, phases: .down) { _ in
+                        // → descends only when a suggestion is highlighted;
+                        // otherwise it stays a caret move inside the field.
+                        entries.isEmpty ? .ignored : (descend() ? .handled : .ignored)
+                    }
+                if focused { suggestions }
+            }
+            if let error {
+                Text("! \(error)").font(.caption).foregroundStyle(.red)
+            }
+            HStack {
+                Text("↑↓ pick · tab/→ enter dir · enter add · esc cancel")
+                    .font(.caption2).foregroundStyle(.tertiary)
+                Spacer()
+                Button("Cancel") { model.modal = nil }
+                Button("Add") { submit() }
+                    .buttonStyle(.glassProminent)
+                    .disabled(dir.isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 480)
+        .onExitCommand { model.modal = nil }
+        .onAppear { focused = true; refresh() }
+        .task(id: dir) { refresh() }
+        .onChange(of: focused) { _, new in
+            // macOS selects the whole field on focus; put the caret at the end
+            // so the first keystroke appends to "~/" instead of wiping it.
+            guard new else { return }
+            DispatchQueue.main.async {
+                if let editor = NSApp.keyWindow?.firstResponder as? NSTextView {
+                    editor.selectedRange = NSRange(location: editor.string.count, length: 0)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var suggestions: some View {
+        if !entries.isEmpty {
+            VStack(alignment: .leading, spacing: 1) {
+                ForEach(Array(entries.prefix(8).enumerated()), id: \.offset) { idx, entry in
+                    HStack(spacing: 4) {
+                        Text(entry)
+                        Spacer(minLength: 0)
+                    }
+                    .font(.caption.monospaced())
+                    .padding(.horizontal, 6).padding(.vertical, 1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(idx == selected ? Color.accentColor.opacity(0.2) : .clear)
+                    .contentShape(Rectangle())
+                    .onTapGesture { selected = idx; _ = descend() }
+                }
+                if entries.count > 8 {
+                    Text("… \(entries.count - 8) more")
+                        .font(.caption2).foregroundStyle(.tertiary).padding(.horizontal, 6)
+                }
+            }
+        }
+    }
+
+    private func refresh() {
+        let (basePath, filter) = DirBrowse.splitPath(dir)
+        entries = DirBrowse.list(base: expandTilde(basePath), filter: filter)
+        selected = 0
+    }
+
+    private func step(_ delta: Int) {
+        guard !entries.isEmpty else { return }
+        selected = ((selected + delta) % entries.count + entries.count) % entries.count
+    }
+
+    @discardableResult
+    private func descend() -> Bool {
+        guard entries.indices.contains(selected) else { return false }
+        let (basePath, _) = DirBrowse.splitPath(dir)
+        dir = basePath + entries[selected] + "/"
+        return true
+    }
+
+    private func submit() {
+        let cleanDir = dir.count > 1 && dir.hasSuffix("/") ? String(dir.dropLast()) : dir
+        let path = expandTilde(cleanDir)
+        var isDir: ObjCBool = false
+        guard !path.isEmpty,
+              FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue
+        else { error = "not a directory"; return }
+        model.addProject(path)
+        model.modal = nil
     }
 }

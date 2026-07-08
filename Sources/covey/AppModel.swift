@@ -26,6 +26,7 @@ public final class AppModel {
         case restart(String)
         case restartAll
         case themeRestart
+        case addProject
     }
 
     public enum Focus { case sessions, terminal, inspector }
@@ -52,7 +53,25 @@ public final class AppModel {
             }
         }
     }
-    public private(set) var toast: String?
+    @ObservationIgnored private var toastDismiss: Task<Void, Never>?
+    /// How long a transient toast stays before auto-dismissing (test-tunable).
+    @ObservationIgnored var toastDismissDelay: Duration = .seconds(4)
+    public private(set) var toast: String? {
+        didSet {
+            // Transient confirmations/errors auto-dismiss so they don't hang
+            // forever; status toasts shown while disconnected (e.g. "daemon
+            // connection lost", which carries the Reconnect button) persist
+            // until reconnect clears them.
+            toastDismiss?.cancel()
+            guard toast != nil, connected else { return }
+            let delay = toastDismissDelay
+            toastDismiss = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: delay)
+                guard let self, !Task.isCancelled else { return }
+                self.toast = nil
+            }
+        }
+    }
     public private(set) var connected = false
     public private(set) var themeRaw: String = "dark"
     public private(set) var splitPct: Int = 38
@@ -96,6 +115,11 @@ public final class AppModel {
     private(set) var inputMode: InputMode = .normal
     /// Dir to prefill in the New Session sheet (set by `N`).
     public private(set) var newSessionPrefillDir: String?
+    /// Issue number the pending New Session is being created for (issue's `s`);
+    /// the sheet records the binding on the created session's name.
+    public private(set) var newSessionPrefillIssue: Int?
+    /// Branch to prefill (create-session-in-branch from an issue).
+    public private(set) var newSessionPrefillBranch: String?
     public private(set) var promptsByName: [String: [String]] = [:]
     public private(set) var notes: [String: String] = [:]
     public private(set) var projectNotes: [String: String] = [:]
@@ -103,15 +127,6 @@ public final class AppModel {
     public private(set) var projects: [String] = []
     /// Selected empty-project ghost row; mutually exclusive with `selected`.
     public private(set) var selectedProjectRoot: String?
-    /// Injectable folder picker (NSOpenPanel in production; stubbed in tests).
-    public var pickProjectFolder: () -> String? = {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Add Project"
-        return panel.runModal() == .OK ? panel.url?.path : nil
-    }
 
     /// Output sinks per session name. A terminal view mounts asynchronously
     /// after attach, so bytes (notably the attach backfill) can arrive before
@@ -376,11 +391,17 @@ public final class AppModel {
     public func rename(_ name: String, to newName: String) async {
         do { try await client.rename(name: name, newName: newName) }
         catch { toast = errorText(error); return }
+        // Migrate name-keyed state so a rename doesn't orphan it.
         if var axes = persisted.splitAxes, let axis = axes.removeValue(forKey: name) {
             axes[newName] = axis
             persisted.splitAxes = axes
-            persist()
         }
+        if var map = persisted.issueBySession, let issue = map.removeValue(forKey: name) {
+            map[newName] = issue
+            persisted.issueBySession = map
+        }
+        if let note = notes.removeValue(forKey: name) { notes[newName] = note }
+        persist()
         if name == selected {
             selected = nil            // select() guard: force the re-attach chain
             await select(newName)
@@ -582,6 +603,22 @@ public final class AppModel {
     public func clearNewSessionPrefill() {
         newSessionPrefillDir = nil
         newSessionPrefillName = nil
+        newSessionPrefillIssue = nil
+        newSessionPrefillBranch = nil
+    }
+
+    /// Binds a created session's name to an issue number so the issue browser
+    /// can find it even after a rename strips the "#N" from the name.
+    public func bindIssue(_ number: Int, toSession name: String) {
+        var map = persisted.issueBySession ?? [:]
+        map[name] = number
+        persisted.issueBySession = map
+        persist()
+    }
+
+    /// The issue a session is bound to, if any (stored binding only).
+    public func issueNumber(forSession name: String) -> Int? {
+        persisted.issueBySession?[name]
     }
 
     public func setIssueScreen(_ s: IssueScreen) { issueScreen = s }
@@ -589,10 +626,12 @@ public final class AppModel {
     /// Prefills the New Session sheet from an issue (issue browser's `s`).
     /// No-op without a selected session's root — nothing to base the
     /// worktree dir on.
-    public func newSessionFromIssue(number: Int, title: String) {
+    public func newSessionFromIssue(number: Int, title: String, branch: String? = nil) {
         guard let root = sessionRootOfSelected() else { return }
         newSessionPrefillDir = root
         newSessionPrefillName = sessionNameForIssue(number: number, title: title)
+        newSessionPrefillIssue = number
+        newSessionPrefillBranch = branch
         modal = .newSession
     }
 
@@ -784,7 +823,7 @@ public final class AppModel {
             cycleFocus(forward: forward)
         case .addProject:
             inputMode = .normal
-            if let dir = pickProjectFolder() { addProject(dir) }
+            modal = .addProject
         case .removeProject:
             inputMode = .normal
             guard let root = inspectorRoot else { toast = "no project"; return }
@@ -885,6 +924,10 @@ public final class AppModel {
     public var inspectorRoot: String? {
         selectedProjectRoot ?? selectedSession().map(sessionRoot)
     }
+
+    /// The repo root a new-session-from-issue action targets. The issue browser
+    /// lives in the inspector, so it shares `inspectorRoot`.
+    public func sessionRootOfSelected() -> String? { inspectorRoot }
 
     public func selectProject(_ root: String) async {
         await select(nil)

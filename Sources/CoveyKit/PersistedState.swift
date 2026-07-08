@@ -53,8 +53,19 @@ public struct IssueDraft: Codable, Equatable {
     public var title: String
     public var body: String
     public var assignMe: Bool
-    public init(title: String = "", body: String = "", assignMe: Bool = false) {
-        self.title = title; self.body = body; self.assignMe = assignMe
+    public var labels: [String]
+    public init(title: String = "", body: String = "", assignMe: Bool = false,
+                labels: [String] = []) {
+        self.title = title; self.body = body; self.assignMe = assignMe; self.labels = labels
+    }
+    // Custom decode so drafts persisted before `labels` existed still load
+    // (synthesized Decodable ignores property defaults for missing keys).
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        body = try c.decodeIfPresent(String.self, forKey: .body) ?? ""
+        assignMe = try c.decodeIfPresent(Bool.self, forKey: .assignMe) ?? false
+        labels = try c.decodeIfPresent([String].self, forKey: .labels) ?? []
     }
 }
 
@@ -93,6 +104,10 @@ public struct PersistedState: Codable, Equatable {
     /// Usage-limit alert markers: window key ("5h"/"7d") -> resetUnix of the
     /// window cycle already alerted (0 when resets_at was absent).
     public var usageNotified: [String: Int64]?
+    /// Issue number bound to a session, keyed by session name. Migrated on
+    /// rename so the binding survives (the name is the session's durable
+    /// identity — it is preserved across relaunch, only rename changes it).
+    public var issueBySession: [String: Int]?
     public var lastVersion: String?
 
     public init(
@@ -109,6 +124,7 @@ public struct PersistedState: Codable, Equatable {
         inspectorSplit: Bool? = nil,
         projects: [String]? = nil,
         usageNotified: [String: Int64]? = nil,
+        issueBySession: [String: Int]? = nil,
         lastVersion: String? = nil
     ) {
         self.theme = theme; self.splitPct = splitPct; self.recents = recents
@@ -124,6 +140,7 @@ public struct PersistedState: Codable, Equatable {
         self.inspectorSplit = inspectorSplit
         self.projects = projects
         self.usageNotified = usageNotified
+        self.issueBySession = issueBySession
         self.lastVersion = lastVersion
     }
 }

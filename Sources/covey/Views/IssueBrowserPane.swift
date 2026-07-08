@@ -69,7 +69,10 @@ struct IssueBrowserPane: View {
         if let root, let dir = model.sessions.first(where: { $0.name == model.selected })?.dir {
             Task { await browser.open(root: root, dir: dir) }
         }
-        listFocused = true
+        // Deferred a turn: returning from the composer, the list rows remount in
+        // this same transaction, and a same-transaction FocusState write is lost
+        // (the focus-tick lesson) — which left j/k dead. Focus once mounted.
+        Task { @MainActor in listFocused = true }
     }
 
     @ViewBuilder
@@ -96,12 +99,14 @@ struct IssueBrowserPane: View {
     // MARK: - detail
 
     private func detailScreen(_ issue: GhIssue) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let hasSession = sessionForIssue(issue) != nil || recentForIssue(issue) != nil
+        return VStack(alignment: .leading, spacing: 6) {
+            bindingRow(issue)
             IssueDetailView(issue: issue, tk: tk)
             if let prompt = browser.prompt { promptCard(prompt) }
             HStack(spacing: 10) {
                 KbdBadge(key: "e", label: "edit", tk: tk)
-                KbdBadge(key: "s", label: "session", tk: tk)
+                KbdBadge(key: "s", label: hasSession ? "open" : "session", tk: tk)
                 KbdBadge(key: "c", label: issue.isOpen ? "close" : "reopen", tk: tk)
                 KbdBadge(key: "x", label: "delete", tk: tk)
                 KbdBadge(key: "b", label: "browser", tk: tk)
@@ -117,6 +122,37 @@ struct IssueBrowserPane: View {
             browser.screen = .list
             listFocused = true
         }
+    }
+
+    /// Header cue: the session (live or stopped) and branch this issue is
+    /// bound to, when any exists.
+    @ViewBuilder
+    private func bindingRow(_ issue: GhIssue) -> some View {
+        let live = sessionForIssue(issue)
+        let recent = live == nil ? recentForIssue(issue) : nil
+        let branch = boundBranch(issue)
+        if live != nil || recent != nil || branch != nil {
+            HStack(spacing: 8) {
+                if let live {
+                    bindingTag("session", live.name, tk.ok)
+                } else if let recent {
+                    bindingTag("recent", recent.name, tk.t3)
+                }
+                if let branch { bindingTag("branch", branch, tk.accent) }
+                Spacer()
+            }
+        }
+    }
+
+    private func bindingTag(_ key: String, _ value: String, _ tint: Color) -> some View {
+        HStack(spacing: 4) {
+            Text(key).font(.system(size: IssueFont.meta)).foregroundStyle(tk.t4)
+            Text(value).font(.system(size: IssueFont.meta, design: .monospaced))
+                .foregroundStyle(tint).lineLimit(1)
+        }
+        .padding(.horizontal, 6).padding(.vertical, 1)
+        .background(tk.surf2, in: Capsule())
+        .overlay(Capsule().strokeBorder(tk.bd2))
     }
 
     private func handleDetailKey(_ press: KeyPress) -> KeyPress.Result {
@@ -249,9 +285,26 @@ struct IssueBrowserPane: View {
 
     private func sessionForIssue(_ issue: GhIssue) -> Session? {
         guard let root else { return nil }
+        // Stored binding first (survives rename); fall back to the "#N" name
+        // convention for sessions created before the binding existed.
         return model.sessions.first {
-            sessionRoot($0) == root && sessionNameMatchesIssue($0.name, number: issue.number)
+            sessionRoot($0) == root
+                && (model.issueNumber(forSession: $0.name) == issue.number
+                    || sessionNameMatchesIssue($0.name, number: issue.number))
         }
+    }
+
+    /// A stopped (recent) session bound to the issue — relaunchable to resume.
+    private func recentForIssue(_ issue: GhIssue) -> RecentSession? {
+        model.visibleRecents().first {
+            model.issueNumber(forSession: $0.name) == issue.number
+                || sessionNameMatchesIssue($0.name, number: issue.number)
+        }
+    }
+
+    /// The issue's local branch, if one exists — the "create in this branch" cue.
+    private func boundBranch(_ issue: GhIssue) -> String? {
+        browser.localBranches.first { branchMatchesIssue($0, number: issue.number) }
     }
 
     private func jumpToSession(of issue: GhIssue) {
@@ -301,7 +354,17 @@ struct IssueBrowserPane: View {
         guard let issue = browser.selectedIssue() else { return .ignored }
         switch ch {
         case "s":
-            model.newSessionFromIssue(number: issue.number, title: issue.title)
+            // Smart: jump to a live bound session, relaunch a stopped one
+            // (resumes its conversation), or open the form only if none exists —
+            // preselecting the issue's branch when there is one.
+            if sessionForIssue(issue) != nil {
+                jumpToSession(of: issue)
+            } else if let recent = recentForIssue(issue) {
+                Task { await model.relaunchRecent(recent) }
+            } else {
+                model.newSessionFromIssue(number: issue.number, title: issue.title,
+                                          branch: boundBranch(issue))
+            }
             return .handled
         case "b":
             if let url = URL(string: issue.url) { NSWorkspace.shared.open(url) }

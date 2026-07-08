@@ -195,6 +195,18 @@ final class AppModelChromeTests: XCTestCase {
     }
 
     @MainActor
+    func testTransientToastAutoDismisses() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        model.toastDismissDelay = .milliseconds(30)
+        model.showToast("project removed")
+        XCTAssertEqual(model.toast, "project removed")
+        let cleared = await eventually { model.toast == nil }
+        XCTAssertTrue(cleared, "transient toast should auto-dismiss, not hang")
+    }
+
+    @MainActor
     func testSlashActivatesFooterFilterAndEscapeClears() async throws {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)

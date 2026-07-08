@@ -30,6 +30,39 @@ final class VimEngineTests: XCTestCase {
         feed(&e, "b"); XCTAssertEqual(e.cursor, 0, "b clamps at 0")
     }
 
+    func testEndOfWordMotion() {
+        var e = engine("foo bar baz", cursor: 0)
+        feed(&e, "e"); XCTAssertEqual(e.cursor, 2, "e -> last char of 'foo'")
+        feed(&e, "e"); XCTAssertEqual(e.cursor, 6, "e -> last char of 'bar'")
+        feed(&e, "e"); XCTAssertEqual(e.cursor, 10, "e -> last char of 'baz'")
+        feed(&e, "e"); XCTAssertEqual(e.cursor, 10, "e clamps at the last word end")
+    }
+
+    func testPunctuationAwareWordMotions() {
+        var e = engine("foo.bar baz", cursor: 0)
+        feed(&e, "w"); XCTAssertEqual(e.cursor, 3, "w stops at the punctuation run '.'")
+        feed(&e, "w"); XCTAssertEqual(e.cursor, 4, "w -> 'bar'")
+        feed(&e, "e"); XCTAssertEqual(e.cursor, 6, "e -> end of 'bar'")
+        feed(&e, "b"); XCTAssertEqual(e.cursor, 4, "b -> start of 'bar'")
+        feed(&e, "b"); XCTAssertEqual(e.cursor, 3, "b -> the '.' run")
+    }
+
+    func testBigWordMotions() {
+        var e = engine("foo.bar baz", cursor: 0)
+        feed(&e, "W"); XCTAssertEqual(e.cursor, 8, "W is whitespace-delimited: skips 'foo.bar'")
+        feed(&e, "B"); XCTAssertEqual(e.cursor, 0, "B -> start of 'foo.bar'")
+        feed(&e, "E"); XCTAssertEqual(e.cursor, 6, "E -> end of the WORD 'foo.bar'")
+    }
+
+    func testFirstNonBlankAndDeleteToWordEnd() {
+        var e = engine("   hi\nyo", cursor: 4)
+        feed(&e, "^"); XCTAssertEqual(e.cursor, 3, "^ -> first non-blank")
+        feed(&e, "0"); XCTAssertEqual(e.cursor, 0)
+        var d = engine("foo bar", cursor: 0)
+        _ = feedFx(&d, "de")
+        XCTAssertEqual(d.text, " bar", "de deletes through the end of 'foo' inclusive")
+    }
+
     func testLineMotionsAndGg() {
         var e = engine("one\ntwo\nthree", cursor: 5)
         feed(&e, "0"); XCTAssertEqual(e.cursor, 4)
@@ -139,6 +172,40 @@ final class VimEngineTests: XCTestCase {
         _ = feedFx(&c, "vlc")
         XCTAssertEqual(c.text, "c")
         XCTAssertEqual(c.mode, .insert)
+    }
+
+    func testVisualLine() {
+        var e = engine("one\ntwo\nthree", cursor: 0)
+        _ = feedFx(&e, "V")
+        XCTAssertEqual(e.mode, .visualLine(anchor: 0), "V enters line-wise visual")
+        _ = feedFx(&e, "j")                          // extend down one line
+        let fx = feedFx(&e, "y")
+        XCTAssertTrue(fx.contains(.setPasteboard("one\ntwo\n")), "V y yanks whole lines")
+        XCTAssertEqual(e.mode, .normal)
+        XCTAssertEqual(e.text, "one\ntwo\nthree", "yank does not edit")
+
+        var d = engine("one\ntwo\nthree", cursor: 0)
+        _ = feedFx(&d, "Vjd")
+        XCTAssertEqual(d.text, "three", "V j d deletes both whole lines")
+
+        var c = engine("one\ntwo", cursor: 0)
+        _ = feedFx(&c, "Vc")
+        XCTAssertEqual(c.mode, .insert)
+        XCTAssertEqual(c.text, "\ntwo", "V c clears the line, keeps a blank line")
+
+        var x = engine("one\ntwo\nthree", cursor: 4)  // line 1 ("two")
+        _ = feedFx(&x, "Vx")
+        XCTAssertEqual(x.text, "one\nthree", "V x deletes the current whole line")
+    }
+
+    func testCharwiseVisualStillCharwise() {
+        // v selects characters, not lines (regression guard for v vs V).
+        var e = engine("abcdef", cursor: 1)
+        _ = feedFx(&e, "v")
+        XCTAssertEqual(e.mode, .visual(anchor: 1))
+        _ = feedFx(&e, "l")
+        let fx = feedFx(&e, "y")
+        XCTAssertTrue(fx.contains(.setPasteboard("bc")), "v y is charwise inclusive")
     }
 
     func testPendingResetOnInvalidMotion() {

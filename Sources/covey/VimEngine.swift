@@ -15,7 +15,7 @@ enum VimEffect: Equatable {
 /// natively in the NSTextView and is synced back via `syncFromView`; every
 /// other mode feeds keys here.
 struct VimEngine {
-    enum Mode: Equatable { case normal, insert, visual(anchor: Int), preview }
+    enum Mode: Equatable { case normal, insert, visual(anchor: Int), visualLine(anchor: Int), preview }
 
     private(set) var chars: [Character]
     private(set) var cursor: Int = 0
@@ -87,7 +87,7 @@ struct VimEngine {
             return .none
         case .preview:
             return handlePreview(input)
-        case .normal, .visual:
+        case .normal, .visual, .visualLine:
             return handleNormalVisual(input, pasteboard: pasteboard)
         }
     }
@@ -155,9 +155,14 @@ struct VimEngine {
             let e = lineEnd(cursor)
             return .charwise(to: min(cursor + n, e), inclusive: false)
         case "0": return .charwise(to: lineStart(cursor), inclusive: false)
+        case "^": return .charwise(to: firstNonBlank(), inclusive: false)
         case "$": return .charwise(to: max(lineStart(cursor), lineEnd(cursor) - 1), inclusive: true)
-        case "w": return .charwise(to: wordForward(from: cursor, times: n), inclusive: false)
-        case "b": return .charwise(to: wordBack(from: cursor, times: n), inclusive: false)
+        case "w": return .charwise(to: wordStartForward(from: cursor, times: n, big: false), inclusive: false)
+        case "W": return .charwise(to: wordStartForward(from: cursor, times: n, big: true), inclusive: false)
+        case "b": return .charwise(to: wordStartBack(from: cursor, times: n, big: false), inclusive: false)
+        case "B": return .charwise(to: wordStartBack(from: cursor, times: n, big: true), inclusive: false)
+        case "e": return .charwise(to: wordEndForward(from: cursor, times: n, big: false), inclusive: true)
+        case "E": return .charwise(to: wordEndForward(from: cursor, times: n, big: true), inclusive: true)
         case "j": return .linewise(toLine: min(line + n, starts.count - 1))
         case "k": return .linewise(toLine: max(line - n, 0))
         case "G":
@@ -194,22 +199,61 @@ struct VimEngine {
         if chars.isEmpty { cursor = 0 }
     }
 
-    private func wordForward(from: Int, times: Int) -> Int {
-        var i = from
+    // Vim word model: keyword chars (letters/digits/_) form a "word", other
+    // non-blanks form a "punct" run; `big` (W/B/E) collapses those so a WORD is
+    // any whitespace-delimited run.
+    private enum WClass: Equatable { case blank, word, punct }
+    private func wclass(_ i: Int, big: Bool) -> WClass {
+        let c = chars[i]
+        if c.isWhitespace { return .blank }
+        if big || c.isLetter || c.isNumber || c == "_" { return .word }
+        return .punct
+    }
+
+    /// w / W: start of the nth next word.
+    private func wordStartForward(from: Int, times: Int, big: Bool) -> Int {
+        var i = min(max(from, 0), chars.count)
         for _ in 0..<times {
-            while i < chars.count && !chars[i].isWhitespace { i += 1 }
-            while i < chars.count && chars[i].isWhitespace { i += 1 }
+            guard i < chars.count else { break }
+            let c0 = wclass(i, big: big)
+            if c0 != .blank { while i < chars.count && wclass(i, big: big) == c0 { i += 1 } }
+            while i < chars.count && wclass(i, big: big) == .blank { i += 1 }
         }
         return min(i, max(0, chars.count - 1))
     }
 
-    private func wordBack(from: Int, times: Int) -> Int {
+    /// e / E: end (last char) of the nth next word — inclusive for operators.
+    private func wordEndForward(from: Int, times: Int, big: Bool) -> Int {
         var i = from
         for _ in 0..<times {
-            while i > 0 && chars[i - 1].isWhitespace { i -= 1 }
-            while i > 0 && !chars[i - 1].isWhitespace { i -= 1 }
+            i += 1
+            while i < chars.count && wclass(i, big: big) == .blank { i += 1 }
+            guard i < chars.count else { i = max(0, chars.count - 1); break }
+            let c = wclass(i, big: big)
+            while i + 1 < chars.count && wclass(i + 1, big: big) == c { i += 1 }
         }
-        return max(i, 0)
+        return max(0, min(i, max(0, chars.count - 1)))
+    }
+
+    /// b / B: start of the nth previous word.
+    private func wordStartBack(from: Int, times: Int, big: Bool) -> Int {
+        var i = min(from, chars.count)
+        for _ in 0..<times {
+            i -= 1
+            while i >= 0 && wclass(i, big: big) == .blank { i -= 1 }
+            guard i >= 0 else { i = 0; break }
+            let c = wclass(i, big: big)
+            while i - 1 >= 0 && wclass(i - 1, big: big) == c { i -= 1 }
+        }
+        return max(0, i)
+    }
+
+    /// ^: first non-blank of the cursor's line (line start if all blank).
+    private func firstNonBlank() -> Int {
+        let s = lineStart(cursor), e = lineEnd(cursor)
+        var i = s
+        while i < e && chars[i].isWhitespace { i += 1 }
+        return i < e ? i : s
     }
 
     // MARK: - insert entries (o/O create lines; the rest position the caret)
@@ -247,10 +291,17 @@ struct VimEngine {
         if case .visual(let anchor) = mode, "dxyc".contains(c) {
             return applyVisual(c, anchor: anchor)
         }
+        if case .visualLine(let anchor) = mode, "dxyc".contains(c) {
+            return applyVisualLine(c, anchor: anchor)
+        }
         if enterInsert(c) { resetPrefixes(); return .none }
         switch c {
         case "v":
             mode = .visual(anchor: cursor)
+            resetPrefixes()
+            return .none
+        case "V":
+            mode = .visualLine(anchor: cursor)
             resetPrefixes()
             return .none
         case "x":
@@ -371,6 +422,41 @@ struct VimEngine {
         chars.removeSubrange(lo..<hi)
         cursor = lo
         if op == "c" { mode = .insert } else { clampToLine() }
+        return .setPasteboard(cut)
+    }
+
+    private func lineIndex(of offset: Int) -> Int {
+        var line = 0
+        for k in 0..<min(max(offset, 0), chars.count) where chars[k] == "\n" { line += 1 }
+        return line
+    }
+
+    /// V-mode d/x/y/c over whole lines from the anchor's line to the cursor's.
+    private mutating func applyVisualLine(_ op: Character, anchor: Int) -> VimEffect {
+        let starts = lineStarts()
+        let lo = min(lineIndex(of: anchor), lineOfCursor())
+        let hi = max(lineIndex(of: anchor), lineOfCursor())
+        let s = starts[lo]
+        var e = lineEnd(starts[hi])
+        let cut = String(chars[s..<e]) + "\n"
+        mode = .normal
+        resetPrefixes()
+        if op == "y" {
+            cursor = s
+            clampToLine()
+            return .setPasteboard(cut)
+        }
+        if e < chars.count { e += 1 }                 // include the trailing \n
+        else if s > 0 { chars.remove(at: s - 1); e = chars.count }
+        chars.removeSubrange(min(s, chars.count)..<min(e, chars.count))
+        cursor = min(s, max(0, chars.count - 1))
+        if chars.isEmpty { cursor = 0 }
+        if op == "c" {
+            chars.insert("\n", at: min(cursor, chars.count))
+            mode = .insert
+        } else {
+            clampToLine()
+        }
         return .setPasteboard(cut)
     }
 

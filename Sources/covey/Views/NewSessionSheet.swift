@@ -25,6 +25,9 @@ struct NewSessionSheet: View {
     @State private var dirEntries: [String] = []
     @State private var dirSelected = 0
     @State private var error: String?
+    /// Issue this session is being created for (from the issue browser's `s`);
+    /// bound to the created session's name on submit.
+    @State private var boundIssue: Int?
     @FocusState private var focus: FormField?
     private let presets: [String]
 
@@ -68,10 +71,14 @@ struct NewSessionSheet: View {
     }
 
     private var fieldSequence: [FormField] {
-        formFieldSequence(isRepo: repoRoot != nil,
-                          showWorktreeToggle: showWorktreeToggle,
-                          showBase: branchIsNew,
-                          customAgent: agentChoice == customAgentSlot)
+        var seq = formFieldSequence(isRepo: repoRoot != nil,
+                                    showWorktreeToggle: showWorktreeToggle,
+                                    showBase: branchIsNew,
+                                    customAgent: agentChoice == customAgentSlot)
+        // From an issue the dir is locked to the project root — drop it from
+        // the keyboard cycle (it's shown as static text, not a field).
+        if boundIssue != nil { seq.removeAll { $0 == .dir } }
+        return seq
     }
 
     private var commandPreview: String { effectiveAgent }
@@ -95,6 +102,10 @@ struct NewSessionSheet: View {
             }
             if let prefillName = model.newSessionPrefillName {
                 name = prefillName
+            }
+            boundIssue = model.newSessionPrefillIssue
+            if let prefillBranch = model.newSessionPrefillBranch {
+                branchInput = prefillBranch
             }
             model.clearNewSessionPrefill()
             focus = .name
@@ -130,7 +141,7 @@ struct NewSessionSheet: View {
                 .focused($focus, equals: .name)
                 .ayuField(tk, focused: focus == .name)
                 .onSubmit { advance(from: .name) }
-            dirRow
+            if boundIssue == nil { dirRow } else { lockedDirRow }
             if repoRoot != nil {
                 branchRow
                 if showWorktreeToggle {
@@ -186,6 +197,22 @@ struct NewSessionSheet: View {
                     _ = dirDescend()
                 }
             }
+        }
+    }
+
+    /// Read-only project path for an issue-originated session (no dir picker):
+    /// the issue lives in one project, so the session is created there.
+    private var lockedDirShown: String {
+        dir.count > 1 && dir.hasSuffix("/") ? String(dir.dropLast()) : dir
+    }
+
+    private var lockedDirRow: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "folder.fill").font(.caption).foregroundStyle(tk.t4)
+            Text("in: \(lockedDirShown)")
+                .font(.caption.monospaced()).foregroundStyle(tk.t3)
+                .lineLimit(1).truncationMode(.head)
+            Spacer()
         }
     }
 
@@ -426,6 +453,9 @@ struct NewSessionSheet: View {
                                                 effort: nil) {
                 error = err
             } else {
+                if let issue = boundIssue, let created = spec.name {
+                    model.bindIssue(issue, toSession: created)
+                }
                 model.modal = nil
             }
         }

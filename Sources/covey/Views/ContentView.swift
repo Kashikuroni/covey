@@ -41,6 +41,7 @@ struct ContentView: View {
                 case .restart(let name): RestartSheet(model: model, name: name)
                 case .restartAll: RestartAllSheet(model: model)
                 case .themeRestart: ThemeRestartSheet(model: model)
+                case .addProject: AddProjectSheet(model: model)
                 }
             }
             // Sheets default to the system gray material — paint them ayu.
@@ -145,8 +146,9 @@ struct ContentView: View {
 
     private func rightDivider(total: CGFloat) -> some View {
         Rectangle()
-            .fill(Color.gray.opacity(0.25))
+            .fill(Color.clear)
             .frame(width: 6)
+            .overlay(Rectangle().fill(Color.gray.opacity(0.25)).frame(width: 1))
             .contentShape(Rectangle())
             .onHover { inside in
                 if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
@@ -162,8 +164,9 @@ struct ContentView: View {
 
     private func divider(total: CGFloat) -> some View {
         Rectangle()
-            .fill(Color.gray.opacity(0.25))
+            .fill(Color.clear)
             .frame(width: 6)
+            .overlay(Rectangle().fill(Color.gray.opacity(0.25)).frame(width: 1))
             .contentShape(Rectangle())
             .onHover { inside in
                 if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }

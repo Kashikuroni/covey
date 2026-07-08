@@ -88,17 +88,17 @@ struct VimEditor: View {
             return [("i / a / o", "edit"), ("enter", "normal"), ("j/k", "scroll")]
         case "INSERT":
             return [("esc", "normal")]
-        case "VISUAL":
+        case "VISUAL", "V-LINE":
             return [("y / d / c", "yank · del · change"), ("esc", "normal")]
         default:   // NORMAL
-            return [("i", "insert"), ("v", "visual"), ("gp", "preview")]
+            return [("i", "insert"), ("v / V", "visual · line"), ("gp", "preview")]
         }
     }
 
     private func badgeColor(_ badge: String) -> Color {
         switch badge {
         case "INSERT": return tk.warn
-        case "VISUAL": return tk.accent
+        case "VISUAL", "V-LINE": return tk.accent
         case "PREVIEW": return tk.ok
         default: return tk.t4
         }
@@ -129,6 +129,7 @@ final class VimBox {
         case .normal: badge = "NORMAL"
         case .insert: badge = "INSERT"
         case .visual: badge = "VISUAL"
+        case .visualLine: badge = "V-LINE"
         case .preview: badge = "PREVIEW"
         }
     }
@@ -259,6 +260,16 @@ private struct VimTextRepresentable: NSViewRepresentable {
                 let lo = min(anchor, c)
                 let hi = min(max(anchor, c) + 1, length)
                 view.setSelectedRange(NSRange(location: lo, length: hi - lo))
+            } else if case .visualLine(let anchor) = box.engine.mode {
+                // Highlight whole lines from the anchor's line to the cursor's.
+                let ns = view.string as NSString
+                let a = min(min(anchor, c), length)
+                let b = min(max(anchor, c), length)
+                let lineA = ns.lineRange(for: NSRange(location: a, length: 0))
+                let lineB = ns.lineRange(for: NSRange(location: b, length: 0))
+                let start = lineA.location
+                let end = lineB.location + lineB.length
+                view.setSelectedRange(NSRange(location: start, length: max(0, end - start)))
             } else {
                 view.setSelectedRange(NSRange(location: c, length: 0))
             }
@@ -302,7 +313,11 @@ private final class VimNSTextView: NSTextView {
 
     private func blockCaretRect(from rect: NSRect) -> NSRect {
         var r = rect
-        r.size.width = ("m" as NSString).size(withAttributes: [.font: font as Any]).width
+        // Widen a thin caret rect to a block; never SHRINK a wider invalidation.
+        // Clamping every setNeedsDisplay rect to one char left most of a pasted
+        // or freshly-typed run unpainted — the "invisible/white text" bug.
+        let m = ("m" as NSString).size(withAttributes: [.font: font as Any]).width
+        r.size.width = max(r.size.width, m)
         return r
     }
 
@@ -320,6 +335,14 @@ private final class VimNSTextView: NSTextView {
                 return
             }
             return super.keyDown(with: event)   // native typing
+        }
+        // Bare j/k move by DISPLAY line (wrap-aware) in normal / char-visual so
+        // the rows of a soft-wrapped logical line are reachable. Operator/count
+        // forms (dj, 3j) and V stay logical through the engine below.
+        if displayLineNav(input, mode: box.engine.mode),
+           box.engine.pending == nil, box.engine.count == nil, !box.engine.pendingG {
+            moveByDisplayLine(down: input == .char("j"))
+            return
         }
         // Before a normal/visual key make sure the engine sees the caret.
         box.engine.syncFromView(text: string, cursor: selectedRange().location)
@@ -343,6 +366,40 @@ private final class VimNSTextView: NSTextView {
             let raw = event.charactersIgnoringModifiers?.first ?? " "
             return .char(latinize(raw))
         }
+    }
+
+    /// Bare j/k in a mode where display-line motion applies (normal or
+    /// char-wise visual — never V-LINE, preview or insert).
+    private func displayLineNav(_ input: VimInput, mode: VimEngine.Mode) -> Bool {
+        guard input == .char("j") || input == .char("k") else { return false }
+        switch mode {
+        case .normal, .visual: return true
+        default: return false
+        }
+    }
+
+    /// Move the caret one wrapped display row via AppKit (which keeps the
+    /// ideal column), then feed the resulting offset back to the engine.
+    private func moveByDisplayLine(down: Bool) {
+        guard let box, let coordinator else { return }
+        let length = (string as NSString).length
+        if case .visual = box.engine.mode {
+            // Keep the engine's visual anchor; move only the caret end.
+            setSelectedRange(NSRange(location: min(box.engine.cursor, length), length: 0))
+        } else {
+            // Normal: adopt the view caret (honors a mouse click) without
+            // re-setting it, so AppKit keeps the ideal column across repeats.
+            box.engine.syncFromView(text: string, cursor: selectedRange().location)
+        }
+        if down { moveDown(nil) } else { moveUp(nil) }
+        box.engine.syncFromView(text: string, cursor: selectedRange().location)
+        if case .visual = box.engine.mode {
+            coordinator.sync(into: self)                     // re-render the range
+        } else {
+            updateInsertionPointStateAndRestartTimer(true)   // block caret, keep column
+            needsDisplay = true
+        }
+        scrollRangeToVisible(selectedRange())
     }
 }
 

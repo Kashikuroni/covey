@@ -208,10 +208,12 @@ public final class IssueBrowserModel {
         }
     }
 
-    func loadLabelsIfNeeded() async {
-        guard labels == nil, !labelsLoading, let dir else { return }
+    /// `overrideDir` lets the composer load labels before the list was ever
+    /// opened (which is what sets `dir`).
+    func loadLabelsIfNeeded(dir overrideDir: String? = nil) async {
+        guard labels == nil, !labelsLoading, let d = overrideDir ?? dir else { return }
         labelsLoading = true
-        if case .success(let fetched) = await fetchLabels(dir) { labels = fetched }
+        if case .success(let fetched) = await fetchLabels(d) { labels = fetched }
         labelsLoading = false
     }
 

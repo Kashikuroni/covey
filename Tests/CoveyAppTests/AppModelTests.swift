@@ -202,6 +202,27 @@ final class AppModelTests: XCTestCase {
     }
 
     @MainActor
+    func testIssueBindingAndNoteSurviveRename() async throws {
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        await model.create(dir: "/usr", agent: "/bin/cat")
+        _ = await eventually { model.sessions.count == 1 }
+        let name = model.sessions[0].name
+        model.bindIssue(297111, toSession: name)
+        model.setNote(session: name, text: "keepme")
+        XCTAssertEqual(model.issueNumber(forSession: name), 297111)
+        await model.rename(name, to: "renamed")
+        _ = await eventually { model.sessions.contains { $0.name == "renamed" } }
+        XCTAssertEqual(model.issueNumber(forSession: "renamed"), 297111,
+                       "issue binding migrates to the new name")
+        XCTAssertNil(model.issueNumber(forSession: name), "old name is no longer bound")
+        XCTAssertEqual(model.notes["renamed"], "keepme", "note migrates too")
+        await model.kill("renamed")
+    }
+
+    @MainActor
     func testRelaunchRecentCreatesSession() async throws {
         let daemon = try TestDaemon()
         defer { daemon.stop() }

@@ -10,9 +10,11 @@ func parseIssueURL(_ stdout: String) -> String? {
 }
 
 /// The gh invocation for a new issue; pure so tests pin the flag layout.
-func issueCreateArgs(title: String, body: String, assignMe: Bool, web: Bool) -> [String] {
+func issueCreateArgs(title: String, body: String, assignMe: Bool,
+                     labels: [String], web: Bool) -> [String] {
     var args = ["gh", "issue", "create", "--title", title, "--body", body]
     if assignMe { args += ["--assignee", "@me"] }
+    for label in labels { args += ["--label", label] }
     if web { args.append("--web") }
     return args
 }
@@ -113,8 +115,10 @@ enum IssueService {
     /// .success = the created issue's URL (or gh's confirmation for --web);
     /// .failure = a display-ready error.
     static func create(dir: String, title: String, body: String,
-                       assignMe: Bool = false, web: Bool = false) async -> IssueOutcome {
-        let args = issueCreateArgs(title: title, body: body, assignMe: assignMe, web: web)
+                       assignMe: Bool = false, labels: [String] = [],
+                       web: Bool = false) async -> IssueOutcome {
+        let args = issueCreateArgs(title: title, body: body, assignMe: assignMe,
+                                   labels: labels, web: web)
         guard let run = await runGh(args: args, dir: dir), run.status != 127 else {
             return .failure(message: ghNotFoundMessage)
         }

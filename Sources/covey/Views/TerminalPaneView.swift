@@ -19,7 +19,7 @@ struct TerminalPaneView: View {
                     pane(name)
                 }
             } else if let root = model.selectedProjectRoot {
-                paneHeader("Agent", name: "")
+                paneHeader("Agent", badge: 2, name: "")
                 Spacer()
                 VStack(spacing: 6) {
                     Text(model.displayName(forDir: root))
@@ -87,8 +87,10 @@ struct TerminalPaneView: View {
 
     private func splitDivider(vertical: Bool, total: CGFloat) -> some View {
         Rectangle()
-            .fill(Color.gray.opacity(0.25))
+            .fill(Color.clear)
             .frame(width: vertical ? 5 : nil, height: vertical ? nil : 5)
+            .overlay(Rectangle().fill(Color.gray.opacity(0.25))
+                .frame(width: vertical ? 1 : nil, height: vertical ? nil : 1))
             .contentShape(Rectangle())
             .onHover { inside in
                 if inside {

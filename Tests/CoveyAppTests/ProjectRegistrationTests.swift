@@ -196,19 +196,17 @@ final class ProjectRegistrationTests: XCTestCase {
     }
 
     @MainActor
-    func testAddProjectActionUsesPicker() async throws {
+    func testAddProjectActionOpensSheet() async throws {
         let daemon = try TestDaemon()
         defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
         await model.start()
-        model.pickProjectFolder = { "/picked/root" }
         model.apply(.addProject)
-        let selected = await eventually { model.selectedProjectRoot == "/picked/root" }
-        XCTAssertTrue(selected)
-        XCTAssertEqual(model.projects, ["/picked/root"])
-        model.pickProjectFolder = { nil }      // canceled panel: no-op
-        model.apply(.addProject)
-        XCTAssertEqual(model.projects, ["/picked/root"])
+        // Opens the path-input sheet (AddProjectSheet), not a Finder panel;
+        // registration happens on submit, so nothing is added by the action.
+        XCTAssertEqual(model.modal, .addProject)
+        XCTAssertEqual(model.inputMode, .normal)
+        XCTAssertEqual(model.projects, [])
     }
 
     @MainActor
@@ -235,15 +233,4 @@ final class ProjectRegistrationTests: XCTestCase {
         XCTAssertEqual(model.projects, [])
     }
 
-    @MainActor
-    func testAddProjectActionCanceledPickerIsNoOp() async throws {
-        let daemon = try TestDaemon()
-        defer { daemon.stop() }
-        let (model, _) = try makeModel(daemon)
-        await model.start()
-        model.pickProjectFolder = { nil }      // canceled panel on first use
-        model.apply(.addProject)
-        XCTAssertEqual(model.projects, [])
-        XCTAssertNil(model.selectedProjectRoot)
-    }
 }

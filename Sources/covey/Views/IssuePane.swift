@@ -78,8 +78,22 @@ struct IssuePane: View {
             stage = .editing
             titleFocused = true
         }
-        .onChange(of: titleFocused) { _, _ in syncEditing() }
+        .onChange(of: titleFocused) { _, focused in
+            syncEditing()
+            if focused { placeTitleCaretAtEnd() }
+        }
         .onChange(of: bodyFocused) { _, _ in syncEditing() }
+        .task(id: root) { await model.issueBrowser.loadLabelsIfNeeded(dir: dir) }
+    }
+
+    /// On focus macOS selects the whole title; drop the caret at the end so a
+    /// stray keystroke can't wipe it (the title carries the system task id).
+    private func placeTitleCaretAtEnd() {
+        DispatchQueue.main.async {
+            if let editor = NSApp.keyWindow?.firstResponder as? NSTextView {
+                editor.selectedRange = NSRange(location: editor.string.count, length: 0)
+            }
+        }
     }
 
     private func syncEditing() {
@@ -119,6 +133,11 @@ struct IssuePane: View {
             }
             .contentShape(Rectangle())
             .onTapGesture { update { $0.assignMe.toggle() } }
+            LabelSelector(tk: tk,
+                          labels: model.issueBrowser.labels ?? [],
+                          loading: model.issueBrowser.labelsLoading,
+                          picked: Binding(get: { Set(draft.labels) },
+                                          set: { s in update { $0.labels = s.sorted() } }))
             HStack {
                 Spacer()
                 Button("Open in browser…") { submit(web: true) }
@@ -145,7 +164,8 @@ struct IssuePane: View {
         stage = .creating
         Task { @MainActor in
             switch await IssueService.create(dir: dir, title: title, body: d.body,
-                                             assignMe: d.assignMe, web: web) {
+                                             assignMe: d.assignMe, labels: d.labels,
+                                             web: web) {
             case .success(let url):
                 if web {
                     stage = .editing   // draft stays; the browser owns it now

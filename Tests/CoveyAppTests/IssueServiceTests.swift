@@ -3,14 +3,24 @@ import XCTest
 
 final class IssueServiceTests: XCTestCase {
     func testIssueCreateArgs() {
-        XCTAssertEqual(issueCreateArgs(title: "t", body: "b", assignMe: false, web: false),
+        XCTAssertEqual(issueCreateArgs(title: "t", body: "b", assignMe: false,
+                                       labels: [], web: false),
                        ["gh", "issue", "create", "--title", "t", "--body", "b"])
-        XCTAssertEqual(issueCreateArgs(title: "t", body: "b", assignMe: true, web: false),
+        XCTAssertEqual(issueCreateArgs(title: "t", body: "b", assignMe: true,
+                                       labels: [], web: false),
                        ["gh", "issue", "create", "--title", "t", "--body", "b",
                         "--assignee", "@me"])
-        XCTAssertEqual(issueCreateArgs(title: "t", body: "", assignMe: true, web: true),
+        XCTAssertEqual(issueCreateArgs(title: "t", body: "", assignMe: true,
+                                       labels: [], web: true),
                        ["gh", "issue", "create", "--title", "t", "--body", "",
                         "--assignee", "@me", "--web"])
+    }
+
+    func testIssueCreateArgsLabels() {
+        XCTAssertEqual(issueCreateArgs(title: "t", body: "b", assignMe: false,
+                                       labels: ["bug", "urgent"], web: false),
+                       ["gh", "issue", "create", "--title", "t", "--body", "b",
+                        "--label", "bug", "--label", "urgent"])
     }
 
     func testParseIssueURLTakesLastNonEmptyLine() {
