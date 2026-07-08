@@ -45,13 +45,13 @@ struct IssuePane: View {
                 switch stage {
                 case .editing: editor
                 case .creating:
-                    statusCard(tint: tk.wait, title: "creating issue…", spinner: true) {
+                    statusCard(tk: tk, tint: tk.wait, title: "creating issue…", spinner: true) {
                         Text("esc hide — gh keeps running")
                             .font(.caption2).foregroundStyle(tk.t4)
                     }
                     Spacer()
                 case .done(let url):
-                    statusCard(icon: "checkmark", tint: tk.ok, title: "issue created") {
+                    statusCard(tk: tk, icon: "checkmark", tint: tk.ok, title: "issue created") {
                         Text(url).font(.caption.monospaced()).foregroundStyle(tk.t2)
                             .textSelection(.enabled).lineLimit(2)
                         Text("URL copied to clipboard")
@@ -61,7 +61,7 @@ struct IssuePane: View {
                         .buttonStyle(AyuButton(tk: tk, prominent: false))
                     Spacer()
                 case .failed(let err):
-                    statusCard(icon: "xmark", tint: tk.err, title: "issue not created") {
+                    statusCard(tk: tk, icon: "xmark", tint: tk.err, title: "issue not created") {
                         // Raw gh stderr — mono and dimmed, the card border
                         // carries the severity instead of a wall of red.
                         Text(err).font(.caption.monospaced()).foregroundStyle(tk.t2)
@@ -80,31 +80,6 @@ struct IssuePane: View {
         }
         .onChange(of: titleFocused) { _, _ in syncEditing() }
         .onChange(of: bodyFocused) { _, _ in syncEditing() }
-    }
-
-    /// gh-outcome card in the pane idiom: surf2 fill, hairline border tinted
-    /// by the outcome, tiered text — same family as ayuField/AyuButton.
-    private func statusCard(icon: String? = nil, tint: Color, title: String,
-                            spinner: Bool = false,
-                            @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                if spinner {
-                    ProgressView().controlSize(.mini)
-                } else if let icon {
-                    Image(systemName: icon)
-                        .font(.caption.weight(.bold)).foregroundStyle(tint)
-                }
-                Text(title)
-                    .font(.callout.weight(.semibold)).foregroundStyle(tk.t1)
-            }
-            content()
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tk.surf2, in: RoundedRectangle(cornerRadius: Tokens.r))
-        .overlay(RoundedRectangle(cornerRadius: Tokens.r)
-            .strokeBorder(tint.opacity(0.35)))
     }
 
     private func syncEditing() {
@@ -179,6 +154,7 @@ struct IssuePane: View {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(url, forType: .string)
                 model.clearIssueDraft(forRoot: root)
+                model.issueBrowser.invalidate(root: root)
                 stage = .done(url)
                 model.showToast("issue created — URL copied")
             case .failure(let err):

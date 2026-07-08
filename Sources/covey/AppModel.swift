@@ -3,6 +3,11 @@ import Foundation
 import Observation
 import CoveyKit
 
+/// ⌘1-5 zone targets (menu key equivalents — reachable from any focus).
+public enum FocusZone: Equatable {
+    case session, agent, note, issues, terminalSplit
+}
+
 /// UI state machine. The daemon is the single source of truth about sessions:
 /// actions call the IPC client and the model mutates only when the daemon's
 /// events confirm the change. One instance owns the single `client.events`
@@ -73,6 +78,13 @@ public final class AppModel {
     /// Vim mode badge from the issue body editor ("NORMAL"/"INSERT"/...);
     /// nil when the editor is not mounted.
     public var inspectorVimBadge: String?
+    /// Which screen the inspector's Issue tab shows; browser is home.
+    public enum IssueScreen: Equatable { case browser, composer }
+    public private(set) var issueScreen: IssueScreen = .browser
+    /// Session name to prefill in the New Session sheet (set by issue's `s`).
+    public private(set) var newSessionPrefillName: String?
+    /// The issue browser's state machine (gh access injected here).
+    public let issueBrowser: IssueBrowserModel
     /// Bumped by space g i; IssuePane focuses the title field on change.
     public private(set) var issueFocusTick = 0
     /// Bumped on entering the note zone; the note editor grabs the keys.
@@ -147,11 +159,20 @@ public final class AppModel {
                 store: StateStore,
                 fetchAccount: @escaping () async -> Account = { Account() },
                 usageInterval: TimeInterval = 60) {
+        // Created before any self-capturing closures below.
+        issueBrowser = IssueBrowserModel(
+            fetchIssues: { dir, state in await IssueService.list(dir: dir, state: state) },
+            fetchLabels: { dir in await IssueService.labelList(dir: dir) },
+            runMutation: { args, dir in await IssueService.mutate(args: args, dir: dir) })
         self.client = client
         self.makeClient = makeClient
         self.store = store
         self.fetchAccount = fetchAccount
         self.usageInterval = usageInterval
+        issueBrowser.toast = { [weak self] msg in self?.showToast(msg) }
+        issueBrowser.fetchBranches = { [weak self] dir in
+            await self?.gitInfo(dir).branches ?? []
+        }
     }
 
     public func start() async {
@@ -558,7 +579,22 @@ public final class AppModel {
         return recents.filter { !active.contains($0.name) }
     }
 
-    public func clearNewSessionPrefill() { newSessionPrefillDir = nil }
+    public func clearNewSessionPrefill() {
+        newSessionPrefillDir = nil
+        newSessionPrefillName = nil
+    }
+
+    public func setIssueScreen(_ s: IssueScreen) { issueScreen = s }
+
+    /// Prefills the New Session sheet from an issue (issue browser's `s`).
+    /// No-op without a selected session's root — nothing to base the
+    /// worktree dir on.
+    public func newSessionFromIssue(number: Int, title: String) {
+        guard let root = sessionRootOfSelected() else { return }
+        newSessionPrefillDir = root
+        newSessionPrefillName = sessionNameForIssue(number: number, title: title)
+        modal = .newSession
+    }
 
     public func setNote(session: String, text: String) {
         if text.isEmpty { notes[session] = nil } else { notes[session] = text }
@@ -719,8 +755,20 @@ public final class AppModel {
             if let s = selectedSession(), s.git == nil { toast = "not a git repo"; return }
             if !showInspector { setShowInspector(true) }
             inspectorTab = .issue
+            issueScreen = .composer
             setFocus(.inspector)
-            issueFocusTick += 1
+            Task { @MainActor in self.issueFocusTick += 1 }
+        case .openIssueList:
+            inputMode = .normal
+            guard let s = selectedSession() else { toast = "no session"; return }
+            if s.git == nil { toast = "not a git repo"; return }
+            if !showInspector { setShowInspector(true) }
+            issueScreen = .browser
+            issueBrowser.screen = .list
+            setFocus(.inspector)
+            selectInspectorTab(.issue)
+            // The pane self-opens via its root/tick .onChange handlers —
+            // opening here too would double the gh fetch.
         case .splitVertical: openSplit(axis: "v")
         case .splitHorizontal: openSplit(axis: "h")
         case .splitClose:
@@ -747,6 +795,34 @@ public final class AppModel {
     /// ⌃h/⌃l: walk the focus zones in order — session list, agent pane,
     /// companion shell pane (when split), inspector note, inspector issue
     /// (when the drawer is shown) — wrapping.
+    /// Direct zone jump for the View-menu ⌘1-5 items. Guards toast instead
+    /// of mutating anything (spec: no auto-show inspector, no auto-split).
+    public func focusZone(_ zone: FocusZone) {
+        switch zone {
+        case .session:
+            sendTerminalCommand(.blur)
+            setFocus(.sessions)
+        case .agent:
+            guard let selected else { toast = "no session"; return }
+            focusPane(selected)
+        case .note:
+            guard showInspector else { toast = "inspector hidden — space u i"; return }
+            sendTerminalCommand(.blur)
+            setFocus(.inspector)
+            selectInspectorTab(.note)
+        case .issues:
+            guard showInspector else { toast = "inspector hidden — space u i"; return }
+            sendTerminalCommand(.blur)
+            setFocus(.inspector)
+            selectInspectorTab(.issue)
+        case .terminalSplit:
+            guard let selected, let comp = companion(of: selected) else {
+                toast = "no split — space t v / h"; return
+            }
+            focusPane(comp.name)
+        }
+    }
+
     private func cycleFocus(forward: Bool) {
         var zones: [(id: String, activate: () -> Void)] = [
             ("sessions", { self.sendTerminalCommand(.blur); self.setFocus(.sessions) })
@@ -839,7 +915,14 @@ public final class AppModel {
         inspectorTab = tab
         // Both zones are always "in the editor": hand the keyboard over at
         // once (the zone chords escape the fields via the key monitor).
-        if tab == .issue { issueFocusTick += 1 } else { noteFocusTick += 1 }
+        // The bump is deferred by one runloop turn: a freshly mounted view
+        // (e.g. IssuePane inserted this same transaction) never sees an
+        // .onChange fire for a tick bump that lands in the same SwiftUI
+        // transaction as its own insertion — it wasn't subscribed yet.
+        // Deferring via Task guarantees the view is mounted first.
+        Task { @MainActor in
+            if tab == .issue { self.issueFocusTick += 1 } else { self.noteFocusTick += 1 }
+        }
     }
 
     // MARK: - issue drafts (persisted per project root)

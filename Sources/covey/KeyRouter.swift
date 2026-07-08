@@ -59,6 +59,7 @@ enum KeyAction: Equatable {
     case cycleFocus(forward: Bool)
     case openRecent
     case createIssue
+    case openIssueList
     case inspectorPaneSwap
     case inspectorSplitToggle
     case toggleSessionsPanel
@@ -107,15 +108,12 @@ enum KeyRouter {
         }
         guard context.vimMode else { return nil }
 
-        // Inspector zone extras: ⌃j/⌃k swap the split panes, `s` toggles
-        // tabs<->split (list navigation never uses s here).
-        if context.focus == .inspector {
-            if input.isControl, ch == "j" || ch == "k" {
-                return .inspectorPaneSwap
-            }
-            if !input.isControl, ch == "s", context.mode == .normal {
-                return .inspectorSplitToggle
-            }
+        // Inspector zone extras: ⌃j/⌃k swap the split panes. (The old plain
+        // `s` split toggle was dead code — the ContentView monitor hands
+        // plain inspector keys to the views before routing; the toggle
+        // lives on `space u v` now.)
+        if context.focus == .inspector, input.isControl, ch == "j" || ch == "k" {
+            return .inspectorPaneSwap
         }
 
         // ⌃h/⌃l walk the focus zones from every zone and mode — the
@@ -208,10 +206,12 @@ enum KeyRouter {
         case (.ui, "f"): return .toggleFooterPanel
         case (.ui, "h"): return .toggleHeaderPanel
         case (.ui, "t"): return .toggleTheme
+        case (.ui, "v"): return .inspectorSplitToggle
         case (.terminal, "v"): return .splitVertical
         case (.terminal, "h"): return .splitHorizontal
         case (.terminal, "x"): return .splitClose
         case (.git, "i"): return .createIssue
+        case (.git, "l"): return .openIssueList
         case (.git, "p"): return .promoteSelected
         case (.git, "b"): return .deleteBranchSelected
         case (.git, "c"): return .cleanupBranches

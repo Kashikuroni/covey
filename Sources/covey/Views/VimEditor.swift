@@ -437,7 +437,7 @@ private struct VimPreview: View {
                                 .font(.system(size: 10, design: .monospaced))
                                 .foregroundStyle(tk.t4)
                                 .frame(width: 18, alignment: .trailing)
-                            render(line)
+                            MarkdownLineView(line: line, tk: tk)
                             Spacer(minLength: 0)
                         }
                         .padding(.trailing, 4)
@@ -487,37 +487,4 @@ private struct VimPreview: View {
         }
     }
 
-    @ViewBuilder
-    private func render(_ line: NoteLine) -> some View {
-        switch line {
-        case .heading(let level, let textLine):
-            Text(textLine)
-                .font(.system(size: level == 1 ? 15 : 13,
-                              weight: level == 1 ? .bold : .semibold))
-                .padding(.top, 2)
-        case .task(let done, let textLine):
-            // Obsidian-style checkbox: crisp SF glyph, done fades + strikes.
-            HStack(alignment: .firstTextBaseline, spacing: 7) {
-                Image(systemName: done ? "checkmark.square.fill" : "square")
-                    .font(.system(size: 12))
-                    .foregroundStyle(done ? AnyShapeStyle(tk.ok.opacity(0.85))
-                                          : AnyShapeStyle(tk.t3))
-                Text(textLine)
-                    .strikethrough(done, color: .secondary)
-                    .foregroundStyle(done ? AnyShapeStyle(.secondary)
-                                          : AnyShapeStyle(.primary))
-            }
-            .font(.callout)
-        case .bullet(let textLine):
-            HStack(alignment: .firstTextBaseline, spacing: 7) {
-                Text("•").foregroundStyle(tk.t3)
-                Text(textLine)
-            }
-            .font(.callout)
-        case .text(let textLine):
-            Text(textLine).font(.callout)
-        case .blank:
-            Text(" ").font(.caption2)
-        }
-    }
 }
