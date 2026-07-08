@@ -26,7 +26,7 @@ enum UsageService {
 
     /// GET an OAuth endpoint with the stored token and Claude Code headers.
     static func oauthGet(_ path: String) async -> Result<Data, UsageFailure> {
-        guard let token = readToken() else { return .failure(UsageFailure(code: "no auth")) }
+        guard let token = readToken(), !token.isEmpty else { return .failure(UsageFailure(code: "no auth")) }
         var req = URLRequest(url: URL(string: "https://api.anthropic.com\(path)")!)
         req.timeoutInterval = 10
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
