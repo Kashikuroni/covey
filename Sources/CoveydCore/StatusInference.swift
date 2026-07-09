@@ -13,12 +13,17 @@ public enum StatusInference {
     /// consecutive `1.` `2.` … run of at least two is found in the last 20 lines.
     public static func parsePrompt(_ screen: String) -> [String] {
         let lines = screen.components(separatedBy: "\n")
-        let start = max(0, lines.count - 20)
+        let start = max(0, lines.count - 24)
         var opts: [String] = []
         var expect = 1
         for line in lines[start...] {
             var t = Substring(line)
-            while let f = t.first, f.isWhitespace || "❯>●·".contains(f) {
+            // Strip any leading decoration before the digit: whitespace, the
+            // selection cursor and bullets (glyphs vary across Claude builds:
+            // ❯ ▶ ► ➤ • · ● …), box borders, and generic symbol/punctuation.
+            while let f = t.first,
+                  f.isWhitespace || f.isSymbol || f.isPunctuation
+                  || "❯▶►➤‣•·●○◦│".contains(f) {
                 t = t.dropFirst()
             }
             let prefix = "\(expect)."
@@ -30,6 +35,18 @@ public enum StatusInference {
             }
         }
         return opts.count >= 2 ? opts : []
+    }
+
+    /// Footer markers Claude Code prints under an AskUserQuestion selection box.
+    /// A robust, format-independent signal that the agent is waiting for a
+    /// choice even when `parsePrompt` cannot line up the options.
+    static let promptMarkers = ["to navigate", "Esc to cancel"]
+
+    /// Whether the screen shows a pending selection prompt (options parsed OR a
+    /// footer marker present). Drives the `.waiting` status.
+    public static func hasSelectionPrompt(_ screen: String) -> Bool {
+        if !parsePrompt(screen).isEmpty { return true }
+        return promptMarkers.contains { screen.contains($0) }
     }
 
     /// Hash of screen content for in-process change detection between ticks.

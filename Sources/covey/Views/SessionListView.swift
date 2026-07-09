@@ -128,6 +128,7 @@ struct SessionListView: View {
     private func card(_ session: Session) -> some View {
         let selected = model.selected == session.name
         let status = model.statusByName[session.name] ?? .idle
+        let modelName = model.modelByName[session.name].map(modelDisplayName)
         return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
                 Text(session.name)
@@ -148,16 +149,21 @@ struct SessionListView: View {
                 if isReturnable(session) {
                     Text("⧉ worktree removed — space g r returns to root")
                         .font(mono(11)).foregroundStyle(tk.t4)
-                } else if let git = session.git {
+                } else if session.git != nil || modelName != nil {
                     HStack(spacing: 6) {
-                        HStack(spacing: 3) {
-                            Text(session.worktreeRepo != nil ? "⧉" : "⎇")
-                                .font(.system(size: 10)).foregroundStyle(tk.t4)
-                            Text(git.branch).font(mono(9)).foregroundStyle(tk.t3)
-                                .lineLimit(1)
+                        if let modelName {
+                            Text(modelName).font(mono(9)).foregroundStyle(tk.t4)
+                        }
+                        if let git = session.git {
+                            HStack(spacing: 3) {
+                                Text(session.worktreeRepo != nil ? "⧉" : "⎇")
+                                    .font(.system(size: 10)).foregroundStyle(tk.t4)
+                                Text(git.branch).font(mono(9)).foregroundStyle(tk.t3)
+                                    .lineLimit(1)
+                            }
                         }
                         Spacer()
-                        if git.added > 0 || git.removed > 0 {
+                        if let git = session.git, git.added > 0 || git.removed > 0 {
                             HStack(spacing: 4) {
                                 if git.added > 0 {
                                     Text("+\(git.added)")

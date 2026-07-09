@@ -35,6 +35,7 @@ final class ProtocolTests: XCTestCase {
             .rename(name: "a", newName: "b"),
             .attach(name: "s-1", sinceSeq: 42),
             .detach(name: "s-1"),
+            .refresh(name: "s-1"),
             .input(name: "s-1", bytesB64: "aGk="),
             .resize(name: "s-1", cols: 80, rows: 24),
             .gitInfo(dir: "/work"),
@@ -65,9 +66,11 @@ final class ProtocolTests: XCTestCase {
         let msgs: [ServerMessage] = [
             .response(id: 1, result: .ok),
             .response(id: 2, result: .session(s)),
-            .response(id: 3, result: .sessions(sessions: [s], statuses: ["s-1": .running], lost: [s])),
+            .response(id: 3, result: .sessions(sessions: [s], statuses: ["s-1": .running],
+                                               lost: [s], models: ["s-1": "claude-fable-5"])),
             .response(id: 4, result: .error(code: "notFound", message: "no such session")),
-            .response(id: 5, result: .sessions(sessions: [s], statuses: [:], lost: nil)),
+            .response(id: 5, result: .sessions(sessions: [s], statuses: [:],
+                                               lost: nil, models: nil)),
             .response(id: 6, result: .gitInfo(repoRoot: "/w", currentBranch: "main",
                                               branches: ["main", "dev"],
                                               worktrees: ["main": "/w"])),
@@ -84,6 +87,7 @@ final class ProtocolTests: XCTestCase {
             .event(.promptChanged(name: "s-1", options: ["yes", "no"])),
             .event(.gitChanged(name: "s-1", git: GitInfo(branch: "main", added: 1, removed: 2))),
             .event(.gitChanged(name: "s-1", git: nil)),
+            .event(.modelChanged(name: "s-1", model: "claude-fable-5")),
             .event(.exited(name: "s-1", code: 0)),
         ]
         for m in msgs { try roundTrip(m) }
@@ -107,6 +111,13 @@ final class ProtocolTests: XCTestCase {
                                            effort: nil, resume: nil, companionOf: nil))
             ), #"{"id":3,"op":{"create":{"agent":"claude","dir":"/w"}}}"#
         )
+    }
+
+    func testSessionsPayloadWithoutModelsDecodes() throws {
+        let json = #"{"response":{"id":1,"result":{"sessions":{"sessions":[],"statuses":{}}}}}"#
+        let msg = try JSONDecoder().decode(ServerMessage.self, from: Data(json.utf8))
+        XCTAssertEqual(msg, .response(id: 1, result: .sessions(sessions: [], statuses: [:],
+                                                               lost: nil, models: nil)))
     }
 
     func testStatusChangedGoldenWireFormat() throws {

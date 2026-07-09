@@ -26,6 +26,9 @@ public struct Request: Codable, Equatable {
         case deleteBranch(dir: String, branch: String)
         case mergedBranches(dir: String)
         case cleanupBranches(dir: String, branches: [String])
+        // SIGWINCH-kick the child into a full repaint (wheel-scroll of a TUI
+        // leaves the alt buffer partially redrawn until the app repaints).
+        case refresh(name: String)
     }
 }
 
@@ -37,8 +40,9 @@ public enum ServerMessage: Codable, Equatable{
     public enum Result: Codable, Equatable {
         case ok
         case session(Session)
-        // `lost` is optional so payloads from older daemons decode as nil.
-        case sessions(sessions: [Session], statuses: [String: Status], lost: [Session]?)
+        // `lost` and `models` are optional so payloads from older daemons decode.
+        case sessions(sessions: [Session], statuses: [String: Status], lost: [Session]?,
+                      models: [String: String]?)
         // `worktrees` (branch -> path) is optional so older payloads decode.
         case gitInfo(repoRoot: String?, currentBranch: String?, branches: [String],
                      worktrees: [String: String]?)
@@ -55,4 +59,5 @@ public enum DaemonEvent: Codable, Equatable {
     case statusChanged(name: String, status: Status)
     case promptChanged(name: String, options: [String])
     case gitChanged(name: String, git: GitInfo?)
+    case modelChanged(name: String, model: String)
 }

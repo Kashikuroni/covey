@@ -111,13 +111,30 @@ final class CoveyTerminalViewTests: XCTestCase {
         let (view, probe) = makeView()
         // Alt buffer + SGR encoding + button tracking, like a real TUI.
         view.feed(text: "\u{1b}[?1049h\u{1b}[?1006h\u{1b}[?1000h")
-        view.sendWheelReport(deltaY: 3, at: CGPoint(x: 10, y: 10))
+        view.sendWheelReport(lines: 3, at: CGPoint(x: 10, y: 10))
         let up = String(decoding: probe.sent, as: UTF8.self)
         XCTAssertTrue(up.contains("\u{1b}[<64;"), "wheel-up SGR code expected, got: \(up)")
         probe.sent.removeAll()
-        view.sendWheelReport(deltaY: -3, at: CGPoint(x: 10, y: 10))
+        view.sendWheelReport(lines: -3, at: CGPoint(x: 10, y: 10))
         let down = String(decoding: probe.sent, as: UTF8.self)
         XCTAssertTrue(down.contains("\u{1b}[<65;"), "wheel-down SGR code expected, got: \(down)")
+    }
+
+    // Regression: a trackpad reports pixels in scrollingDeltaY while deltaY
+    // stays 0, so the mouse-report route must accumulate pixels — gating on
+    // deltaY dropped every trackpad event and the TUI never scrolled.
+    func testTrackpadWheelReportAccumulatesDespiteZeroLineDelta() {
+        let (view, probe) = makeView()
+        view.feed(text: "\u{1b}[?1049h\u{1b}[?1006h\u{1b}[?1003h")  // alt + SGR + anyEvent
+        let rowHeight = view.getOptimalFrameSize().height
+            / CGFloat(view.getTerminal().rows)
+        view.routeWheel(deltaY: 0, scrollingDeltaY: rowHeight * 0.4,
+                        precise: true, at: CGPoint(x: 10, y: 10))
+        XCTAssertTrue(probe.sent.isEmpty, "sub-line trackpad delta must not emit yet")
+        view.routeWheel(deltaY: 0, scrollingDeltaY: rowHeight * 0.8,
+                        precise: true, at: CGPoint(x: 10, y: 10))
+        XCTAssertTrue(String(decoding: probe.sent, as: UTF8.self).contains("<64;"),
+                      "an accumulated whole row must emit a wheel report")
     }
 
     func testWheelArrowsPlainAndApplicationCursor() {

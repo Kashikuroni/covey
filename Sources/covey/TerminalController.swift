@@ -46,6 +46,11 @@ struct TerminalRepresentable: NSViewRepresentable {
     func makeNSView(context: Context) -> TerminalView {
         let view = CoveyTerminalView(frame: .zero)
         view.terminalDelegate = context.coordinator
+        // Claude panes are keyboard-first: never forward mouse to the agent, so
+        // a click/drag focuses and selects text locally instead of hijacking
+        // Claude's mouse-interactive prompt (accidental option pick). Shell
+        // companions keep mouse reporting for vim/lazygit.
+        view.allowMouseReporting = !model.agentIsClaude(self.name)
         // Nerd Font when installed: nvim/lazygit icon glyphs live in the
         // private-use area that stock Menlo lacks (tofu boxes otherwise).
         if let nerd = nerdFont(size: view.font.pointSize) {
@@ -57,6 +62,7 @@ struct TerminalRepresentable: NSViewRepresentable {
         // viewport, so a stale HISTORY badge must clear.
         view.onBufferSwitch = { Task { @MainActor in model.setHistoryMode(false) } }
         view.onFocusClick = { Task { @MainActor in model.focusPane(name) } }
+        view.onWheelScroll = { Task { @MainActor in model.requestTerminalRefresh(name) } }
         model.setTerminalCommandHandler(for: name) { [weak view] command in
             guard let view else { return }
             switch command {
@@ -90,6 +96,10 @@ struct TerminalRepresentable: NSViewRepresentable {
 
     func updateNSView(_ view: TerminalView, context: Context) {
         applyTheme(to: view)
+        // The session list may have been empty when makeNSView first ran
+        // (claude-ness unknown → mouse reporting left on). Re-evaluate now that
+        // the sessions are loaded so claude panes reliably suppress the mouse.
+        view.allowMouseReporting = !model.agentIsClaude(name)
     }
 
     private func applyTheme(to view: TerminalView) {

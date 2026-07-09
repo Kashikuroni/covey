@@ -13,7 +13,12 @@ let package = Package(
         .library(name: "CoveydCore", targets: ["CoveydCore"])
     ],
     dependencies: [
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm", from: "1.13.0")
+        // Pinned to the post-1.13.0 upstream fix (PR #522): CSI T (scroll-down /
+        // SD) collapsed to a single column on the alt screen because Buffer never
+        // initialized marginRight and cmdScrollDown read it raw — froze claude's
+        // chat centre on slow scroll-up. Not in any tag yet (v1.13.0 predates the
+        // merge). Revert to `from: "1.14.0"` once a release ships it.
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm", revision: "94b63560c55e80876f32cb3ceeeba369b474bb2c")
     ],
     targets: [
         .target(
@@ -53,7 +58,10 @@ let package = Package(
         ),
         .testTarget(
             name: "CoveydCoreTests",
-            dependencies: ["CoveydCore"],
+            dependencies: [
+                "CoveydCore",
+                .product(name: "SwiftTerm", package: "SwiftTerm")
+            ],
             swiftSettings: [.swiftLanguageMode(.v5)]
         )
     ]

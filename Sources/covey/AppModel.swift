@@ -37,6 +37,9 @@ public final class AppModel {
 
     public private(set) var sessions: [Session] = []       // sorted by created
     public private(set) var statusByName: [String: Status] = [:]
+    /// Model id of the last assistant message per claude session (daemon's
+    /// transcript monitor); missing key = no badge on the card.
+    public private(set) var modelByName: [String: String] = [:]
     public private(set) var selected: String?
     /// Terminal pane that owns the keyboard while focus == .terminal:
     /// the selected session or its companion shell.
@@ -209,9 +212,10 @@ public final class AppModel {
         projectNames = persisted.projectNames
         projects = persisted.projects ?? []
         do {
-            let (list, statuses, lost) = try await client.list()
+            let (list, statuses, lost, models) = try await client.list()
             sessions = list.sorted { $0.created < $1.created }
             statusByName = statuses
+            modelByName = models
             connected = true
             toast = nil
             if let lost, !lost.isEmpty {
@@ -410,6 +414,35 @@ public final class AppModel {
 
     public func sendInput(_ bytes: [UInt8], to name: String) async {
         try? await client.input(name: name, bytes: bytes)
+    }
+
+    @ObservationIgnored private var lastRefreshAt: [String: Date] = [:]
+    @ObservationIgnored private var refreshTrailing: [String: Task<Void, Never>] = [:]
+
+    /// SIGWINCH-kick the child so it fully repaints — wheel-scrolling a TUI
+    /// leaves the alt buffer partially redrawn. Throttled (a live kick at most
+    /// every 40 ms) plus a trailing kick so the frame after scrolling settles is
+    /// clean.
+    func requestTerminalRefresh(_ name: String) {
+        let now = Date()
+        if lastRefreshAt[name].map({ now.timeIntervalSince($0) >= 0.04 }) ?? true {
+            lastRefreshAt[name] = now
+            Task { [client] in try? await client.refresh(name: name) }
+        }
+        refreshTrailing[name]?.cancel()
+        refreshTrailing[name] = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            guard !Task.isCancelled, let self else { return }
+            self.lastRefreshAt[name] = Date()
+            try? await self.client.refresh(name: name)
+        }
+    }
+
+    /// A claude agent pane. Its terminal suppresses mouse reporting
+    /// (keyboard-first): a click only focuses/selects-text, never reaches
+    /// Claude's mouse-interactive prompt to auto-pick an option.
+    public func agentIsClaude(_ name: String) -> Bool {
+        sessions.first { $0.name == name }?.agent.split(separator: " ").first == "claude"
     }
 
     public func resize(cols: UInt16, rows: UInt16, name: String) async {
@@ -1103,6 +1136,7 @@ public final class AppModel {
         case .sessionRemoved(let name):
             sessions.removeAll { $0.name == name }
             statusByName[name] = nil
+            modelByName[name] = nil
             promptsByName[name] = nil
             dropPaneState(name)
             if selected == name { selected = nil }
@@ -1116,11 +1150,14 @@ public final class AppModel {
             }
             sessions.removeAll { $0.name == name }
             statusByName[name] = nil
+            modelByName[name] = nil
             promptsByName[name] = nil
             dropPaneState(name)
             if selected == name { selected = nil }
         case let .statusChanged(name, status):
             statusByName[name] = status
+        case let .modelChanged(name, model):
+            modelByName[name] = model
         case let .promptChanged(name, options):
             promptsByName[name] = options.isEmpty ? nil : options
         case let .gitChanged(name, git):

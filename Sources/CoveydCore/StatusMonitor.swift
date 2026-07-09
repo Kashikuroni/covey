@@ -17,6 +17,12 @@ public final class StatusMonitor {
     private var prevHash: [String: Int] = [:]
     private var prevStatus: [String: Status] = [:]
     private var prevPrompt: [String: [String]] = [:]
+    /// Consecutive ticks a live prompt has parsed empty. A single empty frame
+    /// is a transient repaint (Claude redraws its boxed prompt mid-render);
+    /// only clear the card buttons once the prompt is gone for `clearGrace`
+    /// ticks in a row.
+    private var emptyStreak: [String: Int] = [:]
+    private let clearGrace = 2
 
     public init(
         interval: TimeInterval = 1.5,
@@ -55,14 +61,31 @@ public final class StatusMonitor {
         var newHash: [String: Int] = [:]
         var newStatus: [String: Status] = [:]
         var newPrompt: [String: [String]] = [:]
+        var newEmptyStreak: [String: Int] = [:]
         for (name, content) in screens {
             let hash = StatusInference.contentHash(content)
-            let prompt = StatusInference.parsePrompt(content)
+            let parsed = StatusInference.parsePrompt(content)
+            // Debounce a flicker to empty: hold the previous prompt for a few
+            // ticks so a single garbled repaint frame does not drop the card
+            // buttons. A genuinely answered prompt clears after `clearGrace`.
+            var prompt = parsed
+            let prev = prevPrompt[name] ?? []
+            if parsed.isEmpty && !prev.isEmpty {
+                let streak = (emptyStreak[name] ?? 0) + 1
+                if streak < clearGrace {
+                    prompt = prev
+                    newEmptyStreak[name] = streak
+                }
+            }
+            // `.waiting` is driven by the selection box, detected via a footer
+            // marker OR parsed options — robust even when option parsing misses.
+            let hasBox = !prompt.isEmpty
+                || StatusInference.promptMarkers.contains { content.contains($0) }
             let status = StatusInference.deriveStatus(
                 content: content,
                 prevHash: prevHash[name],
                 currentHash: hash,
-                hasPrompt: !prompt.isEmpty
+                hasPrompt: hasBox
             )
             newHash[name] = hash
             newStatus[name] = status
@@ -70,7 +93,7 @@ public final class StatusMonitor {
             if prevStatus[name] != status {
                 onStatusChanged?(name, status)
             }
-            if prevPrompt[name, default: []] != prompt {
+            if prev != prompt {
                 onPromptChanged?(name, prompt)
             }
         }
@@ -82,5 +105,6 @@ public final class StatusMonitor {
         prevHash = newHash
         prevStatus = newStatus
         prevPrompt = newPrompt
+        emptyStreak = newEmptyStreak
     }
 }

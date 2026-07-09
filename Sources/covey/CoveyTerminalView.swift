@@ -15,6 +15,10 @@ final class CoveyTerminalView: TerminalView {
     /// Fired when a click focused the terminal (the click itself is swallowed).
     var onFocusClick: (() -> Void)?
 
+    /// Fired after a wheel event scrolled a TUI (mouse-report / arrow route) so
+    /// the host can kick the child into a full repaint.
+    var onWheelScroll: (() -> Void)?
+
     func wheelRoute() -> WheelRoute {
         let terminal = getTerminal()
         guard terminal.isCurrentBufferAlternate else { return .viewport }
@@ -54,10 +58,26 @@ final class CoveyTerminalView: TerminalView {
             scrollViewport(deltaY: precise ? scrollingDeltaY : deltaY,
                            precise: precise)
         case .mouseReport:
-            if deltaY != 0 { sendWheelReport(deltaY: deltaY, at: point) }
+            // A trackpad reports sub-line pixels in `scrollingDeltaY` while the
+            // legacy `deltaY` rounds to 0, so gating a wheel report on `deltaY`
+            // dropped nearly every trackpad event and the TUI never scrolled.
+            // Accumulate pixels into whole lines (same as viewport) and emit one
+            // report per line — smooth, and momentum stays in the flick's sign.
+            let lines = wheelLines(precise: precise, deltaY: deltaY,
+                                   scrollingDeltaY: scrollingDeltaY)
+            if lines != 0 { sendWheelReport(lines: lines, at: point) }
         case .arrows:
             if deltaY != 0 { sendWheelArrows(deltaY: deltaY) }
         }
+    }
+
+    /// Whole terminal lines a wheel event should advance: accumulated pixels for
+    /// a trackpad, a fixed 3-line notch for a discrete mouse wheel.
+    private func wheelLines(precise: Bool, deltaY: CGFloat,
+                            scrollingDeltaY: CGFloat) -> Int {
+        guard precise else { return deltaY > 0 ? 3 : (deltaY < 0 ? -3 : 0) }
+        let rowHeight = getOptimalFrameSize().height / CGFloat(getTerminal().rows)
+        return wheelAccumulator.add(pixels: scrollingDeltaY, rowHeight: rowHeight)
     }
 
     // MacTerminalView seals scrollWheel (`public override`, not `open`), so wheel
@@ -102,8 +122,16 @@ final class CoveyTerminalView: TerminalView {
     // under the cursor opens). Swallow the focusing down AND its up.
     private func installMouseMonitor() {
         guard mouseMonitor == nil else { return }
-        mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] event in
+        mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp, .mouseMoved]) { [weak self] event in
             guard let self, event.window === self.window else { return event }
+            // Bare motion: SwiftTerm's mouseMoved forwards it to the app WITHOUT
+            // honoring allowMouseReporting, so hovering a keyboard-first claude
+            // pane would move/select the mouse-interactive prompt. Swallow it.
+            if event.type == .mouseMoved {
+                guard !self.allowMouseReporting else { return event }
+                let point = self.convert(event.locationInWindow, from: nil)
+                return self.bounds.contains(point) ? nil : event
+            }
             if event.type == .leftMouseUp, self.swallowNextMouseUp {
                 self.swallowNextMouseUp = false
                 return nil
@@ -138,7 +166,9 @@ final class CoveyTerminalView: TerminalView {
     }
 
 
-    func sendWheelReport(deltaY: CGFloat, at point: CGPoint) {
+    /// Emit `|lines|` SGR wheel reports (button 4 up / 5 down) to the TUI.
+    func sendWheelReport(lines: Int, at point: CGPoint) {
+        guard lines != 0 else { return }
         let terminal = getTerminal()
         // Cell-level precision is enough for wheel reports; derive the grid
         // position from the view bounds to avoid SwiftTerm's internal metrics.
@@ -147,9 +177,11 @@ final class CoveyTerminalView: TerminalView {
         let rawRow = Int(point.y / max(bounds.height, 1) * CGFloat(terminal.rows))
         let row = max(0, min(terminal.rows - 1,
                              isFlipped ? rawRow : terminal.rows - 1 - rawRow))
-        let flags = terminal.encodeButton(button: deltaY > 0 ? 4 : 5,
+        let flags = terminal.encodeButton(button: lines > 0 ? 4 : 5,
                                           release: false, shift: false, meta: false, control: false)
-        terminal.sendEvent(buttonFlags: flags, x: col, y: row)
+        for _ in 0..<min(abs(lines), 8) {
+            terminal.sendEvent(buttonFlags: flags, x: col, y: row)
+        }
     }
 
     func sendWheelArrows(deltaY: CGFloat) {

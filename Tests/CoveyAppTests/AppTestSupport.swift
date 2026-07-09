@@ -11,16 +11,24 @@ final class TestDaemon {
     let registry: SessionRegistry
     let monitor: StatusMonitor
     var gitMonitor: GitMonitor!
+    var modelMonitor: ModelMonitor!
+    /// Fake ~/.claude/projects for transcript fixtures.
+    let modelRoot: String
     private let ipc: IPCServer
     private let server: SocketServer
 
     init(persisted: [SessionMeta] = []) throws {
         path = "\(NSTemporaryDirectory())covey-app-\(UInt32.random(in: 0..<UInt32.max)).sock"
+        modelRoot = "\(NSTemporaryDirectory())covey-app-models-\(UInt32.random(in: 0..<UInt32.max))"
         let registry = SessionRegistry(persisted: persisted)
         self.registry = registry
         monitor = StatusMonitor(snapshot: { registry.snapshotScreens() })
         gitMonitor = GitMonitor(snapshot: { registry.list().map { ($0.name, $0.dir) } })
-        ipc = IPCServer(registry: registry, monitor: monitor, gitMonitor: gitMonitor)
+        modelMonitor = ModelMonitor(projectsRoot: modelRoot, snapshot: {
+            registry.list().map { ($0.name, $0.cwd, $0.resumeCmd) }
+        })
+        ipc = IPCServer(registry: registry, monitor: monitor, gitMonitor: gitMonitor,
+                        modelMonitor: modelMonitor)
         server = SocketServer(path: path)
         let ipc = self.ipc
         server.onAccept = { conn in
@@ -33,7 +41,10 @@ final class TestDaemon {
         try server.start()
     }
 
-    func stop() { server.stop() }
+    func stop() {
+        server.stop()
+        try? FileManager.default.removeItem(atPath: modelRoot)
+    }
 }
 
 extension XCTestCase {

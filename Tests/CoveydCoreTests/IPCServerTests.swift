@@ -53,6 +53,41 @@ final class IPCServerTests: XCTestCase {
         } }, "companion cascades on kill")
     }
 
+    func testModelMonitorEventAndListPayload() throws {
+        let root = "\(NSTemporaryDirectory())covey-ipc-models-\(UInt32.random(in: 0..<UInt32.max))"
+        try FileManager.default.createDirectory(atPath: "\(root)/-usr",
+                                                withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        let uuid = "0b154175-0f2e-43e8-b5b0-97ec3cb0e6a4"
+        try #"{"type":"assistant","message":{"model":"claude-fable-5"}}"#
+            .write(toFile: "\(root)/-usr/\(uuid).jsonl", atomically: true, encoding: .utf8)
+
+        let registry = SessionRegistry(clock: { 1 })
+        let modelMonitor = ModelMonitor(projectsRoot: root, snapshot: {
+            registry.list().map { ($0.name, $0.cwd, $0.resumeCmd) }
+        })
+        let server = IPCServer(registry: registry,
+                               monitor: StatusMonitor(snapshot: { registry.snapshotScreens() }),
+                               modelMonitor: modelMonitor)
+        let sink = FakeSink(id: 1)
+        server.register(sink)
+        _ = try registry.create(dir: "/usr", agent: "claude", argv: ["/bin/cat"],
+                                name: "s1", resumeCmd: "claude --resume \(uuid)")
+        modelMonitor.tick()
+        waitUntil({ sink.captured.contains {
+            if case .event(.modelChanged(name: "s1", model: "claude-fable-5")) = $0 { return true }
+            return false
+        } }, "modelChanged event")
+        server.handle(Request(id: 7, op: .list), from: sink)
+        waitUntil({ sink.captured.contains {
+            if case .response(7, .sessions(_, _, _, let models)) = $0 {
+                return models?["s1"] == "claude-fable-5"
+            }
+            return false
+        } }, "models in list payload")
+        registry.kill(name: "s1")
+    }
+
     func testUnknownNameReturnsNotFound() {
         let registry = SessionRegistry()
         let server = IPCServer(registry: registry,
@@ -136,7 +171,7 @@ final class IPCServerTests: XCTestCase {
         } }, "statusChanged waiting")
         server.handle(Request(id: 2, op: .list), from: sink)
         waitUntil({ sink.captured.contains {
-            if case .response(2, .sessions(_, let statuses, _)) = $0 {
+            if case .response(2, .sessions(_, let statuses, _, _)) = $0 {
                 return statuses["menu"] == .waiting
             }
             return false
@@ -154,7 +189,7 @@ final class IPCServerTests: XCTestCase {
         server.register(sink)
         server.handle(Request(id: 1, op: .list), from: sink)
         waitUntil({ sink.captured.contains {
-            if case .response(1, .sessions(_, _, let lost)) = $0 { return lost?.map(\.name) == ["old"] }
+            if case .response(1, .sessions(_, _, let lost, _)) = $0 { return lost?.map(\.name) == ["old"] }
             return false
         } }, "list carries lost")
         server.handle(Request(id: 2, op: .clearLost), from: sink)
@@ -163,7 +198,7 @@ final class IPCServerTests: XCTestCase {
         } }, "clearLost acked")
         server.handle(Request(id: 3, op: .list), from: sink)
         waitUntil({ sink.captured.contains {
-            if case .response(3, .sessions(_, _, let lost)) = $0 { return lost == nil }
+            if case .response(3, .sessions(_, _, let lost, _)) = $0 { return lost == nil }
             return false
         } }, "lost cleared")
     }

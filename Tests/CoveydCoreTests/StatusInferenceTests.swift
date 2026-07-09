@@ -29,6 +29,38 @@ final class StatusInferenceTests: XCTestCase {
         XCTAssertEqual(StatusInference.parsePrompt(menu + padding), [])
     }
 
+    // Claude Code's AskUserQuestion box: the selected row hugs the cursor with
+    // no space ("❯1.Python"), rows squish, descriptions interleave.
+    func testParsePromptDetectsClaudeBoxWithTightCursor() {
+        let content = """
+        Какой стек предпочитаешь?
+
+        ❯1.Python + FastAPI
+             Быстрый async-бэкенд, привычный стек.
+          2. Go + Chi
+             Компилируемый, один бинарь.
+        3.Rust+Axum
+        ─────────────────────────
+        Enter to select · ↑/↓ to navigate · Esc to cancel
+        """
+        XCTAssertEqual(StatusInference.parsePrompt(content),
+                       ["Python + FastAPI", "Go + Chi", "Rust+Axum"])
+    }
+
+    func testHasSelectionPromptViaFooterMarker() {
+        // Options don't line up, but the footer marker still means "waiting".
+        let content = "Question?\n weird · options\n↑/↓ to navigate\n"
+        XCTAssertTrue(StatusInference.hasSelectionPrompt(content))
+    }
+
+    func testHasSelectionPromptViaOptions() {
+        XCTAssertTrue(StatusInference.hasSelectionPrompt("1. a\n2. b\n"))
+    }
+
+    func testHasSelectionPromptFalseForPlainOutput() {
+        XCTAssertFalse(StatusInference.hasSelectionPrompt("just output\nno prompt here"))
+    }
+
     func testContentHashStableForSameInput() {
         XCTAssertEqual(StatusInference.contentHash("abc"), StatusInference.contentHash("abc"))
         XCTAssertNotEqual(StatusInference.contentHash("abc"), StatusInference.contentHash("abd"))

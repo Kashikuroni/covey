@@ -8,18 +8,23 @@ public final class IPCServer {
     private let registry: SessionRegistry
     private let monitor: StatusMonitor
     private let gitMonitor: GitMonitor?
+    private let modelMonitor: ModelMonitor?
     private let server = DispatchQueue(label: "covey.ipc")
     private var sinks: [Int: ClientSink] = [:]
     private var subscribers: [String: Set<Int>] = [:]
 
     public init(registry: SessionRegistry, monitor: StatusMonitor,
-                gitMonitor: GitMonitor? = nil) {
+                gitMonitor: GitMonitor? = nil, modelMonitor: ModelMonitor? = nil) {
         self.registry = registry
         self.monitor = monitor
         self.gitMonitor = gitMonitor
+        self.modelMonitor = modelMonitor
         gitMonitor?.onGitChanged = { [weak self, weak registry] name, git in
             registry?.updateGit(name: name, git: git)
             self?.broadcast(.event(.gitChanged(name: name, git: git)))
+        }
+        modelMonitor?.onModelChanged = { [weak self] name, model in
+            self?.broadcast(.event(.modelChanged(name: name, model: model)))
         }
         monitor.onStatusChanged = { [weak self] name, status in
             self?.broadcast(.event(.statusChanged(name: name, status: status)))
@@ -33,7 +38,7 @@ public final class IPCServer {
         registry.onSessionRemoved = { [weak self] name in
             self?.broadcast(.event(.sessionRemoved(name: name)))
         }
-        registry.onRestarted = { [weak self, weak gitMonitor] s in
+        registry.onRestarted = { [weak self, weak gitMonitor, weak modelMonitor] s in
             guard let self else { return }
             // The respawn created a new PTYProcess — re-bind the output fanout
             // to it; subscribers are keyed by name and survive untouched.
@@ -43,6 +48,7 @@ public final class IPCServer {
             // and re-read right away (the dir may have changed too).
             gitMonitor?.forget(name: s.name)
             gitMonitor?.poke(name: s.name, dir: s.dir)
+            modelMonitor?.poke(name: s.name, cwd: s.cwd, resumeCmd: s.resumeCmd)
             self.broadcast(.event(.sessionAdded(session: s)))   // client upserts
         }
         registry.onExit = { [weak self] name, code in
@@ -98,7 +104,8 @@ public final class IPCServer {
                         resumeCmd: $0.resumeCmd)
             }
             reply(.sessions(sessions: sessions, statuses: statuses,
-                            lost: lost.isEmpty ? nil : lost))
+                            lost: lost.isEmpty ? nil : lost,
+                            models: modelMonitor?.current()))
 
         case .clearLost:
             registry.clearLost(); reply(.ok)
@@ -126,6 +133,8 @@ public final class IPCServer {
                 attachOutputFanout(for: s.name)
                 // The card's git line should not wait out the poll interval.
                 gitMonitor?.poke(name: s.name, dir: s.dir)
+                // A resumed session's transcript already exists — badge now.
+                modelMonitor?.poke(name: s.name, cwd: s.cwd, resumeCmd: s.resumeCmd)
                 reply(.session(s))
             } catch let e as RegistryError {
                 reply(errorResult(e))
@@ -221,6 +230,10 @@ public final class IPCServer {
         case let .detach(name):
             guard registry.get(name: name) != nil else { return notFound(name) }
             subscribers[name]?.remove(sink.id); reply(.ok)
+
+        case let .refresh(name):
+            guard registry.get(name: name) != nil else { return notFound(name) }
+            registry.kick(name: name); reply(.ok)
 
         case let .input(name, bytesB64):
             guard registry.get(name: name) != nil else { return notFound(name) }

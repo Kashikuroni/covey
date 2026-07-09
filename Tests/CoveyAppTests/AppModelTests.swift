@@ -50,6 +50,26 @@ final class AppModelTests: XCTestCase {
     }
 
     @MainActor
+    func testModelChangedUpdatesMap() async throws {
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        let uuid = "0b154175-0f2e-43e8-b5b0-97ec3cb0e6a4"
+        try FileManager.default.createDirectory(atPath: "\(daemon.modelRoot)/-tmp",
+                                                withIntermediateDirectories: true)
+        try #"{"type":"assistant","message":{"model":"claude-fable-5"}}"#
+            .write(toFile: "\(daemon.modelRoot)/-tmp/\(uuid).jsonl",
+                   atomically: true, encoding: .utf8)
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"],
+                                       name: "s", resumeCmd: "claude --resume \(uuid)")
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        daemon.modelMonitor.tick()
+        let updated = await eventually { model.modelByName["s"] == "claude-fable-5" }
+        XCTAssertTrue(updated, "modelChanged did not land in model")
+        daemon.registry.kill(name: "s")
+    }
+
+    @MainActor
     func testStartSelectsFirstSession() async throws {
         let daemon = try TestDaemon()
         defer { daemon.stop() }

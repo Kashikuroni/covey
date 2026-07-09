@@ -49,7 +49,11 @@ let registry = SessionRegistry(persisted: registryStore.load(),
                                onPersist: { registryStore.save($0) })
 let monitor = StatusMonitor(snapshot: { registry.snapshotScreens() })
 let gitMonitor = GitMonitor(snapshot: { registry.list().map { ($0.name, $0.dir) } })
-let ipc = IPCServer(registry: registry, monitor: monitor, gitMonitor: gitMonitor)
+let modelMonitor = ModelMonitor(snapshot: {
+    registry.list().map { ($0.name, $0.cwd, $0.resumeCmd) }
+})
+let ipc = IPCServer(registry: registry, monitor: monitor, gitMonitor: gitMonitor,
+                    modelMonitor: modelMonitor)
 let server = SocketServer(path: socketPath)
 server.onAccept = { conn in
     ipc.register(conn)
@@ -81,5 +85,6 @@ do {
 
 monitor.start()
 gitMonitor.start()
+modelMonitor.start()
 
 dispatchMain()
