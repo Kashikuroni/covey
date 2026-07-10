@@ -319,9 +319,13 @@ public final class AppModel {
         catch { toast = errorText(error) }
     }
 
-    public func kill(_ name: String, removeWorktree: Bool = false) async {
-        do { try await client.kill(name: name, removeWorktree: removeWorktree ? true : nil) }
-        catch { toast = errorText(error) }
+    public func kill(_ name: String, removeWorktree: Bool = false,
+                     deleteBranch: Bool = false) async {
+        do {
+            try await client.kill(name: name,
+                                  removeWorktree: removeWorktree ? true : nil,
+                                  deleteBranch: deleteBranch ? true : nil)
+        } catch { toast = errorText(error) }
     }
 
     /// Restart via the daemon; the error text doubles as the sheet's inline
@@ -1033,6 +1037,13 @@ public final class AppModel {
 
     public func mergedBranches(dir: String) async -> [String] {
         (try? await client.mergedBranches(dir: dir)) ?? []
+    }
+
+    /// Whether the session's worktree branch is safe to delete: `(dirty,
+    /// merged)`. nil when the daemon can't answer (session gone / not a
+    /// worktree) — the caller then keeps the delete toggle disabled.
+    public func branchStatus(name: String) async -> (dirty: Bool, merged: Bool)? {
+        try? await client.branchStatus(name: name)
     }
 
     public func cleanupBranches(dir: String, branches: [String]) async -> String? {

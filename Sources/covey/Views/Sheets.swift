@@ -510,20 +510,46 @@ struct KillSheet: View {
     let model: AppModel
     let name: String
     @State private var removeWorktree = false
+    @State private var deleteBranch = false
+    @State private var branchGate: BranchGate = .loading
+
+    private enum BranchGate: Equatable {
+        case loading
+        case blocked(String)   // caption explaining why delete is unavailable
+        case allowed
+    }
+
+    private var isWorktree: Bool {
+        model.sessions.first(where: { $0.name == name })?.worktreeRepo != nil
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Kill session \"\(name)\"?").font(.headline)
-            if model.sessions.first(where: { $0.name == name })?.worktreeRepo != nil {
+            if isWorktree {
                 Toggle("Also remove the git worktree", isOn: $removeWorktree)
+                    .onChange(of: removeWorktree) { _, on in
+                        if !on { deleteBranch = false }   // can't delete a live worktree's branch
+                    }
+                VStack(alignment: .leading, spacing: 2) {
+                    Toggle("Also delete the branch", isOn: $deleteBranch)
+                        .disabled(branchGate != .allowed)
+                        .onChange(of: deleteBranch) { _, on in
+                            if on { removeWorktree = true }   // delete needs the tree gone
+                        }
+                    if case let .blocked(reason) = branchGate {
+                        Text(reason).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             }
             HStack {
                 Spacer()
                 Button("Cancel") { model.modal = nil }
                 Button("Kill", role: .destructive) {
                     let rm = removeWorktree
+                    let del = deleteBranch
                     Task {
-                        await model.kill(name, removeWorktree: rm)
+                        await model.kill(name, removeWorktree: rm, deleteBranch: del)
                         model.modal = nil
                     }
                 }
@@ -533,6 +559,15 @@ struct KillSheet: View {
         }
         .padding(20)
         .frame(width: 360)
+        .task {
+            guard isWorktree else { return }
+            guard let st = await model.branchStatus(name: name) else {
+                branchGate = .blocked("Branch status unavailable"); return
+            }
+            if st.dirty { branchGate = .blocked("Uncommitted changes") }
+            else if !st.merged { branchGate = .blocked("Unmerged commits") }
+            else { branchGate = .allowed }
+        }
     }
 }
 
