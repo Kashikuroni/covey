@@ -57,7 +57,6 @@ public enum DaemonEvent: Codable, Equatable {
     case sessionRemoved(name: String)
     case exited(name: String, code: Int32)
     case statusChanged(name: String, status: Status)
-    case promptChanged(name: String, options: [String])
     case gitChanged(name: String, git: GitInfo?)
     case modelChanged(name: String, model: String)
 }

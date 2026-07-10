@@ -84,7 +84,6 @@ final class ProtocolTests: XCTestCase {
             .event(.sessionAdded(session: s)),
             .event(.sessionRemoved(name: "s-1")),
             .event(.statusChanged(name: "s-1", status: .waiting)),
-            .event(.promptChanged(name: "s-1", options: ["yes", "no"])),
             .event(.gitChanged(name: "s-1", git: GitInfo(branch: "main", added: 1, removed: 2))),
             .event(.gitChanged(name: "s-1", git: nil)),
             .event(.modelChanged(name: "s-1", model: "claude-fable-5")),

@@ -216,50 +216,41 @@ final class VimEngineTests: XCTestCase {
         XCTAssertEqual(e.text, "bc", "engine is usable right after")
     }
 
-    func testPreviewEnterExitAndScroll() {
+    func testPreviewIsNonInteractive() {
+        // Preview is a pure read view: no cursor roaming, no scroll keys.
         var e = engine("l0\nl1\nl2\nl3\nl4", cursor: 0)
         _ = feedFx(&e, "gp")
         XCTAssertEqual(e.mode, .preview)
         _ = feedFx(&e, "j")
-        XCTAssertEqual(e.lineOfCursor(), 1)
+        XCTAssertEqual(e.lineOfCursor(), 0, "j does not move the cursor in preview")
         _ = feedFx(&e, "3j")
-        XCTAssertEqual(e.lineOfCursor(), 4)
+        XCTAssertEqual(e.lineOfCursor(), 0)
         _ = feedFx(&e, "gg")
         XCTAssertEqual(e.lineOfCursor(), 0)
         _ = feedFx(&e, "G")
-        XCTAssertEqual(e.lineOfCursor(), 4)
-        _ = feedFx(&e, "2G")
-        XCTAssertEqual(e.lineOfCursor(), 1)
+        XCTAssertEqual(e.lineOfCursor(), 0)
         let fx = feedFx(&e, "zz")
-        XCTAssertTrue(fx.contains(.scrollCenter))
+        XCTAssertFalse(fx.contains(.scrollCenter), "zz no longer scrolls in preview")
         _ = feedFx(&e, "x")
         XCTAssertEqual(e.text, "l0\nl1\nl2\nl3\nl4", "preview never edits")
+        XCTAssertEqual(e.mode, .preview, "stray keys keep the read view")
         _ = e.handle(.escape)
         XCTAssertEqual(e.mode, .normal)
     }
 
-    func testPreviewInsertEntries() {
-        // No horizontal cursor in preview: entries are line-wise.
+    func testPreviewEntersNormalToEdit() {
+        // Read-only: i/a/o are inert — you drop to NORMAL (enter/esc) first.
         var e = engine("ab\ncd", cursor: 0)
-        _ = feedFx(&e, "gpj")
+        _ = feedFx(&e, "gp")
         _ = feedFx(&e, "i")
-        XCTAssertEqual(e.mode, .insert)
-        XCTAssertEqual(e.cursor, 3, "i starts at the line START")
-        _ = e.handle(.escape)
-        _ = feedFx(&e, "gp")
+        XCTAssertEqual(e.mode, .preview, "i is inert in preview")
         _ = feedFx(&e, "a")
-        XCTAssertEqual(e.mode, .insert)
-        XCTAssertEqual(e.cursor, 5, "a starts at the line END")
-        _ = e.handle(.escape)
-        _ = feedFx(&e, "gp")
+        XCTAssertEqual(e.mode, .preview, "a is inert in preview")
         _ = feedFx(&e, "o")
-        XCTAssertEqual(e.mode, .insert)
-        XCTAssertEqual(e.text, "ab\ncd\n")
-        XCTAssertEqual(e.cursor, 6, "o opens a fresh line below")
-        _ = e.handle(.escape)
-        _ = feedFx(&e, "gp")
+        XCTAssertEqual(e.mode, .preview, "o is inert in preview")
+        XCTAssertEqual(e.text, "ab\ncd", "preview never edits")
         _ = e.handle(.char("\n"))
-        XCTAssertEqual(e.mode, .normal, "enter drops to normal on the line")
+        XCTAssertEqual(e.mode, .normal, "enter drops to normal")
     }
 
     func testStartInPreview() {
@@ -275,5 +266,50 @@ final class VimEngineTests: XCTestCase {
         XCTAssertEqual(e.handle(.shiftTab), .switchField(forward: false))
         feed(&e, "i")
         XCTAssertEqual(e.handle(.tab), .none, "insert keeps tab as typing")
+    }
+
+    func testUndoRedoNormalEdit() {
+        var e = engine("abc", cursor: 0)
+        _ = feedFx(&e, "x")                    // delete 'a'
+        XCTAssertEqual(e.text, "bc")
+        _ = feedFx(&e, "u")                    // undo
+        XCTAssertEqual(e.text, "abc")
+        XCTAssertEqual(e.mode, .normal)
+        _ = e.handle(.redo)                    // ⌃r
+        XCTAssertEqual(e.text, "bc", "redo reapplies the delete")
+    }
+
+    func testUndoUndoesWholeInsertSession() {
+        var e = engine("abc", cursor: 0)
+        _ = feedFx(&e, "i")                    // enter insert (snapshots "abc")
+        e.syncFromView(text: "XYabc", cursor: 2)   // native typing round-trips here
+        _ = e.handle(.escape)
+        XCTAssertEqual(e.text, "XYabc")
+        _ = feedFx(&e, "u")
+        XCTAssertEqual(e.text, "abc", "one u undoes the entire insert")
+    }
+
+    func testUndoLinewiseDelete() {
+        var e = engine("one\ntwo\nthree", cursor: 0)
+        _ = feedFx(&e, "dd")
+        XCTAssertEqual(e.text, "two\nthree")
+        _ = feedFx(&e, "u")
+        XCTAssertEqual(e.text, "one\ntwo\nthree")
+    }
+
+    func testNewEditClearsRedo() {
+        var e = engine("abc", cursor: 0)
+        _ = feedFx(&e, "x")                    // "bc"
+        _ = feedFx(&e, "u")                    // "abc"
+        _ = feedFx(&e, "x")                    // "bc" — a fresh edit drops the redo
+        _ = e.handle(.redo)                    // nothing to redo
+        XCTAssertEqual(e.text, "bc")
+    }
+
+    func testYankDoesNotSnapshot() {
+        var e = engine("abc", cursor: 0)
+        _ = feedFx(&e, "yy")                   // pure copy — no edit
+        _ = feedFx(&e, "u")                    // nothing to undo
+        XCTAssertEqual(e.text, "abc")
     }
 }
