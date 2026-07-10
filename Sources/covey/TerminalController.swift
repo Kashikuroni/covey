@@ -56,12 +56,15 @@ struct TerminalRepresentable: NSViewRepresentable {
         if let nerd = nerdFont(size: view.font.pointSize) {
             view.font = nerd
         }
-        // PROBE (sync-coalescing freeze): SwiftTerm defers a DECSET 2026 sync
-        // frame until `syncSequenceSettleMs` after the LAST block and cancels the
+        // Claude repaints each frame atomically inside one DECSET 2026 sync
+        // block, so render it immediately. SwiftTerm otherwise defers the frame
+        // until `syncSequenceSettleMs` after the LAST sync block and cancels the
         // render when the next block opens — so a continuous scroll (a stream of
         // sync blocks) renders NOTHING until the gesture settles, then snaps to
-        // the destination. 0 = render each atomic frame immediately.
-        view.syncSequenceSettleMs = 0
+        // the destination (visible freeze-then-jump). Non-claude panes keep the
+        // default: tmux/vim split one repaint across several sync pairs and need
+        // the coalescing to avoid tearing.
+        view.syncSequenceSettleMs = model.agentIsClaude(self.name) ? 0 : 16
         let model = self.model
         let name = self.name
         // Entering/leaving the alternate buffer invalidates any scrolled-up
@@ -106,6 +109,7 @@ struct TerminalRepresentable: NSViewRepresentable {
         // (claude-ness unknown → mouse reporting left on). Re-evaluate now that
         // the sessions are loaded so claude panes reliably suppress the mouse.
         view.allowMouseReporting = !model.agentIsClaude(name)
+        view.syncSequenceSettleMs = model.agentIsClaude(name) ? 0 : 16
     }
 
     private func applyTheme(to view: TerminalView) {
