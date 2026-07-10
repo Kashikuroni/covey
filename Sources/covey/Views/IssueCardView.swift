@@ -109,26 +109,34 @@ struct IssueCardView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    // At most 2 chips so the row never wraps into a cluttered stack; the rest
+    // collapse into a `shown/total` counter. Labels use a smaller type than the
+    // author so they read as secondary metadata.
     private var labelRow: some View {
-        HStack(spacing: 13) {
-            ForEach(issue.labels.prefix(3), id: \.name) { label in
-                let c = labelChipColors(hex: label.color, darkTheme: tk.isDark)
-                HStack(spacing: 5) {
-                    Circle().frame(width: 6, height: 6)
-                        .foregroundStyle(c.map { Color(hex: $0.dot) } ?? tk.t3)
-                    Text(label.name)
-                        .foregroundStyle(c.map { Color(hex: $0.text) } ?? tk.t2)
+        let shown = min(2, issue.labels.count)
+        return HStack(spacing: 13) {
+            HStack(spacing: 10) {
+                ForEach(issue.labels.prefix(shown), id: \.name) { label in
+                    let c = labelChipColors(hex: label.color, darkTheme: tk.isDark)
+                    HStack(spacing: 5) {
+                        Circle().frame(width: 6, height: 6)
+                            .foregroundStyle(c.map { Color(hex: $0.dot) } ?? tk.t3)
+                        Text(label.name)
+                            .lineLimit(1)
+                            .foregroundStyle(c.map { Color(hex: $0.text) } ?? tk.t2)
+                    }
+                }
+                if issue.labels.count > shown {
+                    Text("\(shown)/\(issue.labels.count)").foregroundStyle(tk.t4)
                 }
             }
-            if issue.labels.count > 3 {
-                Text("+\(issue.labels.count - 3)").foregroundStyle(tk.t4)
-            }
+            .font(.system(size: IssueFont.cardLabel, design: .monospaced))
             Spacer(minLength: 4)
             if !issue.author.isEmpty {
                 Text("@\(issue.author)").foregroundStyle(tk.t4)
+                    .font(.system(size: IssueFont.cardMeta, design: .monospaced))
             }
         }
-        .font(.system(size: IssueFont.cardMeta, design: .monospaced))
     }
 
     private var wipBlock: some View {
