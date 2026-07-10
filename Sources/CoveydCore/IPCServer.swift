@@ -142,9 +142,14 @@ public final class IPCServer {
                 reply(.error(code: "createFailed", message: "\(error)"))
             }
 
-        case let .kill(name, removeWorktree):
+        case let .kill(name, removeWorktree, deleteBranch):
             guard registry.get(name: name) != nil else { return notFound(name) }
-            if removeWorktree == true { registry.markWorktreeRemoval(name: name) }
+            if deleteBranch == true {
+                registry.markBranchDeletion(name: name)
+                registry.markWorktreeRemoval(name: name)   // delete needs the tree gone
+            } else if removeWorktree == true {
+                registry.markWorktreeRemoval(name: name)
+            }
             registry.kill(name: name); reply(.ok)
 
         case let .restart(name, dir):
@@ -190,6 +195,17 @@ public final class IPCServer {
         case let .mergedBranches(dir):
             let repo = GitOps.repoRoot(expandTilde(dir))
             reply(.branches(repo.map { GitOps.listMergedBranches($0) } ?? []))
+
+        case let .branchStatus(name):
+            guard let session = registry.get(name: name) else { return notFound(name) }
+            guard let repo = session.worktreeRepo,
+                  let branch = GitOps.currentBranch(session.dir) else {
+                return reply(.error(code: "branchStatusFailed",
+                                    message: "not a worktree session"))
+            }
+            let dirty = GitOps.isDirty(session.dir)
+            let merged = GitOps.listMergedBranches(repo).contains(branch)
+            reply(.branchStatus(dirty: dirty, merged: merged))
 
         case let .cleanupBranches(dir, branches):
             guard let repo = GitOps.repoRoot(expandTilde(dir)) else {

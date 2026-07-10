@@ -150,4 +150,34 @@ final class GitOpsTests: XCTestCase {
         XCTAssertTrue(merged.contains("merged-b"))
         XCTAssertFalse(merged.contains("main"), "current branch excluded")
     }
+
+    func testSeedWorktreeIgnoredCopiesIgnoredSkipsHeavy() throws {
+        // .gitignore selects the ignored paths; commit it so the tree is clean.
+        try """
+        .env
+        config/
+        node_modules/
+        .worktrees/
+        """.write(toFile: "\(repo)/.gitignore", atomically: true, encoding: .utf8)
+        try sh("git -C '\(repo)' add .gitignore && git -C '\(repo)' -c user.email=t@t -c user.name=t commit -q -m ignore")
+        // ignored files present in the repo working tree
+        try "SECRET=1".write(toFile: "\(repo)/.env", atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(atPath: "\(repo)/config", withIntermediateDirectories: true)
+        try "k=v".write(toFile: "\(repo)/config/local.json", atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(atPath: "\(repo)/node_modules", withIntermediateDirectories: true)
+        try "junk".write(toFile: "\(repo)/node_modules/lib.js", atomically: true, encoding: .utf8)
+
+        let wt = "\(repo)/.worktrees/feat"
+        try GitOps.prepareWorktree(repo: repo, wtPath: wt, newBranch: "feat", base: "main")
+        GitOps.seedWorktreeIgnored(repo: repo, wtPath: wt)
+
+        XCTAssertEqual(try? String(contentsOfFile: "\(wt)/.env", encoding: .utf8), "SECRET=1",
+                       "ignored file copied")
+        XCTAssertEqual(try? String(contentsOfFile: "\(wt)/config/local.json", encoding: .utf8), "k=v",
+                       "ignored dir copied recursively")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: "\(wt)/node_modules"),
+                       "heavy dir skipped")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: "\(wt)/.worktrees"),
+                       "the .worktrees layer is never seeded into itself")
+    }
 }

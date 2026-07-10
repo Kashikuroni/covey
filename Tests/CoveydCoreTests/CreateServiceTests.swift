@@ -130,4 +130,20 @@ final class CreateServiceTests: XCTestCase {
         XCTAssertThrowsError(try CreateService.prepare(CreateSpec(
             dir: NSTemporaryDirectory(), agent: "sh", worktree: .existing(branch: "main"))))
     }
+
+    func testWorktreeNewSeedsIgnoredFiles() throws {
+        try """
+        .env
+        .worktrees/
+        """.write(toFile: "\(repo)/.gitignore", atomically: true, encoding: .utf8)
+        try sh("git -C '\(repo)' add .gitignore && git -C '\(repo)' -c user.email=t@t -c user.name=t commit -q -m ignore")
+        try "SECRET=1".write(toFile: "\(repo)/.env", atomically: true, encoding: .utf8)
+
+        let p = try CreateService.prepare(CreateSpec(
+            dir: repo, agent: "sh",
+            worktree: .new(branch: "feat", base: "main")))
+
+        XCTAssertEqual(try? String(contentsOfFile: "\(p.finalDir)/.env", encoding: .utf8),
+                       "SECRET=1", "the new worktree carries the ignored .env")
+    }
 }

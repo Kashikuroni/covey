@@ -21,7 +21,7 @@ final class IPCServerTests: XCTestCase {
         server.handle(Request(id: 10, op: .create(dir: "/usr", agent: "sh", argv: ["/bin/cat"], name: "s1", terminal: nil, worktree: nil, model: nil, effort: nil, resume: nil, companionOf: nil)), from: sink)
         waitUntil({ sink.captured.contains { if case .response(10, .session) = $0 { return true }; return false } }, "create response")
         waitUntil({ sink.captured.contains { if case .event(.sessionAdded) = $0 { return true }; return false } }, "added event")
-        server.handle(Request(id: 11, op: .kill(name: "s1", removeWorktree: nil)), from: sink)
+        server.handle(Request(id: 11, op: .kill(name: "s1", removeWorktree: nil, deleteBranch: nil)), from: sink)
     }
 
     func testCreateCompanionDerivesNameAndKillCascades() {
@@ -47,7 +47,7 @@ final class IPCServerTests: XCTestCase {
             }
             return false
         } }, "companion session derived name")
-        server.handle(Request(id: 3, op: .kill(name: "agent", removeWorktree: nil)), from: sink)
+        server.handle(Request(id: 3, op: .kill(name: "agent", removeWorktree: nil, deleteBranch: nil)), from: sink)
         waitUntil({ sink.captured.contains {
             if case .event(.exited(name: "agent+sh", _)) = $0 { return true }; return false
         } }, "companion cascades on kill")
@@ -94,7 +94,7 @@ final class IPCServerTests: XCTestCase {
                                monitor: StatusMonitor(snapshot: { registry.snapshotScreens() }))
         let sink = FakeSink(id: 1)
         server.register(sink)
-        server.handle(Request(id: 5, op: .kill(name: "ghost", removeWorktree: nil)), from: sink)
+        server.handle(Request(id: 5, op: .kill(name: "ghost", removeWorktree: nil, deleteBranch: nil)), from: sink)
         waitUntil({ sink.captured.contains {
             if case .response(5, .error(let code, _)) = $0 { return code == "notFound" }; return false
         } }, "notFound error")
@@ -114,7 +114,7 @@ final class IPCServerTests: XCTestCase {
                let d = Data(base64Encoded: b64) { return String(decoding: d, as: UTF8.self).contains("ping") }
             return false
         } }, "live output")
-        server.handle(Request(id: 4, op: .kill(name: "s1", removeWorktree: nil)), from: sink)
+        server.handle(Request(id: 4, op: .kill(name: "s1", removeWorktree: nil, deleteBranch: nil)), from: sink)
     }
 
     func testAttachPrefixesStatePreambleToBackfill() {
@@ -147,7 +147,7 @@ final class IPCServerTests: XCTestCase {
             }
             return false
         } }, "first output = preamble + backfill")
-        server.handle(Request(id: 3, op: .kill(name: "tui", removeWorktree: nil)), from: sink)
+        server.handle(Request(id: 3, op: .kill(name: "tui", removeWorktree: nil, deleteBranch: nil)), from: sink)
     }
 
     func testTickBroadcastsWaitingAndListCarriesStatuses() {
@@ -176,7 +176,7 @@ final class IPCServerTests: XCTestCase {
             }
             return false
         } }, "list has statuses")
-        server.handle(Request(id: 3, op: .kill(name: "menu", removeWorktree: nil)), from: sink)
+        server.handle(Request(id: 3, op: .kill(name: "menu", removeWorktree: nil, deleteBranch: nil)), from: sink)
     }
 
     func testListCarriesLostAndClearLostRemoves() {
@@ -231,7 +231,7 @@ final class IPCServerTests: XCTestCase {
         XCTAssertTrue(created?.dir.hasSuffix(".worktrees/wt-branch") == true)
         XCTAssertNotNil(created?.worktreeRepo)
         let wtPath = created!.dir
-        server.handle(Request(id: 2, op: .kill(name: "wt", removeWorktree: true)), from: sink)
+        server.handle(Request(id: 2, op: .kill(name: "wt", removeWorktree: true, deleteBranch: nil)), from: sink)
         waitUntil({ !FileManager.default.fileExists(atPath: wtPath) },
                   "worktree removed after exit")
     }
@@ -298,8 +298,8 @@ final class IPCServerTests: XCTestCase {
         waitUntil({ sink.captured.contains {
             if case .event(.exited(name: "wts+sh", _)) = $0 { return true }; return false
         } }, "companion killed by promote")
-        server.handle(Request(id: 6, op: .kill(name: "plain", removeWorktree: nil)), from: sink)
-        server.handle(Request(id: 8, op: .kill(name: "wts", removeWorktree: nil)), from: sink)
+        server.handle(Request(id: 6, op: .kill(name: "plain", removeWorktree: nil, deleteBranch: nil)), from: sink)
+        server.handle(Request(id: 8, op: .kill(name: "wts", removeWorktree: nil, deleteBranch: nil)), from: sink)
     }
 
     func testRestartRespawnsAndUpserts() throws {
@@ -361,5 +361,48 @@ final class IPCServerTests: XCTestCase {
             }
             return false
         } }, "gitInfo for a non-repo")
+    }
+
+    func testBranchStatusAndKillDeleteBranch() throws {
+        let repo = "\(NSTemporaryDirectory())covey-ipcdel-\(UInt32.random(in: 0..<UInt32.max))"
+        try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: repo) }
+        for cmd in ["git -C '\(repo)' init -q -b main",
+                    "git -C '\(repo)' -c user.email=t@t -c user.name=t commit --allow-empty -q -m init"] {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/bin/sh")
+            p.arguments = ["-c", cmd]
+            try p.run(); p.waitUntilExit()
+        }
+        let registry = SessionRegistry()
+        let server = IPCServer(registry: registry,
+                               monitor: StatusMonitor(snapshot: { registry.snapshotScreens() }))
+        let sink = FakeSink(id: 1)
+        server.register(sink)
+        server.handle(Request(id: 1, op: .create(
+            dir: repo, agent: "sh", argv: nil, name: "wt",
+            terminal: nil, worktree: .new(branch: "feat", base: "main"),
+            model: nil, effort: nil, resume: nil, companionOf: nil)), from: sink)
+        var created: Session?
+        waitUntil({ sink.captured.contains {
+            if case .response(1, .session(let s)) = $0 { created = s; return true }
+            return false
+        } }, "worktree create response")
+        let wtPath = created!.dir
+
+        // branchStatus: feat is at main's tip -> clean & merged
+        server.handle(Request(id: 2, op: .branchStatus(name: "wt")), from: sink)
+        waitUntil({ sink.captured.contains {
+            if case .response(2, .branchStatus(let dirty, let merged)) = $0 {
+                return dirty == false && merged == true
+            }
+            return false
+        } }, "clean, merged status")
+
+        // kill + delete branch: worktree removed, branch gone
+        server.handle(Request(id: 3, op: .kill(name: "wt", removeWorktree: nil,
+                                               deleteBranch: true)), from: sink)
+        waitUntil({ !FileManager.default.fileExists(atPath: wtPath) }, "worktree removed")
+        waitUntil({ !GitOps.branchExists(repo, "feat") }, "branch deleted after worktree removal")
     }
 }
