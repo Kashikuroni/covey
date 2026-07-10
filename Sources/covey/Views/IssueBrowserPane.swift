@@ -44,7 +44,7 @@ struct IssueBrowserPane: View {
             guard let newRoot else { return }   // nil root: pane already shows the hint
             // A detail/edit screen from the old repo must not survive the switch.
             browser.screen = .list
-            if let dir = model.sessions.first(where: { $0.name == model.selected })?.dir {
+            if let dir = model.inspectorDir {
                 Task { await browser.open(root: newRoot, dir: dir) }
             }
         }
@@ -66,7 +66,7 @@ struct IssueBrowserPane: View {
     }
 
     private func openList() {
-        if let root, let dir = model.sessions.first(where: { $0.name == model.selected })?.dir {
+        if let root, let dir = model.inspectorDir {
             Task { await browser.open(root: root, dir: dir) }
         }
         // Deferred a turn: returning from the composer, the list rows remount in

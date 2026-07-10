@@ -36,67 +36,20 @@ final class StatusMonitorTests: XCTestCase {
         XCTAssertEqual(m.currentStatuses(), ["s": .waiting])
     }
 
-    func testPromptOptionsEmitOnChangeOnly() {
+    // The prompt box still drives `.waiting`, and its parse is debounced so a
+    // single garbled repaint frame does not flip the status off for one tick.
+    func testTransientEmptyFrameHoldsWaiting() {
         var screens = ["s": "pick one:\n  1. yes\n  2. no"]
-        let monitor = StatusMonitor(snapshot: { screens })
-        let lock = NSLock()
-        var events: [(String, [String])] = []
-        monitor.onPromptChanged = { name, options in
-            lock.lock(); events.append((name, options)); lock.unlock()
-        }
-        func captured() -> [(String, [String])] {
-            lock.lock(); defer { lock.unlock() }; return events
-        }
-        monitor.tick()
-        XCTAssertEqual(captured().last?.1, ["yes", "no"])
-        monitor.tick()
-        XCTAssertEqual(captured().count, 1, "unchanged prompt does not re-emit")
-        screens["s"] = "done, moving on"
-        monitor.tick()
-        XCTAssertEqual(captured().count, 1, "one empty frame is debounced, prompt held")
-        monitor.tick()
-        XCTAssertEqual(captured().last?.1, [], "second empty frame clears the prompt")
-        screens = [:]
-        monitor.tick()
-        XCTAssertEqual(captured().count, 2, "already-empty prompt set stays quiet on prune")
-    }
-
-    // A single garbled repaint frame (Claude redrawing its boxed prompt) must
-    // not flicker the card buttons: the prompt is held until it is really gone.
-    func testTransientEmptyFrameDoesNotClearPrompt() {
-        var screens = ["s": "pick one:\n  1. yes\n  2. no"]
-        let monitor = StatusMonitor(snapshot: { screens })
-        let lock = NSLock()
-        var events: [(String, [String])] = []
-        monitor.onPromptChanged = { name, options in
-            lock.lock(); events.append((name, options)); lock.unlock()
-        }
-        func captured() -> [(String, [String])] {
-            lock.lock(); defer { lock.unlock() }; return events
-        }
-        monitor.tick()
-        XCTAssertEqual(captured().last?.1, ["yes", "no"])
+        let (m, events) = makeMonitor { screens }
+        m.tick()
+        XCTAssertEqual(events().last?.1, .waiting)
         screens["s"] = "…mid-repaint garbage…"          // transient empty parse
-        monitor.tick()
-        XCTAssertEqual(captured().count, 1, "held through the flicker")
-        screens["s"] = "pick one:\n  1. yes\n  2. no"    // repaint recovered
-        monitor.tick()
-        XCTAssertEqual(captured().count, 1, "no spurious clear/re-emit")
-    }
-
-    func testPrunedSessionWithPromptEmitsEmpty() {
-        var screens = ["s": "pick one:\n  1. yes\n  2. no"]
-        let monitor = StatusMonitor(snapshot: { screens })
-        let lock = NSLock()
-        var events: [(String, [String])] = []
-        monitor.onPromptChanged = { name, options in
-            lock.lock(); events.append((name, options)); lock.unlock()
-        }
-        monitor.tick()
-        screens = [:]
-        monitor.tick()
-        lock.lock(); let last = events.last; lock.unlock()
-        XCTAssertEqual(last?.1, [], "killed session clears its prompt")
+        m.tick()
+        XCTAssertEqual(events().last?.1, .waiting, "held through the flicker")
+        screens["s"] = "done, moving on"                // genuinely gone
+        m.tick()                                        // first empty: still held
+        m.tick()                                        // second empty: clears
+        XCTAssertEqual(events().last?.1, .idle, "waiting drops once the prompt is really gone")
     }
 
     func testWorkingMarkerYieldsRunningEvenOnFirstTick() {

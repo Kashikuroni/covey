@@ -1,7 +1,7 @@
 import Foundation
 
 /// Keys the vim editor understands beyond printable characters.
-enum VimInput: Equatable { case char(Character), escape, tab, shiftTab }
+enum VimInput: Equatable { case char(Character), escape, tab, shiftTab, redo }
 
 /// Side effects the view applies (the engine itself stays pure).
 enum VimEffect: Equatable {
@@ -23,6 +23,14 @@ struct VimEngine {
     private(set) var pending: Character?   // d / c / y awaiting a motion
     private(set) var pendingG = false      // g prefix (gg / gp)
     private(set) var count: Int?           // motion count (5j, 12G)
+
+    // Undo history of (buffer, cursor) snapshots taken just before each edit;
+    // `redoStack` holds states popped by `u`, cleared the moment a new edit
+    // lands. An insert session is one snapshot (taken on entry), so a single
+    // `u` reverts the whole insert — the vim model.
+    private var undoStack: [(chars: [Character], cursor: Int)] = []
+    private var redoStack: [(chars: [Character], cursor: Int)] = []
+    private let undoLimit = 200
 
     var text: String { String(chars) }
 
@@ -73,10 +81,48 @@ struct VimEngine {
         pending = nil; pendingG = false; count = nil
     }
 
+    // MARK: - undo / redo
+
+    /// Record the pre-edit state. Call once at the start of any mutation
+    /// (including entering INSERT). A fresh edit invalidates the redo stack.
+    private mutating func snapshot() {
+        undoStack.append((chars, cursor))
+        if undoStack.count > undoLimit { undoStack.removeFirst() }
+        redoStack.removeAll()
+    }
+
+    @discardableResult
+    mutating func undo() -> Bool {
+        guard let prev = undoStack.popLast() else { return false }
+        redoStack.append((chars, cursor))
+        chars = prev.chars
+        cursor = min(prev.cursor, max(0, chars.count - 1))
+        mode = .normal
+        resetPrefixes()
+        clampToLine()
+        return true
+    }
+
+    @discardableResult
+    mutating func redo() -> Bool {
+        guard let next = redoStack.popLast() else { return false }
+        undoStack.append((chars, cursor))
+        chars = next.chars
+        cursor = min(next.cursor, max(0, chars.count - 1))
+        mode = .normal
+        resetPrefixes()
+        clampToLine()
+        return true
+    }
+
     // MARK: - input
 
     mutating func handle(_ input: VimInput,
                          pasteboard: () -> String? = { nil }) -> VimEffect {
+        if input == .redo {
+            if case .normal = mode { redo() }   // vim redo works from NORMAL
+            return .none
+        }
         switch mode {
         case .insert:
             if input == .escape {
@@ -105,6 +151,8 @@ struct VimEngine {
             return .switchField(forward: input == .tab)
         case .char(let c):
             return handleChar(c, pasteboard: pasteboard)
+        case .redo:
+            return .none   // intercepted in handle(); unreachable here
         }
     }
 
@@ -259,6 +307,8 @@ struct VimEngine {
     // MARK: - insert entries (o/O create lines; the rest position the caret)
 
     private mutating func enterInsert(_ c: Character) -> Bool {
+        guard "iaIAoO".contains(c) else { return false }
+        snapshot()   // one undo point covers the whole insert session
         switch c {
         case "i": mode = .insert
         case "a":
@@ -304,10 +354,15 @@ struct VimEngine {
             mode = .visualLine(anchor: cursor)
             resetPrefixes()
             return .none
+        case "u":
+            if case .normal = mode { undo() }   // redo is ⌃r (VimInput.redo)
+            resetPrefixes()
+            return .none
         case "x":
             defer { resetPrefixes() }
             let e = lineEnd(cursor)
             guard cursor < e else { return .none }
+            snapshot()
             chars.remove(at: cursor)
             clampToLine()
             return .none
@@ -329,6 +384,7 @@ struct VimEngine {
 
     /// dd / yy / cc.
     private mutating func applyLinewise(_ op: Character) -> VimEffect {
+        if op != "y" { snapshot() }
         let s = lineStart(cursor)
         var e = lineEnd(cursor)
         let line = String(chars[s..<e])
@@ -363,6 +419,7 @@ struct VimEngine {
     private mutating func applyOperator(to motion: MotionKind) -> VimEffect {
         guard let op = pending else { return .none }
         pending = nil
+        if op != "y" { snapshot() }
         switch motion {
         case .charwise(let to, let inclusive):
             var lo = min(cursor, to)
@@ -409,6 +466,7 @@ struct VimEngine {
     }
 
     private mutating func applyVisual(_ op: Character, anchor: Int) -> VimEffect {
+        if op != "y" { snapshot() }
         let lo = min(anchor, cursor)
         let hi = min(max(anchor, cursor) + 1, chars.count)   // inclusive
         let cut = String(chars[lo..<hi])
@@ -433,6 +491,7 @@ struct VimEngine {
 
     /// V-mode d/x/y/c over whole lines from the anchor's line to the cursor's.
     private mutating func applyVisualLine(_ op: Character, anchor: Int) -> VimEffect {
+        if op != "y" { snapshot() }
         let starts = lineStarts()
         let lo = min(lineIndex(of: anchor), lineOfCursor())
         let hi = max(lineIndex(of: anchor), lineOfCursor())
@@ -462,6 +521,7 @@ struct VimEngine {
 
     private mutating func paste(before: Bool, pasteboard: () -> String?) -> VimEffect {
         guard let clip = pasteboard(), !clip.isEmpty else { return .none }
+        snapshot()
         if clip.hasSuffix("\n") {   // linewise: insert as a whole line
             if before {
                 let at = lineStart(cursor)
@@ -489,72 +549,23 @@ struct VimEngine {
         return .none
     }
 
-    // MARK: - preview: scroll-only navigation over the rendered text
+    // MARK: - preview: a pure read view — no cursor, no edits
 
+    /// Preview shows the rendered markdown and nothing else: the only keys it
+    /// honors are enter / esc, both dropping to NORMAL where editing, copying
+    /// and navigation live. Every other key is inert so the cursor never roams.
     private mutating func handlePreview(_ input: VimInput) -> VimEffect {
         switch input {
         case .escape:
             mode = .normal
             resetPrefixes()
-            return .none
-        case .tab, .shiftTab:
-            return .none
-        case .char(let c):
-            if let d = c.wholeNumberValue, c.isNumber,
-               (1...9).contains(d) || (d == 0 && count != nil) {
-                count = (count ?? 0) * 10 + d
-                return .none
-            }
-            if pendingG {
-                pendingG = false
-                if c == "g" { moveCursor(toLine: (count ?? 1) - 1) }
-                count = nil
-                return .none
-            }
-            switch c {
-            // Line-wise insert entries (the preview has no horizontal cursor):
-            // i -> line start, a/A -> line end, o/O -> a fresh line below/above.
-            case "i":
-                cursor = lineStart(cursor)
-                mode = .insert
-                resetPrefixes()
-                return .none
-            case "a", "A":
-                cursor = lineEnd(cursor)
-                mode = .insert
-                resetPrefixes()
-                return .none
-            case "o", "O":
-                mode = .normal
-                _ = enterInsert(c)
-                resetPrefixes()
-                return .none
-            case "\n", "\r":
-                mode = .normal
-                cursor = lineStart(cursor)
-                resetPrefixes()
-                return .none
-            case "g":
-                pendingG = true
-                return .none
-            case "j":
-                moveCursor(toLine: lineOfCursor() + max(count ?? 1, 1))
-            case "k":
-                moveCursor(toLine: lineOfCursor() - max(count ?? 1, 1))
-            case "G":
-                let starts = lineStarts()
-                moveCursor(toLine: count.map { min($0 - 1, starts.count - 1) }
-                                   ?? starts.count - 1)
-            case "z":
-                // zz: a doubled z centers the cursor line.
-                if pending == "z" { pending = nil; count = nil; return .scrollCenter }
-                pending = "z"
-                return .none
-            default: break
-            }
-            pending = nil
-            count = nil
-            return .none
+        case .char("\n"), .char("\r"):
+            mode = .normal
+            cursor = lineStart(cursor)
+            resetPrefixes()
+        default:
+            break
         }
+        return .none
     }
 }

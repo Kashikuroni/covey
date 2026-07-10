@@ -123,7 +123,6 @@ public final class AppModel {
     public private(set) var newSessionPrefillIssue: Int?
     /// Branch to prefill (create-session-in-branch from an issue).
     public private(set) var newSessionPrefillBranch: String?
-    public private(set) var promptsByName: [String: [String]] = [:]
     public private(set) var notes: [String: String] = [:]
     public private(set) var projectNotes: [String: String] = [:]
     public private(set) var projectNames: [String: String] = [:]
@@ -691,15 +690,6 @@ public final class AppModel {
         projectNames[dir] ?? projectDefaultName(dir)
     }
 
-    /// tmux.rs send_choice port: the digit plus Enter.
-    public func answerPrompt(_ n: Int, session: String? = nil) {
-        guard let target = session ?? selected,
-              let options = promptsByName[target], n >= 1, n <= options.count
-        else { return }
-        Task { try? await client.input(name: target, bytes: Array("\(n)\r".utf8)) }
-    }
-
-
     func apply(_ action: KeyAction) {
         switch action {
         case .selectNext: step(by: 1)
@@ -758,8 +748,6 @@ public final class AppModel {
         case .renameProject:
             inputMode = .normal
             if let root = inspectorRoot { modal = .renameProject(root) }
-        case .answerPrompt(let n):
-            answerPrompt(n)
         case .sendShiftTab:
             guard let selected else { return }
             Task { try? await client.input(name: selected, bytes: [0x1b, 0x5b, 0x5a]) }
@@ -966,6 +954,14 @@ public final class AppModel {
     /// lives in the inspector, so it shares `inspectorRoot`.
     public func sessionRootOfSelected() -> String? { inspectorRoot }
 
+    /// The working directory the inspector's issue browser and composer run
+    /// gh/git in: the selected session's dir (a worktree when it has one), else
+    /// the project root — so an explicitly selected project with no sessions
+    /// still lists issues instead of stranding the prior project's list.
+    public var inspectorDir: String? {
+        selectedSession()?.dir ?? inspectorRoot
+    }
+
     public func selectProject(_ root: String) async {
         await select(nil)
         // Re-check after the await: a concurrent removeProject must not let a
@@ -1148,7 +1144,6 @@ public final class AppModel {
             sessions.removeAll { $0.name == name }
             statusByName[name] = nil
             modelByName[name] = nil
-            promptsByName[name] = nil
             dropPaneState(name)
             if selected == name { selected = nil }
         case .exited(let name, _):
@@ -1162,15 +1157,12 @@ public final class AppModel {
             sessions.removeAll { $0.name == name }
             statusByName[name] = nil
             modelByName[name] = nil
-            promptsByName[name] = nil
             dropPaneState(name)
             if selected == name { selected = nil }
         case let .statusChanged(name, status):
             statusByName[name] = status
         case let .modelChanged(name, model):
             modelByName[name] = model
-        case let .promptChanged(name, options):
-            promptsByName[name] = options.isEmpty ? nil : options
         case let .gitChanged(name, git):
             if let i = sessions.firstIndex(where: { $0.name == name }) {
                 sessions[i].git = git

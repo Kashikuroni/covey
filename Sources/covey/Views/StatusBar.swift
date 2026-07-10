@@ -94,15 +94,10 @@ struct StatusBar: View {
         case .help: return [("any key", "closes")]
         case .normal:
             guard model.vimMode else { return [("⌘N", "new"), ("⌘F", "filter")] }
-            var base: [(String, String)] = [
+            return [
                 ("n", "new"), ("r", "recent"), ("enter", "attach"), ("d", "kill"),
                 ("space", "menu"), ("/", "filter"), ("?", "help"),
             ]
-            if let selected = model.selected,
-               !(model.promptsByName[selected] ?? []).isEmpty {
-                base.append(("1-9", "answer"))
-            }
-            return base
         }
     }
 

@@ -9,6 +9,64 @@ enum InputMode: Equatable {
 
 enum LeaderMenu: Equatable { case root, git, session, terminal, ui, project }
 
+/// One line of the which-key panel — pure data so it lives next to the router
+/// (the single source of truth for the leader tree) and the view just draws it.
+struct LeaderRow: Equatable {
+    let key: String
+    let label: String
+    let implemented: Bool
+}
+
+extension LeaderMenu {
+    /// The rows the which-key panel shows for this menu. Kept beside
+    /// `routeLeader` so a chord and its visible row never drift apart.
+    var rows: [LeaderRow] {
+        switch self {
+        case .root: return [
+            LeaderRow(key: "g", label: "git — issue · list · promote · delete branch · cleanup · return", implemented: true),
+            LeaderRow(key: "s", label: "session — rename · restart · verify · nvim", implemented: true),
+            LeaderRow(key: "t", label: "terminal — split v · split h · close", implemented: true),
+            LeaderRow(key: "u", label: "ui — session list · inspector · footer · header · theme · split", implemented: true),
+            LeaderRow(key: "p", label: "project — add · remove", implemented: true),
+        ]
+        case .git: return [
+            LeaderRow(key: "i", label: "create github issue", implemented: true),
+            LeaderRow(key: "l", label: "list issues", implemented: true),
+            LeaderRow(key: "p", label: "promote worktree to root", implemented: true),
+            LeaderRow(key: "b", label: "delete session branch", implemented: true),
+            LeaderRow(key: "c", label: "cleanup merged branches", implemented: true),
+            LeaderRow(key: "r", label: "return to repo root", implemented: true),
+        ]
+        case .session: return [
+            LeaderRow(key: "r", label: "rename session", implemented: true),
+            LeaderRow(key: "R", label: "rename project", implemented: true),
+            LeaderRow(key: "u", label: "restart session", implemented: true),
+            LeaderRow(key: "U", label: "restart all claude sessions", implemented: true),
+            LeaderRow(key: "v", label: "verify / cancel (later)", implemented: false),
+            LeaderRow(key: "V", label: "verification details (later)", implemented: false),
+            LeaderRow(key: "e", label: "nvim in agent dir (later)", implemented: false),
+        ]
+        case .terminal: return [
+            LeaderRow(key: "v", label: "vertical split — shell beside agent", implemented: true),
+            LeaderRow(key: "h", label: "horizontal split — shell below agent", implemented: true),
+            LeaderRow(key: "x", label: "close split", implemented: true),
+        ]
+        case .ui: return [
+            LeaderRow(key: "s", label: "toggle session list", implemented: true),
+            LeaderRow(key: "i", label: "toggle inspector", implemented: true),
+            LeaderRow(key: "f", label: "toggle footer", implemented: true),
+            LeaderRow(key: "h", label: "toggle header", implemented: true),
+            LeaderRow(key: "t", label: "toggle dark / light theme", implemented: true),
+            LeaderRow(key: "v", label: "inspector tabs / split", implemented: true),
+        ]
+        case .project: return [
+            LeaderRow(key: "a", label: "add project — folder picker", implemented: true),
+            LeaderRow(key: "d", label: "remove project — notes survive", implemented: true),
+        ]
+        }
+    }
+}
+
 /// Non-character keys the router cares about.
 enum Special: Equatable {
     case escape, enter, tab, backspace, up, down, left, right, pageUp, pageDown, end
@@ -43,7 +101,6 @@ enum KeyAction: Equatable {
     case showHelp
     case openProjectNote
     case renameProject
-    case answerPrompt(Int)
     case sendShiftTab
     case promoteSelected
     case deleteBranchSelected
@@ -185,9 +242,6 @@ enum KeyRouter {
         case "}": return .resizeSplit(8)
         case "?": return .showHelp
         default:
-            if let n = ch?.wholeNumberValue, (1...9).contains(n) {
-                return .answerPrompt(n)
-            }
             return nil
         }
     }

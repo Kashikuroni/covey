@@ -100,6 +100,18 @@ final class KeyRouterTests: XCTestCase {
         XCTAssertEqual(KeyRouter.route(key("r"), context: git), .returnToRoot)
     }
 
+    func testRootMenuShowsEveryDescendKey() {
+        // The which-key panel must list every root key that opens a submenu —
+        // a chord that routes but has no visible row is invisible to the user.
+        let root = ctx(mode: .leader(.root))
+        let rowKeys = Set(LeaderMenu.root.rows.map(\.key))
+        for ch in "abcdefghijklmnopqrstuvwxyz" {
+            guard case .leaderDescend = KeyRouter.route(key(ch), context: root) else { continue }
+            XCTAssertTrue(rowKeys.contains(String(ch)),
+                          "space \(ch) descends into a submenu but has no row in the panel")
+        }
+    }
+
     func testSelectSessionMode() {
         let sel = ctx(mode: .selectSession)
         XCTAssertEqual(KeyRouter.route(key("1"), context: sel), .selectByNumber(1))
@@ -213,10 +225,10 @@ final class KeyRouterTests: XCTestCase {
         XCTAssertNil(KeyRouter.route(key("r"), context: ctx(focus: .terminal)))
     }
 
-    func testPromptAnswerAndShiftTab() {
-        XCTAssertEqual(KeyRouter.route(key("1"), context: ctx()), .answerPrompt(1))
-        XCTAssertEqual(KeyRouter.route(key("9"), context: ctx()), .answerPrompt(9))
-        XCTAssertNil(KeyRouter.route(key("0"), context: ctx()))
+    func testDigitsUnboundAndShiftTab() {
+        // Answers feature removed: digits no longer answer a card prompt.
+        XCTAssertNil(KeyRouter.route(key("1"), context: ctx()), "digits unbound in normal now")
+        XCTAssertNil(KeyRouter.route(key("9"), context: ctx()))
         XCTAssertNil(KeyRouter.route(key("i"), context: ctx()), "no reply composer: terminal is live")
         XCTAssertEqual(KeyRouter.route(.init(char: nil, isShift: true, special: .tab),
                                        context: ctx()), .sendShiftTab)

@@ -7,8 +7,6 @@ import CoveyKit
 public final class StatusMonitor {
     /// Fires only when a session's status differs from the previous tick.
     public var onStatusChanged: ((String, Status) -> Void)?
-    /// Fires when a session's detected prompt options change (empty = gone).
-    public var onPromptChanged: ((String, [String]) -> Void)?
 
     private let snapshot: () -> [String: String]
     private let interval: TimeInterval
@@ -19,7 +17,7 @@ public final class StatusMonitor {
     private var prevPrompt: [String: [String]] = [:]
     /// Consecutive ticks a live prompt has parsed empty. A single empty frame
     /// is a transient repaint (Claude redraws its boxed prompt mid-render);
-    /// only clear the card buttons once the prompt is gone for `clearGrace`
+    /// only drop the `.waiting` status once the prompt is gone for `clearGrace`
     /// ticks in a row.
     private var emptyStreak: [String: Int] = [:]
     private let clearGrace = 2
@@ -66,8 +64,8 @@ public final class StatusMonitor {
             let hash = StatusInference.contentHash(content)
             let parsed = StatusInference.parsePrompt(content)
             // Debounce a flicker to empty: hold the previous prompt for a few
-            // ticks so a single garbled repaint frame does not drop the card
-            // buttons. A genuinely answered prompt clears after `clearGrace`.
+            // ticks so a single garbled repaint frame does not flip `.waiting`
+            // off. A genuinely answered prompt clears after `clearGrace`.
             var prompt = parsed
             let prev = prevPrompt[name] ?? []
             if parsed.isEmpty && !prev.isEmpty {
@@ -93,13 +91,6 @@ public final class StatusMonitor {
             if prevStatus[name] != status {
                 onStatusChanged?(name, status)
             }
-            if prev != prompt {
-                onPromptChanged?(name, prompt)
-            }
-        }
-        // Sessions that vanished while showing a prompt must clear it.
-        for (name, options) in prevPrompt where newPrompt[name] == nil && !options.isEmpty {
-            onPromptChanged?(name, [])
         }
         // Replacing the maps wholesale prunes removed sessions.
         prevHash = newHash

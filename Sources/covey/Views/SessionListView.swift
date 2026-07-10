@@ -179,33 +179,23 @@ struct SessionListView: View {
                     }
                 }
             }
-            if let options = model.promptsByName[session.name], !options.isEmpty {
-                HStack(spacing: 6) {
-                    ForEach(Array(options.prefix(9).enumerated()), id: \.offset) { idx, label in
-                        Button("\(idx + 1) \(label)") {
-                            Task { await model.select(session.name) }
-                            model.answerPrompt(idx + 1, session: session.name)
-                        }
-                        .buttonStyle(.glass)
-                        .controlSize(.mini)
-                        .lineLimit(1)
-                    }
-                }
-                }
         }
         .padding(EdgeInsets(top: 7, leading: 11, bottom: 8, trailing: 11))
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(selected ? tk.cardHover : tk.card,
                     in: RoundedRectangle(cornerRadius: Tokens.r))
         .overlay(
+            // Active session: the same hairline border, just recolored accent
+            // (a fill would hurt legibility).
             RoundedRectangle(cornerRadius: Tokens.r)
-                .strokeBorder(selected ? tk.bd3 : tk.bd))
+                .strokeBorder(selected ? tk.accent : tk.bd))
         .overlay(alignment: .leading) {
-            // The amux status stripe: selection wins, then waiting.
+            // The amux status stripe: selection (accent) wins, then waiting.
             RoundedRectangle(cornerRadius: 1)
-                .fill(selected ? tk.t1 : (status == .waiting ? tk.wait : .clear))
+                .fill(selected ? tk.accent : (status == .waiting ? tk.wait : .clear))
                 .frame(width: 2)
                 .padding(.vertical, 8)
+                .padding(.leading, 3)   // gap from the border, don't merge into it
         }
         .shadow(color: tk.shadowColor, radius: Tokens.shadowRadius, y: Tokens.shadowY)
     }

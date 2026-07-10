@@ -8,19 +8,26 @@ struct InspectorView: View {
     private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
 
     var body: some View {
-        VStack(spacing: 0) {
+        // Observe the selected session's project root HERE: without this read
+        // the inspector only rebuilt its panes on a `focus` change, so a
+        // cross-project session switch left Note and the issue list showing the
+        // old project until a click. Reading `root` makes this view re-run when
+        // the project changes, which re-drives both panes; `.id(root)` remounts
+        // Note with a fresh editor so its NSTextView can't keep stale text.
+        let root = model.inspectorRoot
+        return VStack(spacing: 0) {
             if model.inspectorSplit {
                 // Split shows both panes — a shared tab row would lie about
                 // what a click does. Each pane carries its own zone header.
                 paneHeader("Note", badge: 3, tab: .note)
-                NotePane(model: model)
+                NotePane(model: model).id(root)
                 Divider()
                 paneHeader("Issue", badge: 4, tab: .issue)
                 IssueBrowserPane(model: model)
             } else {
                 tabsHeader
                 if model.inspectorTab == .note {
-                    NotePane(model: model)
+                    NotePane(model: model).id(root)
                 } else {
                     IssueBrowserPane(model: model)
                 }

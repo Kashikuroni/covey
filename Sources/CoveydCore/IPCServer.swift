@@ -29,9 +29,6 @@ public final class IPCServer {
         monitor.onStatusChanged = { [weak self] name, status in
             self?.broadcast(.event(.statusChanged(name: name, status: status)))
         }
-        monitor.onPromptChanged = { [weak self] name, options in
-            self?.broadcast(.event(.promptChanged(name: name, options: options)))
-        }
         registry.onSessionAdded = { [weak self] s in
             self?.broadcast(.event(.sessionAdded(session: s)))
         }

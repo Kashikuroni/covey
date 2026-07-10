@@ -16,6 +16,9 @@ final class ProjectRegistrationTests: XCTestCase {
         XCTAssertEqual(model.projects, ["/repo/x"])
         XCTAssertNil(model.selected)
         XCTAssertEqual(model.inspectorRoot, "/repo/x")
+        // No session: the issue browser must still get a dir to run gh in —
+        // the project root itself — else it shows the prior project's issues.
+        XCTAssertEqual(model.inspectorDir, "/repo/x")
         model.addProject("/repo/x")            // duplicate: no second entry
         XCTAssertEqual(model.projects, ["/repo/x"])
     }
@@ -35,6 +38,7 @@ final class ProjectRegistrationTests: XCTestCase {
         XCTAssertNil(model.selectedProjectRoot, "session selection clears the ghost")
         XCTAssertEqual(model.selected, "s1")
         XCTAssertEqual(model.inspectorRoot, "/tmp")
+        XCTAssertEqual(model.inspectorDir, "/tmp")   // session selected: its dir
         daemon.registry.kill(name: "s1")
     }
 

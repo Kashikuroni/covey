@@ -358,33 +358,6 @@ final class AppModelChromeTests: XCTestCase {
     }
 
     @MainActor
-    func testPromptEventsAndAnswer() async throws {
-        let daemon = try TestDaemon(); defer { daemon.stop() }
-        let (model, _) = try makeModel(daemon)
-        await model.start()
-        // A shell session that renders a numbered menu and then echoes input.
-        _ = try daemon.registry.create(
-            dir: "/tmp", agent: "sh",
-            argv: ["/bin/sh", "-c", "printf 'pick:\\n  1. yes\\n  2. no\\n'; exec cat"],
-            name: "menu")
-        await model.reconnect()
-        _ = await eventually { model.sessions.count == 1 }
-        _ = await eventually {
-            daemon.monitor.tick()
-            return model.promptsByName["menu"] == ["yes", "no"]
-        }
-        await model.select("menu")
-        model.apply(.answerPrompt(2))
-        _ = await eventually {
-            let bf = daemon.registry.backfill(name: "menu", since: 0)
-            return bf.map { String(decoding: $0.bytes, as: UTF8.self).contains("2") } ?? false
-        }
-        daemon.registry.kill(name: "menu")
-        _ = await eventually { model.sessions.isEmpty }
-        XCTAssertNil(model.promptsByName["menu"], "kill clears the prompt")
-    }
-
-    @MainActor
     func testCreateIssueOpensInspectorIssueTab() async throws {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)

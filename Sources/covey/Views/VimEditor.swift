@@ -85,13 +85,14 @@ struct VimEditor: View {
     private var modeHints: [(String, String)] {
         switch box.badge {
         case "PREVIEW":
-            return [("i / a / o", "edit"), ("enter", "normal"), ("j/k", "scroll")]
+            return [("enter", "normal")]
         case "INSERT":
             return [("esc", "normal")]
         case "VISUAL", "V-LINE":
             return [("y / d / c", "yank · del · change"), ("esc", "normal")]
         default:   // NORMAL
-            return [("i", "insert"), ("v / V", "visual · line"), ("gp", "preview")]
+            return [("i", "insert"), ("v / V", "visual · line"),
+                    ("u / ⌃r", "undo · redo"), ("gp", "preview")]
         }
     }
 
@@ -323,6 +324,17 @@ private final class VimNSTextView: NSTextView {
 
     override func keyDown(with event: NSEvent) {
         guard let box, let coordinator else { return super.keyDown(with: event) }
+        // Vim redo (⌃R) — caught before the general ⌘/⌃ passthrough. `u` (undo)
+        // is a plain NORMAL key and flows through the engine path below.
+        // Match by keyCode: ⌃R's charactersIgnoringModifiers is the DC2 control
+        // char, not "r", so a string compare would silently miss.
+        if box.engine.mode == .normal,
+           event.modifierFlags.contains(.control),
+           event.keyCode == 15 {   // kVK_ANSI_R
+            _ = box.handle(.redo)
+            coordinator.sync(into: self)
+            return
+        }
         // ⌘/⌃-chords belong to the app (zone cycling, form shortcuts).
         if !event.modifierFlags.intersection([.command, .control]).isEmpty {
             return super.keyDown(with: event)
@@ -344,8 +356,16 @@ private final class VimNSTextView: NSTextView {
             moveByDisplayLine(down: input == .char("j"))
             return
         }
-        // Before a normal/visual key make sure the engine sees the caret.
-        box.engine.syncFromView(text: string, cursor: selectedRange().location)
+        // Before a normal/visual key make sure the engine sees the caret —
+        // EXCEPT in V-LINE. There the selection spans whole lines and its
+        // `.location` is the block TOP; adopting it would collapse the moving
+        // end onto the top row, so j/k stall the moment a line wraps (the
+        // wrapped continuation is one logical line the engine already spans).
+        // In V-LINE the engine's own cursor is the moving end — leave it.
+        switch box.engine.mode {
+        case .visualLine: break
+        default: box.engine.syncFromView(text: string, cursor: selectedRange().location)
+        }
         if let forward = box.handle(input) {
             coordinator.onSwitchField(forward)
             return
@@ -498,13 +518,6 @@ private struct VimPreview: View {
                             Spacer(minLength: 0)
                         }
                         .padding(.trailing, 4)
-                        .background(idx == box.engine.lineOfCursor()
-                                    ? tk.accent.opacity(0.12) : .clear)
-                        .overlay(alignment: .leading) {
-                            if idx == box.engine.lineOfCursor() {
-                                Rectangle().fill(tk.accent).frame(width: 2)
-                            }
-                        }
                         .id(idx)
                     }
                 }
