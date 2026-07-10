@@ -166,20 +166,23 @@ func blend(_ rgb: UInt32, toward target: UInt32, _ t: Double) -> UInt32 {
     return (chan(16) << 16) | (chan(8) << 8) | chan(0)
 }
 
-/// Colors for a GitHub label chip: the dot uses the raw label color; the text
-/// is nudged toward the theme foreground when the raw color is too low-contrast
-/// on the card (pale label on light, near-black on dark). nil when the hex is
-/// empty/invalid so the caller can fall back to a neutral token.
+/// How far a label color is pulled toward the theme foreground: 0 keeps the raw
+/// GitHub color, 1 replaces it with the theme text color. Tune here.
+let labelThemeBlend = 0.4
+
+/// Colors for a GitHub label chip, pulled toward the theme so raw GitHub hues
+/// settle into the ayu palette instead of clashing on the card. Both the dot and
+/// the text blend `labelThemeBlend` of the way toward the theme foreground
+/// (Tokens.t1 base): the hue survives, the loudness drops into ayu's matte tone,
+/// and low-contrast labels (pale on light, near-black on dark) get lifted toward
+/// the readable end for free. nil when the hex is empty/invalid so the caller can
+/// fall back to a neutral token.
 func labelChipColors(hex: String, darkTheme: Bool) -> (dot: UInt32, text: UInt32)? {
     guard let rgb = parseHexColor(hex) else { return nil }
-    let lum = relativeLuminance(rgb)
-    var text = rgb
-    if darkTheme {
-        if lum < 0.22 { text = blend(rgb, toward: 0xFFFFFF, 0.55) }
-    } else {
-        if lum > 0.72 { text = blend(rgb, toward: 0x000000, 0.45) }
-    }
-    return (dot: rgb, text: text)
+    // Theme foreground — keep in sync with Tokens.dark/.light `t1`.
+    let fg: UInt32 = darkTheme ? 0xCCCAC2 : 0x5C6166
+    let themed = blend(rgb, toward: fg, labelThemeBlend)
+    return (dot: themed, text: themed)
 }
 
 /// The card's description block: the whole body, edge-trimmed, or nil when

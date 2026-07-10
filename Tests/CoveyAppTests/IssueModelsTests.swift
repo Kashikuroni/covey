@@ -136,27 +136,28 @@ final class IssueModelsTests: XCTestCase {
         XCTAssertNil(labelChipColors(hex: "xyz", darkTheme: true))
     }
 
-    func testLabelChipColorsMidColorUnchanged() {
-        // A mid-luminance label ("d73a4a") stays as-is in light theme.
-        let c = labelChipColors(hex: "d73a4a", darkTheme: false)
-        XCTAssertEqual(c?.dot, 0xD73A4A)
-        XCTAssertEqual(c?.text, 0xD73A4A)
+    func testLabelChipColorsBlendedTowardForeground() {
+        // Every label is pulled toward the theme foreground: dot and text share
+        // the themed color, no longer the raw GitHub hex.
+        let c = try! XCTUnwrap(labelChipColors(hex: "d73a4a", darkTheme: false))
+        XCTAssertEqual(c.dot, c.text)                              // unified
+        XCTAssertNotEqual(c.dot, 0xD73A4A)                         // moved off raw
+        XCTAssertEqual(c.dot, blend(0xD73A4A, toward: 0x5C6166, labelThemeBlend))
     }
 
-    func testLabelChipColorsPaleDarkenedOnLight() {
-        // A near-white label ("ededed") keeps its dot but darkens its text on
-        // the light card so it stays readable.
+    func testLabelChipColorsPaleDarkenedTowardForegroundOnLight() {
+        // A near-white label ("ededed") darkens toward the light-theme fg so it
+        // stays readable on the light card.
         let c = try! XCTUnwrap(labelChipColors(hex: "ededed", darkTheme: false))
-        XCTAssertEqual(c.dot, 0xEDEDED)
-        XCTAssertNotEqual(c.text, c.dot)
-        XCTAssertLessThan(relativeLuminance(c.text), relativeLuminance(c.dot))
+        XCTAssertEqual(c.dot, c.text)
+        XCTAssertLessThan(relativeLuminance(c.text), relativeLuminance(0xEDEDED))
     }
 
-    func testLabelChipColorsDarkLabelLiftedOnDark() {
-        // A near-black label lifts toward white on the mirage card.
+    func testLabelChipColorsDarkLabelLiftedTowardForegroundOnDark() {
+        // A near-black label lifts toward the mirage fg so it does not vanish.
         let c = try! XCTUnwrap(labelChipColors(hex: "0a0a0a", darkTheme: true))
-        XCTAssertEqual(c.dot, 0x0A0A0A)
-        XCTAssertGreaterThan(relativeLuminance(c.text), relativeLuminance(c.dot))
+        XCTAssertEqual(c.dot, c.text)
+        XCTAssertGreaterThan(relativeLuminance(c.text), relativeLuminance(0x0A0A0A))
     }
 
     func testIssueDescription() {
