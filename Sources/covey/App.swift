@@ -8,6 +8,13 @@ struct CoveyApp: App {
     @State private var startupError: String?
 
     init() {
+        // Hold-to-repeat for movement keys (holding j/k to scroll in nvim/less):
+        // macOS press-and-hold otherwise swallows repeat key-downs for keys with
+        // no accent variant (j/k/h/l), so a held key fires exactly once. Every
+        // terminal disables it. Must be set() not register(): the input system
+        // reads this via CFPreferencesCopyAppValue, which never consults the
+        // registration domain — so a registered default has no effect here.
+        UserDefaults.standard.set(false, forKey: "ApplePressAndHoldEnabled")
         // SwiftPM executables launch as accessory processes; become a real app.
         NSApplication.shared.setActivationPolicy(.regular)
     }
