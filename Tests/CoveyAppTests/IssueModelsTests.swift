@@ -121,4 +121,54 @@ final class IssueModelsTests: XCTestCase {
         XCTAssertNil(bodyPreview(""))
         XCTAssertNil(bodyPreview("   \n \n"))
     }
+
+    func testParseHexColor() {
+        XCTAssertEqual(parseHexColor("d73a4a"), 0xD73A4A)
+        XCTAssertEqual(parseHexColor("#FFFFFF"), 0xFFFFFF)
+        XCTAssertEqual(parseHexColor("000000"), 0x000000)
+        XCTAssertNil(parseHexColor(""))
+        XCTAssertNil(parseHexColor("fff"))       // wrong length
+        XCTAssertNil(parseHexColor("zzzzzz"))    // non-hex
+    }
+
+    func testLabelChipColorsInvalid() {
+        XCTAssertNil(labelChipColors(hex: "", darkTheme: false))
+        XCTAssertNil(labelChipColors(hex: "xyz", darkTheme: true))
+    }
+
+    func testLabelChipColorsMidColorUnchanged() {
+        // A mid-luminance label ("d73a4a") stays as-is in light theme.
+        let c = labelChipColors(hex: "d73a4a", darkTheme: false)
+        XCTAssertEqual(c?.dot, 0xD73A4A)
+        XCTAssertEqual(c?.text, 0xD73A4A)
+    }
+
+    func testLabelChipColorsPaleDarkenedOnLight() {
+        // A near-white label ("ededed") keeps its dot but darkens its text on
+        // the light card so it stays readable.
+        let c = try! XCTUnwrap(labelChipColors(hex: "ededed", darkTheme: false))
+        XCTAssertEqual(c.dot, 0xEDEDED)
+        XCTAssertNotEqual(c.text, c.dot)
+        XCTAssertLessThan(relativeLuminance(c.text), relativeLuminance(c.dot))
+    }
+
+    func testLabelChipColorsDarkLabelLiftedOnDark() {
+        // A near-black label lifts toward white on the mirage card.
+        let c = try! XCTUnwrap(labelChipColors(hex: "0a0a0a", darkTheme: true))
+        XCTAssertEqual(c.dot, 0x0A0A0A)
+        XCTAssertGreaterThan(relativeLuminance(c.text), relativeLuminance(c.dot))
+    }
+
+    func testIssueDescription() {
+        XCTAssertEqual(issueDescription("  hello\nworld \n"), "hello\nworld")
+        XCTAssertNil(issueDescription("   \n\n "))
+        XCTAssertNil(issueDescription(""))
+    }
+
+    func testIssueWipHasDiff() {
+        XCTAssertFalse(IssueWip().hasDiff)
+        XCTAssertTrue(IssueWip(added: 5).hasDiff)
+        XCTAssertTrue(IssueWip(removed: 3).hasDiff)
+        XCTAssertFalse(IssueWip(added: 0, removed: 0).hasDiff)
+    }
 }

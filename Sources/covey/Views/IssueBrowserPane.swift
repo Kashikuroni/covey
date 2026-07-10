@@ -237,7 +237,7 @@ struct IssueBrowserPane: View {
     private var rows: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(spacing: 4) {
+                VStack(spacing: 9) {
                     ForEach(browser.visible(), id: \.number) { issue in
                         row(issue)
                             .id(issue.number)
@@ -277,9 +277,11 @@ struct IssueBrowserPane: View {
             sessionTint: session.map {
                 sessionStatusTint(model.statusByName[$0.name] ?? .idle, tk: tk)
             },
-            branch: browser.localBranches.first {
+            branch: session?.git?.branch ?? browser.localBranches.first {
                 branchMatchesIssue($0, number: issue.number)
             },
+            added: session?.git?.added,
+            removed: session?.git?.removed,
             prNumber: issue.linkedPRs.first?.number)
     }
 

@@ -139,3 +139,52 @@ func bodyPreview(_ body: String) -> String? {
         .map { $0.trimmingCharacters(in: .whitespaces) }
         .first { !$0.isEmpty }
 }
+
+/// Parses a 6-digit GitHub label hex ("d73a4a" or "#d73a4a") to 0xRRGGBB.
+/// nil for empty/wrong-length/non-hex input.
+func parseHexColor(_ s: String) -> UInt32? {
+    let hex = s.hasPrefix("#") ? String(s.dropFirst()) : s
+    guard hex.count == 6, let v = UInt32(hex, radix: 16) else { return nil }
+    return v
+}
+
+/// Perceptual (sRGB-weighted) luminance of 0xRRGGBB, 0…1.
+func relativeLuminance(_ rgb: UInt32) -> Double {
+    let r = Double((rgb >> 16) & 0xFF) / 255
+    let g = Double((rgb >> 8) & 0xFF) / 255
+    let b = Double(rgb & 0xFF) / 255
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/// Linear per-channel blend of `rgb` toward `target` by fraction t (0…1).
+func blend(_ rgb: UInt32, toward target: UInt32, _ t: Double) -> UInt32 {
+    func chan(_ shift: UInt32) -> UInt32 {
+        let a = Double((rgb >> shift) & 0xFF)
+        let b = Double((target >> shift) & 0xFF)
+        return UInt32((a + (b - a) * t).rounded())
+    }
+    return (chan(16) << 16) | (chan(8) << 8) | chan(0)
+}
+
+/// Colors for a GitHub label chip: the dot uses the raw label color; the text
+/// is nudged toward the theme foreground when the raw color is too low-contrast
+/// on the card (pale label on light, near-black on dark). nil when the hex is
+/// empty/invalid so the caller can fall back to a neutral token.
+func labelChipColors(hex: String, darkTheme: Bool) -> (dot: UInt32, text: UInt32)? {
+    guard let rgb = parseHexColor(hex) else { return nil }
+    let lum = relativeLuminance(rgb)
+    var text = rgb
+    if darkTheme {
+        if lum < 0.22 { text = blend(rgb, toward: 0xFFFFFF, 0.55) }
+    } else {
+        if lum > 0.72 { text = blend(rgb, toward: 0x000000, 0.45) }
+    }
+    return (dot: rgb, text: text)
+}
+
+/// The card's description block: the whole body, edge-trimmed, or nil when
+/// blank. (bodyPreview stays for first-line-only callers.)
+func issueDescription(_ body: String) -> String? {
+    let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
+}

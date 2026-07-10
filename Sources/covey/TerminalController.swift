@@ -56,6 +56,12 @@ struct TerminalRepresentable: NSViewRepresentable {
         if let nerd = nerdFont(size: view.font.pointSize) {
             view.font = nerd
         }
+        // PROBE (sync-coalescing freeze): SwiftTerm defers a DECSET 2026 sync
+        // frame until `syncSequenceSettleMs` after the LAST block and cancels the
+        // render when the next block opens — so a continuous scroll (a stream of
+        // sync blocks) renders NOTHING until the gesture settles, then snaps to
+        // the destination. 0 = render each atomic frame immediately.
+        view.syncSequenceSettleMs = 0
         let model = self.model
         let name = self.name
         // Entering/leaving the alternate buffer invalidates any scrolled-up

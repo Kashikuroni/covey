@@ -18,6 +18,8 @@ struct Tokens {
     let shadowColor: Color
     // ayu common.accent — prominent buttons, tint
     let accent: Color
+    // which palette this is — lets color math (label contrast) adapt to theme
+    let isDark: Bool
 
     static let r: CGFloat = 6
     static let rSm: CGFloat = 4
@@ -34,7 +36,8 @@ struct Tokens {
                  bd: Color, bd2: Color, bd3: Color,
                  t1: Color, t2: Color, t3: Color, t4: Color,
                  run: Color, wait: Color, idle: Color, ok: Color, err: Color, warn: Color,
-                 diffAdd: Color, diffDel: Color, shadowColor: Color, accent: Color) {
+                 diffAdd: Color, diffDel: Color, shadowColor: Color, accent: Color,
+                 isDark: Bool) {
         self.bg = bg; self.surface = surface; self.surf2 = surf2
         self.surf3 = surf3; self.surf4 = surf4
         self.card = card; self.cardHover = cardHover; self.termBg = termBg
@@ -45,6 +48,7 @@ struct Tokens {
         self.diffAdd = diffAdd; self.diffDel = diffDel
         self.shadowColor = shadowColor
         self.accent = accent
+        self.isDark = isDark
     }
 
     static let dark = Tokens(
@@ -63,7 +67,8 @@ struct Tokens {
         err: Color(hex: 0xF27983), warn: Color(hex: 0xD9BE98),
         diffAdd: Color(hex: 0x87D96C), diffDel: Color(hex: 0xF27983),
         shadowColor: Color.black.opacity(0.2),
-        accent: Color(hex: 0xFFCC66))
+        accent: Color(hex: 0xFFCC66),
+        isDark: true)
 
     static let light = Tokens(
         bg: Color(hex: 0xEBEEF0), surface: Color(hex: 0xF8F9FA),
@@ -81,7 +86,8 @@ struct Tokens {
         err: Color(hex: 0xFF7383), warn: Color(hex: 0xE59645),
         diffAdd: Color(hex: 0x6CBF43), diffDel: Color(hex: 0xFF7383),
         shadowColor: Color(hex: 0x6B7D8F).opacity(0.1),
-        accent: Color(hex: 0xF29718))
+        accent: Color(hex: 0xF29718),
+        isDark: false)
 }
 
 extension Color {
