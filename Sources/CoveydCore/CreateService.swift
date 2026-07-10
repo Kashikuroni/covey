@@ -44,6 +44,7 @@ public enum CreateService {
             try GitOps.ensureGitignore(repo, entry: ".worktrees/")
             let path = wtFor(branch)
             try GitOps.prepareWorktree(repo: repo, wtPath: path, newBranch: branch, base: base)
+            GitOps.seedWorktreeIgnored(repo: repo, wtPath: path)
             return Prepared(finalDir: path, argv: argv, label: label,
                             worktreeRepo: repo, resumeCmd: resumeCmd)
         case .existing(let branch):
@@ -54,6 +55,7 @@ public enum CreateService {
             try GitOps.ensureGitignore(repo, entry: ".worktrees/")
             let path = wtFor(branch)
             try GitOps.prepareWorktreeExisting(repo: repo, wtPath: path, branch: branch)
+            GitOps.seedWorktreeIgnored(repo: repo, wtPath: path)
             return Prepared(finalDir: path, argv: argv, label: label,
                             worktreeRepo: repo, resumeCmd: resumeCmd)
         case .checkout(let branch):
