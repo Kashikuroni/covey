@@ -28,8 +28,10 @@ final class ProtocolTests: XCTestCase {
             .create(dir: "/work", agent: "claude", argv: nil, name: nil,
                     terminal: nil, worktree: .checkoutNew(branch: "feat", base: "main"),
                     model: nil, effort: nil, resume: nil, companionOf: nil),
-            .kill(name: "s-1", removeWorktree: nil),
-            .kill(name: "s-1", removeWorktree: true),
+            .kill(name: "s-1", removeWorktree: nil, deleteBranch: nil),
+            .kill(name: "s-1", removeWorktree: true, deleteBranch: nil),
+            .kill(name: "s-1", removeWorktree: true, deleteBranch: true),
+            .branchStatus(name: "s-1"),
             .restart(name: "s-1", dir: nil),
             .restart(name: "s-1", dir: "/repo"),
             .rename(name: "a", newName: "b"),
@@ -77,6 +79,7 @@ final class ProtocolTests: XCTestCase {
             .response(id: 7, result: .gitInfo(repoRoot: nil, currentBranch: nil,
                                               branches: [], worktrees: nil)),
             .response(id: 9, result: .branches(["feat", "fix"])),
+            .response(id: 10, result: .branchStatus(dirty: true, merged: false)),
             .response(id: 8, result: .session(Session(name: "r", dir: "/w", cwd: "/w",
                                                       agent: "claude", created: 2,
                                                       resumeCmd: "claude --resume u"))),
@@ -100,7 +103,7 @@ final class ProtocolTests: XCTestCase {
         )
         XCTAssertEqual(
             try line(
-                Request(id: 2, op: .kill(name: "s-1", removeWorktree: nil))
+                Request(id: 2, op: .kill(name: "s-1", removeWorktree: nil, deleteBranch: nil))
             ), #"{"id":2,"op":{"kill":{"name":"s-1"}}}"#
         )
         // nil optionals are omitted:

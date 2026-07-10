@@ -27,6 +27,7 @@ public final class SessionRegistry {
     private var lostMetas: [SessionMeta]
     private let onPersist: (([SessionMeta]) -> Void)?
     private var pendingWorktreeRemoval: [String: (repo: String, path: String)] = [:]
+    private var pendingBranchDeletion: [String: (repo: String, branch: String)] = [:]
 
     public init(clock: @escaping () -> Int64 = { Int64(time(nil)) },
                 persisted: [SessionMeta] = [],
@@ -174,6 +175,22 @@ public final class SessionRegistry {
         lock.unlock()
     }
 
+    /// Schedules `git branch -d` of the session's branch once its process
+    /// exits AND its worktree has been removed. Reads the branch by shelling
+    /// out — done outside the lock.
+    public func markBranchDeletion(name: String) {
+        lock.lock()
+        guard let entry = entries[name], let repo = entry.session.worktreeRepo else {
+            lock.unlock(); return
+        }
+        let dir = entry.session.dir
+        lock.unlock()
+        guard let branch = GitOps.currentBranch(dir) else { return }
+        lock.lock()
+        pendingBranchDeletion[name] = (repo: repo, branch: branch)
+        lock.unlock()
+    }
+
     public func list() -> [Session] {
         lock.lock(); defer { lock.unlock() }
         return entries.values.map(\.session)
@@ -308,11 +325,17 @@ public final class SessionRegistry {
         }
         entries[id] = nil
         let removal = pendingWorktreeRemoval.removeValue(forKey: id)
+        let branchDeletion = pendingBranchDeletion.removeValue(forKey: id)
         lock.unlock()
         persistNow()
         if let updated { onSessionAdded?(updated) }   // recents read the client cache
         if let removal {
             try? GitOps.removeWorktree(repo: removal.repo, wtPath: removal.path)
+        }
+        // Branch delete AFTER the worktree is removed — git refuses to delete a
+        // branch still checked out in a worktree.
+        if let branchDeletion {
+            try? GitOps.deleteBranch(repo: branchDeletion.repo, branch: branchDeletion.branch)
         }
         onExit?(id, code)
     }

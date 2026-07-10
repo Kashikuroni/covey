@@ -12,7 +12,7 @@ public struct Request: Codable, Equatable {
         case create(dir: String, agent: String, argv: [String]?, name: String?,
                     terminal: Bool?, worktree: WorktreeSpec?, model: String?,
                     effort: String?, resume: String?, companionOf: String?)
-        case kill(name: String, removeWorktree: Bool?)
+        case kill(name: String, removeWorktree: Bool?, deleteBranch: Bool?)
         // Kill the child and respawn it in place; `dir` overrides the respawn
         // directory (return-to-root). claude resumes, other agents rerun argv.
         case restart(name: String, dir: String?)
@@ -26,6 +26,7 @@ public struct Request: Codable, Equatable {
         case deleteBranch(dir: String, branch: String)
         case mergedBranches(dir: String)
         case cleanupBranches(dir: String, branches: [String])
+        case branchStatus(name: String)
         // SIGWINCH-kick the child into a full repaint (wheel-scroll of a TUI
         // leaves the alt buffer partially redrawn until the app repaints).
         case refresh(name: String)
@@ -47,6 +48,7 @@ public enum ServerMessage: Codable, Equatable{
         case gitInfo(repoRoot: String?, currentBranch: String?, branches: [String],
                      worktrees: [String: String]?)
         case branches([String])
+        case branchStatus(dirty: Bool, merged: Bool)
         case error(code: String, message: String)
     }
 }

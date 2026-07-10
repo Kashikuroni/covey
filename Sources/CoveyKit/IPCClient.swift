@@ -99,8 +99,10 @@ public final class IPCClient {
         throw IPCClientError.daemonError(code: "badResponse", message: "expected gitInfo")
     }
 
-    public func kill(name: String, removeWorktree: Bool? = nil) async throws {
-        try await expectOK(.kill(name: name, removeWorktree: removeWorktree))
+    public func kill(name: String, removeWorktree: Bool? = nil,
+                     deleteBranch: Bool? = nil) async throws {
+        try await expectOK(.kill(name: name, removeWorktree: removeWorktree,
+                                 deleteBranch: deleteBranch))
     }
 
     public func restart(name: String, dir: String? = nil) async throws {
@@ -124,6 +126,13 @@ public final class IPCClient {
             return list
         }
         throw IPCClientError.daemonError(code: "badResponse", message: "expected branches")
+    }
+
+    public func branchStatus(name: String) async throws -> (dirty: Bool, merged: Bool) {
+        if case let .branchStatus(dirty, merged) = try await request(.branchStatus(name: name)) {
+            return (dirty, merged)
+        }
+        throw IPCClientError.daemonError(code: "badResponse", message: "expected branchStatus")
     }
 
     public func cleanupBranches(dir: String, branches: [String]) async throws {
