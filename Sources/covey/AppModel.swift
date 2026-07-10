@@ -962,6 +962,14 @@ public final class AppModel {
     /// lives in the inspector, so it shares `inspectorRoot`.
     public func sessionRootOfSelected() -> String? { inspectorRoot }
 
+    /// The working directory the inspector's issue browser and composer run
+    /// gh/git in: the selected session's dir (a worktree when it has one), else
+    /// the project root — so an explicitly selected project with no sessions
+    /// still lists issues instead of stranding the prior project's list.
+    public var inspectorDir: String? {
+        selectedSession()?.dir ?? inspectorRoot
+    }
+
     public func selectProject(_ root: String) async {
         await select(nil)
         // Re-check after the await: a concurrent removeProject must not let a

@@ -20,9 +20,7 @@ struct IssuePane: View {
 
     private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
     private var root: String? { model.inspectorRoot }
-    private var dir: String? {
-        model.sessions.first { $0.name == model.selected }?.dir ?? model.selectedProjectRoot
-    }
+    private var dir: String? { model.inspectorDir }
 
     private var draft: IssueDraft {
         root.map { model.issueDraft(forRoot: $0) } ?? IssueDraft()
