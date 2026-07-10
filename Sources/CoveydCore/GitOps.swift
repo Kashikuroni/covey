@@ -119,6 +119,41 @@ public enum GitOps {
         try run(repo, ["worktree", "remove", "--force", wtPath])
     }
 
+    /// Regenerable dep/build directories never worth copying into a new
+    /// worktree (matched by basename). Everything else that git ignores is
+    /// seeded so the fresh tree can build.
+    public static let heavyIgnoredDirs: Set<String> = [
+        "node_modules", ".build", "build", "dist", "out", "target", ".next",
+        ".venv", "venv", "__pycache__", ".gradle", "DerivedData", "Pods",
+        ".turbo", ".cache", "coverage",
+    ]
+
+    /// Copies the repo's gitignored files into a freshly-added worktree so it
+    /// carries the build-critical files git left behind (.env, local configs).
+    /// Best-effort: enumeration or per-entry copy failures are swallowed — a
+    /// seeding hiccup must never abort session creation. Fully-ignored
+    /// directories are copied whole; `heavyIgnoredDirs` and covey's own
+    /// `.worktrees/`/`.git` are skipped.
+    public static func seedWorktreeIgnored(repo: String, wtPath: String) {
+        guard let out = try? run(repo, ["status", "--porcelain", "--ignored", "-z"],
+                                 readOnly: true)
+        else { return }
+        let fm = FileManager.default
+        for entry in out.split(separator: "\0", omittingEmptySubsequences: true) {
+            guard entry.hasPrefix("!! ") else { continue }   // ignored entries only
+            var rel = String(entry.dropFirst(3))
+            if rel.hasSuffix("/") { rel.removeLast() }        // dir entries collapse to "path/"
+            let first = rel.split(separator: "/").first.map(String.init) ?? rel
+            if first == ".worktrees" || first == ".git" { continue }
+            if heavyIgnoredDirs.contains((rel as NSString).lastPathComponent) { continue }
+            let src = "\(repo)/\(rel)"
+            let dst = "\(wtPath)/\(rel)"
+            try? fm.createDirectory(atPath: (dst as NSString).deletingLastPathComponent,
+                                    withIntermediateDirectories: true)
+            try? fm.copyItem(atPath: src, toPath: dst)
+        }
+    }
+
     /// Prunes vanished worktrees, then removes a non-empty orphan directory at
     /// the target path that git no longer tracks (an empty dir is left for git).
     private static func clearStaleWorktreePath(repo: String, wtPath: String) throws {
