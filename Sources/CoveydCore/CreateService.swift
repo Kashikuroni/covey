@@ -21,12 +21,14 @@ public enum CreateService {
         let (command, label, resumeCmd) = composeLaunch(spec: spec, uuid: uuid)
 
         let argv: [String]
-        if spec.terminal {
-            argv = [command]
-        } else {
+        switch command {
+        case .argv(let parts):
             // Resolve the first word to an absolute path (the daemon's PATH may
-            // be narrower than the shell that configured the agent).
-            argv = ["/bin/sh", "-c", resolveCommand(command)]
+            // be narrower than the shell that configured the agent). parts stay
+            // separate argv elements — never passes through a shell.
+            argv = resolveArgv(parts)
+        case .shellString(let s):
+            argv = ["/bin/sh", "-c", resolveCommand(s)]
         }
 
         guard let wt = spec.worktree else {
@@ -100,6 +102,18 @@ public enum CreateService {
               let path = GitOps.resolveAgentPath(bin)
         else { return command }
         return path + command.dropFirst(bin.count)
+    }
+
+    /// argv-only counterpart of resolveCommand: resolves parts[0] to an
+    /// absolute path when it's a bare name (no "/"); the rest of the array
+    /// is untouched and never passes through a shell.
+    private static func resolveArgv(_ parts: [String]) -> [String] {
+        guard let bin = parts.first, !bin.contains("/"),
+              let path = GitOps.resolveAgentPath(bin)
+        else { return parts }
+        var resolved = parts
+        resolved[0] = path
+        return resolved
     }
 
     private static func sameDir(_ a: String, _ b: String) -> Bool {

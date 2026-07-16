@@ -52,15 +52,16 @@ public func effortLevels(model: String?) -> [String] {
     }
 }
 
-/// The final command a create runs: the agent plus claude model/effort flags.
-public func composeAgentCommand(agent: String, model: String?, effort: String?) -> String {
-    var cmd = agent
-    if let model { cmd += " --model \(model)" }
-    if let effort { cmd += " --effort \(effort)" }
-    return cmd
+/// The two shapes a session launch can take. `.argv` execs directly — no
+/// shell ever parses it. `.shellString` goes through `/bin/sh -c` and must
+/// only ever be built from covey-generated content (see composeLaunch's
+/// resume branch), never from user-typed fields.
+public enum LaunchCommand: Equatable {
+    case argv([String])
+    case shellString(String)
 }
 
-/// argv form of composeAgentCommand: the agent (split on whitespace — the
+/// The final argv a create runs: the agent (split on whitespace — the
 /// custom-agent field is "binary + flags" only, never shell syntax) plus
 /// claude model/effort flags, each its own element. Never joined into a
 /// string that could be re-parsed by a shell.
@@ -75,22 +76,24 @@ public func composeAgentArgv(agent: String, model: String?, effort: String?) -> 
 /// pre-generated `uuid` (consumed only for plain `claude`). No path
 /// resolution — CreateService resolves the binary afterwards.
 public func composeLaunch(spec: CreateSpec, uuid: String?)
-    -> (command: String, label: String, resumeCmd: String?) {
+    -> (command: LaunchCommand, label: String, resumeCmd: String?) {
     if spec.terminal {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/sh"
-        return (shell, (shell as NSString).lastPathComponent, nil)
+        return (.argv([shell]), (shell as NSString).lastPathComponent, nil)
     }
     if let resume = spec.resume {
         // A relaunch runs the saved resume command (hardened, see below);
         // the SAVED command stays canonical so every relaunch re-wraps it.
-        return (resumeLaunchCommand(resume), spec.agent, resume)
+        // Every token here is covey-generated (a UUID), never user input —
+        // that's what makes the shell fallback (`||`) safe.
+        return (.shellString(resumeLaunchCommand(resume)), spec.agent, resume)
     }
-    let base = composeAgentCommand(agent: spec.agent, model: spec.model, effort: spec.effort)
+    let base = composeAgentArgv(agent: spec.agent, model: spec.model, effort: spec.effort)
     if spec.agent == "claude", let uuid {
         // Inject --session-id so the conversation is resumable from cold start.
-        return ("\(base) --session-id \(uuid)", spec.agent, "claude --resume \(uuid)")
+        return (.argv(base + ["--session-id", uuid]), spec.agent, "claude --resume \(uuid)")
     }
-    return (base, spec.agent, nil)
+    return (.argv(base), spec.agent, nil)
 }
 
 /// The command a relaunch actually runs. claude writes the conversation file

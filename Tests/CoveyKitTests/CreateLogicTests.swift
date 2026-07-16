@@ -9,14 +9,6 @@ final class CreateLogicTests: XCTestCase {
         XCTAssertEqual(effortLevels(model: nil), ["auto"])
     }
 
-    func testComposeAgentCommand() {
-        XCTAssertEqual(composeAgentCommand(agent: "claude", model: nil, effort: nil), "claude")
-        XCTAssertEqual(composeAgentCommand(agent: "claude", model: "opus", effort: nil),
-                       "claude --model opus")
-        XCTAssertEqual(composeAgentCommand(agent: "claude", model: "opus", effort: "max"),
-                       "claude --model opus --effort max")
-    }
-
     func testComposeAgentArgv() {
         XCTAssertEqual(composeAgentArgv(agent: "claude", model: nil, effort: nil), ["claude"])
         XCTAssertEqual(composeAgentArgv(agent: "claude", model: "opus", effort: nil),
@@ -46,15 +38,16 @@ final class CreateLogicTests: XCTestCase {
     func testComposeLaunchTerminalUsesShell() {
         let spec = CreateSpec(dir: "/w", agent: "claude", terminal: true)
         let (cmd, label, resume) = composeLaunch(spec: spec, uuid: "u-1")
-        XCTAssertEqual(cmd, ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/sh")
-        XCTAssertEqual(label, (cmd as NSString).lastPathComponent)
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/sh"
+        XCTAssertEqual(cmd, .argv([shell]))
+        XCTAssertEqual(label, (shell as NSString).lastPathComponent)
         XCTAssertNil(resume)
     }
 
     func testComposeLaunchClaudeInjectsSessionId() {
         let spec = CreateSpec(dir: "/w", agent: "claude", model: "opus")
         let (cmd, label, resume) = composeLaunch(spec: spec, uuid: "abc")
-        XCTAssertEqual(cmd, "claude --model opus --session-id abc")
+        XCTAssertEqual(cmd, .argv(["claude", "--model", "opus", "--session-id", "abc"]))
         XCTAssertEqual(label, "claude")
         XCTAssertEqual(resume, "claude --resume abc")
     }
@@ -63,9 +56,11 @@ final class CreateLogicTests: XCTestCase {
         // claude writes the conversation file only after the first message, so
         // resuming a never-used session dies with "No conversation found" —
         // the launch command falls back to a fresh claude with the SAME id.
+        // This whole string is covey-generated (the uuid), never user input,
+        // so it stays on the shell path (see LaunchCommand.shellString).
         let spec = CreateSpec(dir: "/w", agent: "claude", resume: "claude --resume abc")
         let (cmd, _, resume) = composeLaunch(spec: spec, uuid: nil)
-        XCTAssertEqual(cmd, "claude --resume abc || claude --session-id abc")
+        XCTAssertEqual(cmd, .shellString("claude --resume abc || claude --session-id abc"))
         XCTAssertEqual(resume, "claude --resume abc",
                        "the SAVED command stays canonical — re-wrapped at each relaunch")
     }
@@ -78,7 +73,7 @@ final class CreateLogicTests: XCTestCase {
     func testComposeLaunchNonClaudeHasNoResume() {
         let spec = CreateSpec(dir: "/w", agent: "codex")
         let (cmd, _, resume) = composeLaunch(spec: spec, uuid: "abc")
-        XCTAssertEqual(cmd, "codex")
+        XCTAssertEqual(cmd, .argv(["codex"]))
         XCTAssertNil(resume)
     }
 

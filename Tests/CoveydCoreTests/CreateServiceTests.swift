@@ -27,8 +27,7 @@ final class CreateServiceTests: XCTestCase {
     func testPlainAgentPrepared() throws {
         let p = try CreateService.prepare(CreateSpec(dir: "/tmp", agent: "sh"))
         XCTAssertEqual(p.finalDir, "/tmp")
-        XCTAssertEqual(Array(p.argv.prefix(2)), ["/bin/sh", "-c"])
-        XCTAssertEqual(p.argv.last, "/bin/sh")   // "sh" resolved to an absolute path
+        XCTAssertEqual(p.argv, ["/bin/sh"], "resolved to an absolute path, no shell wrapper")
         XCTAssertNil(p.worktreeRepo)
         XCTAssertNil(p.resumeCmd)
     }
@@ -41,9 +40,12 @@ final class CreateServiceTests: XCTestCase {
 
     func testClaudeGetsSessionIdAndResume() throws {
         let p = try CreateService.prepare(CreateSpec(dir: "/tmp", agent: "claude", model: "opus"))
-        let cmd = p.argv.last ?? ""
-        XCTAssertTrue(cmd.contains("--session-id "), cmd)
-        XCTAssertTrue(cmd.contains("--model opus"), cmd)
+        guard let modelIdx = p.argv.firstIndex(of: "--model"),
+              let sessionIdx = p.argv.firstIndex(of: "--session-id") else {
+            return XCTFail("missing flags in argv: \(p.argv)")
+        }
+        XCTAssertEqual(p.argv[modelIdx + 1], "opus")
+        XCTAssertFalse(p.argv[sessionIdx + 1].isEmpty, "a uuid follows --session-id")
         XCTAssertTrue(p.resumeCmd?.hasPrefix("claude --resume ") == true)
     }
 
