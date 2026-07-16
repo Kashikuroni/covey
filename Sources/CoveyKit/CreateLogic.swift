@@ -60,6 +60,17 @@ public func composeAgentCommand(agent: String, model: String?, effort: String?) 
     return cmd
 }
 
+/// argv form of composeAgentCommand: the agent (split on whitespace — the
+/// custom-agent field is "binary + flags" only, never shell syntax) plus
+/// claude model/effort flags, each its own element. Never joined into a
+/// string that could be re-parsed by a shell.
+public func composeAgentArgv(agent: String, model: String?, effort: String?) -> [String] {
+    var argv = agent.split(separator: " ").map(String.init)
+    if let model { argv += ["--model", model] }
+    if let effort { argv += ["--effort", effort] }
+    return argv
+}
+
 /// Assemble the `(command, label, resumeCmd)` a spec launches, given a
 /// pre-generated `uuid` (consumed only for plain `claude`). No path
 /// resolution — CreateService resolves the binary afterwards.
@@ -107,6 +118,14 @@ public func validateCreate(name: String, dir: String, existing: [String]) -> Str
         return "directory not found: \(expanded)"
     }
     return nil
+}
+
+/// Returns an error message, or nil when the agent field is valid. The
+/// argv-only launch path (composeAgentArgv) already removes the injection
+/// risk that used to exist here — this is UX parity with
+/// validateCreate/validateBranch, not a security control.
+public func validateAgent(_ agent: String) -> String? {
+    agent.trimmingCharacters(in: .whitespaces).isEmpty ? "agent name is empty" : nil
 }
 
 /// Validates a new worktree branch name before it becomes a filesystem path.

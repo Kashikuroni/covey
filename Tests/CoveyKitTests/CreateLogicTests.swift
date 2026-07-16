@@ -17,6 +17,32 @@ final class CreateLogicTests: XCTestCase {
                        "claude --model opus --effort max")
     }
 
+    func testComposeAgentArgv() {
+        XCTAssertEqual(composeAgentArgv(agent: "claude", model: nil, effort: nil), ["claude"])
+        XCTAssertEqual(composeAgentArgv(agent: "claude", model: "opus", effort: nil),
+                       ["claude", "--model", "opus"])
+        XCTAssertEqual(composeAgentArgv(agent: "claude", model: "opus", effort: "max"),
+                       ["claude", "--model", "opus", "--effort", "max"])
+        XCTAssertEqual(composeAgentArgv(agent: "my-wrapper --verbose", model: nil, effort: nil),
+                       ["my-wrapper", "--verbose"],
+                       "custom agent field is binary + flags, split on whitespace")
+    }
+
+    func testComposeAgentArgvDoesNotSplitInjectedShellMetacharacters() {
+        let argv = composeAgentArgv(agent: "claude; rm -rf ~", model: nil, effort: nil)
+        XCTAssertEqual(argv, ["claude;", "rm", "-rf", "~"])
+        XCTAssertTrue(argv[0].hasSuffix(";"),
+                      "the semicolon stays glued to the first token — there is no shell " +
+                      "to interpret it as a command separator, so execvp fails to resolve " +
+                      "a binary literally named 'claude;' instead of running a second command")
+    }
+
+    func testValidateAgent() {
+        XCTAssertNil(validateAgent("claude"))
+        XCTAssertNotNil(validateAgent(""))
+        XCTAssertNotNil(validateAgent("   "))
+    }
+
     func testComposeLaunchTerminalUsesShell() {
         let spec = CreateSpec(dir: "/w", agent: "claude", terminal: true)
         let (cmd, label, resume) = composeLaunch(spec: spec, uuid: "u-1")
