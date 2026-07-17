@@ -6,7 +6,7 @@ extension XCTestCase {
 
     /// Expectation that fulfills once the process's accumulated output
     /// contains `needle`.
-    func expectOutput(_ p: PTYProcess, contains needle: String) -> XCTestExpectation {
+    func expectOutput(_ p: PTYSessionRuntime, contains needle: String) -> XCTestExpectation {
         let exp = expectation(description: "output contains \(needle)")
         exp.assertForOverFulfill = false
         var collected = [UInt8]()
