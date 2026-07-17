@@ -5,9 +5,26 @@ public enum PTYError: Error {
     case spawnFailed(Int32)
 }
 
+/// The seam between SessionRegistry and however a session's process is
+/// actually run. PTYSessionRuntime is the only implementation today (a PTY
+/// via forkpty); this exists so SessionRegistry's PTY-lifecycle logic
+/// doesn't need to change shape when a non-PTY runtime is introduced later.
+public protocol SessionRuntime: AnyObject {
+    func setOutputHandler(_ handler: (([UInt8], Int) -> Void)?)
+    func setExitHandler(_ handler: ((Int32) -> Void)?)
+    func spawn(argv: [String], env: [String: String]?, cwd: String?,
+               cols: UInt16, rows: UInt16) throws
+    func write(_ bytes: [UInt8])
+    func resize(cols: UInt16, rows: UInt16)
+    func kick()
+    func kill()
+    func backfill(since seq: Int) -> (bytes: [UInt8], fromSeq: Int, gapped: Bool)
+    func scrollbackTail(_ maxBytes: Int) -> [UInt8]
+}
+
 /// Owns one child process running in its own PTY: spawn via forkpty, read output
 /// through a DispatchSource, write input, resize, kill. Byte-transparent.
-public final class PTYProcess {
+public final class PTYSessionRuntime: SessionRuntime {
     /// Output handler, invoked on the internal queue with each chunk and the
     /// seq of its first byte. Assign it via `setOutputHandler`.
     private var onOutput: (([UInt8], Int) -> Void)?
@@ -47,7 +64,7 @@ public final class PTYProcess {
         argv:  [String], env: [String: String]? = nil, cwd: String? = nil,
         cols: UInt16, rows: UInt16
     ) throws {
-        precondition(pid == -1, "PTYProcess already spawned")
+        precondition(pid == -1, "PTYSessionRuntime already spawned")
         precondition(!argv.isEmpty, "argv must not be empty")
         
         // Prepare all C strings in the PARENT. Between fork and exec the child may
@@ -232,7 +249,7 @@ public final class PTYProcess {
         var status: Int32 = 0
         // Safe to block: on macOS the master EOFs only once the session leader
         // has exited (tty revoke), so the child is already a zombie here. Pinned
-        // by PTYProcessTests.testMasterEOFImpliesChildExited.
+        // by PTYSessionRuntimeTests.testMasterEOFImpliesChildExited.
         _ = waitpid(pid, &status, 0)
         let code: Int32
         if (status & 0x7f) == 0 {

@@ -7,7 +7,7 @@ public enum RegistryError: Error, Equatable {
     case dirMissing(String)
 }
 
-/// In-memory registry of live sessions: name -> (Session, PTYProcess).
+/// In-memory registry of live sessions: name -> (Session, SessionRuntime).
 /// A process exit removes its entry automatically and notifies via `onExit`.
 public final class SessionRegistry {
     /// Called when a session's process exits: (name, exit code).
@@ -17,7 +17,7 @@ public final class SessionRegistry {
     /// Fired when a pending restart respawned the session in place (the entry,
     /// name and screen survive; no exited/sessionRemoved accompany it).
     public var onRestarted: ((Session) -> Void)?
-    private var entries: [String: (session: Session, process: PTYProcess,
+    private var entries: [String: (session: Session, process: any SessionRuntime,
                                    screen: ScreenModel, argv: [String],
                                    size: (cols: UInt16, rows: UInt16))] = [:]
     private var pendingRestart: [String: String] = [:]   // name -> respawn dir
@@ -98,7 +98,7 @@ public final class SessionRegistry {
             created: clock(), git: nil, worktreeRepo: worktreeRepo,
             resumeCmd: resumeCmd, companionOf: companionOf
         )
-        let proc = PTYProcess()
+        let proc = PTYSessionRuntime()
         // Identify the entry by process, not by name: the exit may arrive
         // after a rename, when the create-time name no longer keys the entry.
         proc.setExitHandler { [weak self, weak proc] code in
@@ -108,7 +108,7 @@ public final class SessionRegistry {
         let screen = ScreenModel(cols: 80, rows: 24)
         proc.setOutputHandler { bytes, _ in screen.feed(bytes) }
         do {
-            try proc.spawn(argv: argv, cwd: dir, cols: 80, rows: 24)
+            try proc.spawn(argv: argv, env: nil, cwd: dir, cols: 80, rows: 24)
         } catch {
             lock.unlock()
             throw error
@@ -203,7 +203,7 @@ public final class SessionRegistry {
 
     /// Snapshot of a session's process and screen under the lock; callers act
     /// on the pair outside it.
-    private func withEntry(_ name: String) -> (process: PTYProcess, screen: ScreenModel)? {
+    private func withEntry(_ name: String) -> (process: any SessionRuntime, screen: ScreenModel)? {
         lock.lock(); defer { lock.unlock() }
         guard let entry = entries[name] else { return nil }
         return (entry.process, entry.screen)
@@ -291,7 +291,7 @@ public final class SessionRegistry {
         return screens.mapValues { $0.visibleText() }
     }
 
-    private func handleExit(_ proc: PTYProcess, _ code: Int32) {
+    private func handleExit(_ proc: any SessionRuntime, _ code: Int32) {
         lock.lock()
         guard let id = entries.first(where: { $0.value.process === proc })?.key,
               let entry = entries[id] else {
@@ -351,7 +351,7 @@ public final class SessionRegistry {
         var session = old.session
         if let resume { session.resumeCmd = resume }
         let argv = session.resumeCmd.map { CreateService.resumeArgv($0) } ?? old.argv
-        let proc = PTYProcess()
+        let proc = PTYSessionRuntime()
         proc.setExitHandler { [weak self, weak proc] code in
             guard let proc else { return }
             self?.handleExit(proc, code)
@@ -359,7 +359,7 @@ public final class SessionRegistry {
         let screen = old.screen
         proc.setOutputHandler { bytes, _ in screen.feed(bytes) }
         do {
-            try proc.spawn(argv: argv, cwd: dir, cols: old.size.cols, rows: old.size.rows)
+            try proc.spawn(argv: argv, env: nil, cwd: dir, cols: old.size.cols, rows: old.size.rows)
         } catch {
             return nil
         }

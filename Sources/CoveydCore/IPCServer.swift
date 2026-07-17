@@ -37,7 +37,7 @@ public final class IPCServer {
         }
         registry.onRestarted = { [weak self, weak gitMonitor, weak modelMonitor] s in
             guard let self else { return }
-            // The respawn created a new PTYProcess — re-bind the output fanout
+            // The respawn created a new PTYSessionRuntime — re-bind the output fanout
             // to it; subscribers are keyed by name and survive untouched.
             self.attachOutputFanout(for: s.name)
             // The respawn wiped the session's transient git info; make the
