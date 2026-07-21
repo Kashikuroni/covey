@@ -21,23 +21,47 @@ final class TerminalPaneRemountTests: XCTestCase {
         return found
     }
 
-    private func altCount(in root: NSView) -> Int {
-        terminalViews(in: root)
-            .filter { $0.getTerminal().isCurrentBufferAlternate }.count
+    private func restoredAgentView(in root: NSView) -> CoveyTerminalView? {
+        terminalViews(in: root).first {
+            $0.getTerminal().isCurrentBufferAlternate
+                && $0.getTerminal().keyboardEnhancementFlags.rawValue == 1
+        }
     }
 
-    func testSplitToggleKeepsAgentAltBufferState() async throws {
+    private func assertShiftEnterIsKittyEncoded(
+        by view: CoveyTerminalView,
+        in window: NSWindow,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let probe = TerminalInputProbe()
+        view.terminalDelegate = probe
+        XCTAssertTrue(window.makeFirstResponder(view), file: file, line: line)
+        sendReturnKey(to: view, modifiers: [.shift])
+        XCTAssertEqual(
+            probe.sent,
+            Array("\u{1b}[13;2u".utf8),
+            file: file,
+            line: line
+        )
+    }
+
+    func testSplitToggleKeepsAgentAltBufferAndKittyKeyboardState() async throws {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
         await model.start()
         _ = try daemon.registry.create(
             dir: "/usr", agent: "claude",
+            // Overflow the 1 MB ring so the original Kitty push cannot mask a
+            // missing synthesized preamble when each fresh view attaches.
             argv: ["/bin/sh", "-c",
-                   "printf '\\033[?1049h\\033[?1003h\\033[?1006hREADY'; exec cat"],
+                   "printf '\\033[?1049h\\033[>1u\\033[?1003h\\033[?1006h'; "
+                   + "/usr/bin/yes x | /usr/bin/head -c 1001000; "
+                   + "printf 'READY'; exec cat"],
             name: "agent")
         _ = await eventually { model.sessions.contains { $0.name == "agent" } }
         _ = await eventually {
-            daemon.registry.statePreamble(name: "agent")?.isEmpty == false
+            daemon.registry.backfill(name: "agent", since: 0)?.gapped == true
         }
         await model.select("agent")
 
@@ -45,32 +69,43 @@ final class TerminalPaneRemountTests: XCTestCase {
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = NSHostingView(rootView: TerminalPaneView(model: model))
 
-        // Single pane: the agent's view replays the attach preamble -> alt.
         let mounted = await eventually {
-            window.contentView.map { self.altCount(in: $0) } == 1
+            guard let root = window.contentView else { return false }
+            return self.restoredAgentView(in: root) != nil
         }
-        XCTAssertTrue(mounted, "agent pane should reach the alternate buffer")
+        XCTAssertTrue(mounted, "agent pane should restore alt buffer and Kitty flags")
 
-        // Open the terminal split: the agent view remounts; its fresh
-        // emulator must regain the session's alt+mouse state.
         model.apply(.splitVertical)
         _ = await eventually { model.companion(of: "agent") != nil }
-        let altSurvivesOpen = await eventually {
+        let openRestored = await eventually {
             guard let root = window.contentView else { return false }
             return self.terminalViews(in: root).count == 2
-                && self.altCount(in: root) == 1
+                && self.restoredAgentView(in: root) != nil
         }
-        XCTAssertTrue(altSurvivesOpen,
-                      "agent pane must stay in the alternate buffer after split open")
+        XCTAssertTrue(openRestored,
+                      "agent pane must restore Kitty flags after split open")
+        if let root = window.contentView,
+           let agentView = restoredAgentView(in: root) {
+            assertShiftEnterIsKittyEncoded(by: agentView, in: window)
+        } else {
+            XCTFail("restored agent view missing after split open")
+        }
 
-        // Close the split: another remount, same invariant.
         model.apply(.splitClose)
         _ = await eventually { model.companion(of: "agent") == nil }
-        let altSurvivesClose = await eventually {
-            window.contentView.map { self.altCount(in: $0) } == 1
+        let closeRestored = await eventually {
+            guard let root = window.contentView else { return false }
+            return self.terminalViews(in: root).count == 1
+                && self.restoredAgentView(in: root) != nil
         }
-        XCTAssertTrue(altSurvivesClose,
-                      "agent pane must stay in the alternate buffer after split close")
+        XCTAssertTrue(closeRestored,
+                      "agent pane must restore Kitty flags after split close")
+        if let root = window.contentView,
+           let agentView = restoredAgentView(in: root) {
+            assertShiftEnterIsKittyEncoded(by: agentView, in: window)
+        } else {
+            XCTFail("restored agent view missing after split close")
+        }
 
         daemon.registry.kill(name: "agent")
     }

@@ -75,6 +75,30 @@ final class ScreenModelTests: XCTestCase {
                        bytes("\u{1b}[?1003h\u{1b}[?1006h\u{1b}[?1h"))
     }
 
+    func testStatePreambleRestoresKittyKeyboardFlagsWithoutPushing() {
+        let screen = ScreenModel()
+        screen.feed(bytes("\u{1b}[>3u"))
+
+        XCTAssertEqual(screen.statePreamble(), bytes("\u{1b}[=3;1u"))
+    }
+
+    func testStatePreambleSelectsAltBufferBeforeKittyKeyboardFlags() {
+        let screen = ScreenModel()
+        screen.feed(bytes("\u{1b}[?1049h\u{1b}[>1u\u{1b}[?1002h"))
+
+        XCTAssertEqual(
+            screen.statePreamble(),
+            bytes("\u{1b}[?1049h\u{1b}[=1;1u\u{1b}[?1002h\u{1b}[?1006h")
+        )
+    }
+
+    func testStatePreambleDropsPoppedKittyKeyboardFlags() {
+        let screen = ScreenModel()
+        screen.feed(bytes("\u{1b}[>1u\u{1b}[<u"))
+
+        XCTAssertEqual(screen.statePreamble(), [])
+    }
+
     // tmux capture-pane parity: without it a menu at the top of a mostly
     // blank 24-row screen falls outside parsePrompt's last-20-lines window.
     func testTrailingBlankRowsAreTrimmed() {
