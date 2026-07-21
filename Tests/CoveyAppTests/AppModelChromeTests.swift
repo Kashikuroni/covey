@@ -659,4 +659,59 @@ final class AppModelChromeTests: XCTestCase {
         model.focusZone(.session)
         XCTAssertEqual(model.focus, .sessions)
     }
+
+    @MainActor
+    func testUsagePlacementCyclesAndClosesLeader() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        XCTAssertEqual(model.usagePlacement, .right)
+
+        model.apply(.openLeader)
+        model.apply(.leaderDescend(.ui))
+        model.apply(.cycleUsagePlacement)
+        XCTAssertEqual(model.usagePlacement, .left)
+        XCTAssertEqual(model.inputMode, .normal)
+
+        model.apply(.cycleUsagePlacement)
+        XCTAssertEqual(model.usagePlacement, .center)
+        model.apply(.cycleUsagePlacement)
+        XCTAssertEqual(model.usagePlacement, .right)
+    }
+
+    @MainActor
+    func testUsagePlacementPersistsAndUnknownFallsBackToRight() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let path = "\(NSTemporaryDirectory())covey-placement-\(UInt32.random(in: 0..<UInt32.max)).json"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        let store = StateStore(path: path, debounce: 0.05)
+        let client = IPCClient(path: daemon.path); try client.connect()
+        let model = AppModel(
+            client: client,
+            makeClient: { let c = IPCClient(path: daemon.path); try c.connect(); return c },
+            store: store)
+        await model.start()
+        model.apply(.cycleUsagePlacement)
+        store.flush()
+
+        let client2 = IPCClient(path: daemon.path); try client2.connect()
+        let reloaded = AppModel(
+            client: client2,
+            makeClient: { let c = IPCClient(path: daemon.path); try c.connect(); return c },
+            store: StateStore(path: path, debounce: 0.05))
+        await reloaded.start()
+        XCTAssertEqual(reloaded.usagePlacement, .left)
+
+        let invalidStore = StateStore(path: path, debounce: 0.05)
+        invalidStore.save(PersistedState(usagePlacement: "diagonal"))
+        invalidStore.flush()
+        let client3 = IPCClient(path: daemon.path); try client3.connect()
+        let invalid = AppModel(
+            client: client3,
+            makeClient: { let c = IPCClient(path: daemon.path); try c.connect(); return c },
+            store: StateStore(path: path, debounce: 0.05))
+        await invalid.start()
+        XCTAssertEqual(invalid.usagePlacement, .right)
+    }
 }

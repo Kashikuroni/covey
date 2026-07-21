@@ -78,6 +78,7 @@ public final class AppModel {
     public private(set) var connected = false
     public private(set) var themeRaw: String = "dark"
     public private(set) var splitPct: Int = 38
+    public private(set) var usagePlacement: UsagePlacement = .right
     public private(set) var recents: [RecentSession] = []
     public private(set) var usage: Usage?
     public private(set) var plan: String?
@@ -196,6 +197,7 @@ public final class AppModel {
         persisted = store.load()
         themeRaw = persisted.theme ?? "dark"
         splitPct = persisted.splitPct ?? 38
+        usagePlacement = persisted.usagePlacement.flatMap(UsagePlacement.init(rawValue:)) ?? .right
         recents = persisted.recents
         order = persisted.order
         projectOrder = persisted.projectOrder
@@ -813,6 +815,10 @@ public final class AppModel {
         case .toggleHeaderPanel:
             inputMode = .normal
             setShowHeader(!showHeader)
+        case .cycleUsagePlacement:
+            inputMode = .normal
+            usagePlacement = usagePlacement.next
+            persist()
         case .createIssue:
             inputMode = .normal
             guard inspectorRoot != nil else { toast = "no project"; return }
@@ -1092,6 +1098,7 @@ public final class AppModel {
     private func persist() {
         persisted.theme = themeRaw
         persisted.splitPct = splitPct
+        persisted.usagePlacement = usagePlacement.rawValue
         persisted.recents = recents
         persisted.order = order
         persisted.projectOrder = projectOrder

@@ -58,6 +58,7 @@ extension LeaderMenu {
             LeaderRow(key: "h", label: "toggle header", implemented: true),
             LeaderRow(key: "t", label: "toggle dark / light theme", implemented: true),
             LeaderRow(key: "v", label: "inspector tabs / split", implemented: true),
+            LeaderRow(key: "l", label: "cycle limits / clock position", implemented: true),
         ]
         case .project: return [
             LeaderRow(key: "a", label: "add project — folder picker", implemented: true),
@@ -123,6 +124,7 @@ enum KeyAction: Equatable {
     case toggleInspectorPanel
     case toggleFooterPanel
     case toggleHeaderPanel
+    case cycleUsagePlacement
     case addProject
     case removeProject
 }
@@ -261,6 +263,7 @@ enum KeyRouter {
         case (.ui, "h"): return .toggleHeaderPanel
         case (.ui, "t"): return .toggleTheme
         case (.ui, "v"): return .inspectorSplitToggle
+        case (.ui, "l"): return .cycleUsagePlacement
         case (.terminal, "v"): return .splitVertical
         case (.terminal, "h"): return .splitHorizontal
         case (.terminal, "x"): return .splitClose

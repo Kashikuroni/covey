@@ -202,6 +202,10 @@ final class KeyRouterTests: XCTestCase {
         XCTAssertEqual(KeyRouter.route(key("h"), context: u), .toggleHeaderPanel)
         XCTAssertEqual(KeyRouter.route(key("t"), context: u), .toggleTheme)
         XCTAssertEqual(KeyRouter.route(key("v"), context: u), .inspectorSplitToggle)
+        XCTAssertEqual(KeyRouter.route(key("l"), context: u), .cycleUsagePlacement)
+        XCTAssertTrue(LeaderMenu.ui.rows.contains {
+            $0.key == "l" && $0.label == "cycle limits / clock position" && $0.implemented
+        })
         // The old app group is gone.
         XCTAssertEqual(KeyRouter.route(key("a"), context: ctx(mode: .leader(.root))),
                        .closeOverlay)
