@@ -205,4 +205,51 @@ final class CoveyTerminalViewTests: XCTestCase {
         XCTAssertEqual(view.scrollPosition, 1.0)
         XCTAssertEqual(probe.positions.last, 1.0)
     }
+
+    @MainActor
+    func testShiftEnterUsesCsiUWhenKittyDisambiguationIsActive() {
+        let view = CoveyTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 400, height: 300)
+        )
+        let probe = TerminalInputProbe()
+        view.terminalDelegate = probe
+        let window = hostTerminalForKeyboardInput(view)
+        XCTAssertTrue(window.firstResponder === view)
+
+        view.feed(text: "\u{1b}[=1;1u")
+        sendReturnKey(to: view, modifiers: [.shift])
+
+        XCTAssertEqual(probe.sent, Array("\u{1b}[13;2u".utf8))
+    }
+
+    @MainActor
+    func testPlainEnterRemainsCarriageReturnInKittyMode() {
+        let view = CoveyTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 400, height: 300)
+        )
+        let probe = TerminalInputProbe()
+        view.terminalDelegate = probe
+        let window = hostTerminalForKeyboardInput(view)
+        XCTAssertTrue(window.firstResponder === view)
+
+        view.feed(text: "\u{1b}[=1;1u")
+        sendReturnKey(to: view)
+
+        XCTAssertEqual(probe.sent, [0x0d])
+    }
+
+    @MainActor
+    func testShiftEnterKeepsLegacyBehaviorWithoutKittyMode() {
+        let view = CoveyTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 400, height: 300)
+        )
+        let probe = TerminalInputProbe()
+        view.terminalDelegate = probe
+        let window = hostTerminalForKeyboardInput(view)
+        XCTAssertTrue(window.firstResponder === view)
+
+        sendReturnKey(to: view, modifiers: [.shift])
+
+        XCTAssertEqual(probe.sent, [0x0d])
+    }
 }
