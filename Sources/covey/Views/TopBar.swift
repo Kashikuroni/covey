@@ -1,6 +1,14 @@
 import SwiftUI
 import AppKit
 
+func topBarAlignment(_ placement: UsagePlacement) -> Alignment {
+    switch placement {
+    case .left: return .leading
+    case .center: return .center
+    case .right: return .trailing
+    }
+}
+
 struct TopBar: View {
     @Bindable var model: AppModel
     /// Windowed mode shows the macOS menu-bar clock; ours only earns its
@@ -11,7 +19,6 @@ struct TopBar: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Spacer()
             UsageChip(usage: model.usage, plan: model.plan,
                       error: model.usageError, tk: tk)
             if isFullscreen {
@@ -22,6 +29,8 @@ struct TopBar: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity,
+               alignment: topBarAlignment(model.usagePlacement))
         // Room for the traffic lights overlaid by the hidden title bar.
         .padding(.leading, 78).padding(.trailing, 14)
         .frame(height: 38)
