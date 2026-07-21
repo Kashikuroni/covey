@@ -557,7 +557,10 @@ public final class AppModel {
             sendTerminalCommand(.focus)
         }
     }
-    public func setHistoryMode(_ on: Bool) { historyMode = on }
+    public func setHistoryMode(_ on: Bool) {
+        guard historyMode != on else { return }
+        historyMode = on
+    }
     public func setFocus(_ f: Focus) { focus = f }
 
     public func moveSession(inDir dir: String, from: IndexSet, to: Int) {

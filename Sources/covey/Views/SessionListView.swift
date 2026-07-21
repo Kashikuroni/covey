@@ -6,11 +6,6 @@ struct SessionListView: View {
 
     private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
 
-    /// mono helper matching the amux type scale
-    private func mono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: weight, design: .monospaced)
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             // Zone tab matching the terminal panes' Agent/Terminal headers.
@@ -39,7 +34,7 @@ struct SessionListView: View {
                 if !rows.isEmpty {
                     Section {
                         ForEach(rows, id: \.name) { session in
-                            card(session)
+                            SessionCardView(model: model, session: session, tk: tk)
                                 .onTapGesture { Task { await model.select(session.name) } }
                                 .listRowBackground(Color.clear)
                                 .listRowSeparator(.hidden)
@@ -125,7 +120,23 @@ struct SessionListView: View {
         }
     }
 
-    private func card(_ session: Session) -> some View {
+}
+
+/// mono helper matching the amux type scale — shared by the list and its cards.
+private func mono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+    .system(size: size, weight: weight, design: .monospaced)
+}
+
+/// One session's row card, its own `View` type: `@Observable` tracks reads
+/// per view, so a status/git/model change on ONE session only invalidates
+/// its own card instead of forcing `SessionListView.body` (and every other
+/// card) to re-evaluate.
+private struct SessionCardView: View {
+    @Bindable var model: AppModel
+    let session: Session
+    let tk: Tokens
+
+    var body: some View {
         let selected = model.selected == session.name
         let status = model.statusByName[session.name] ?? .idle
         let modelName = model.modelByName[session.name].map(modelDisplayName)
@@ -199,5 +210,4 @@ struct SessionListView: View {
         }
         .shadow(color: tk.shadowColor, radius: Tokens.shadowRadius, y: Tokens.shadowY)
     }
-
 }
