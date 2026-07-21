@@ -70,7 +70,7 @@ struct TerminalRepresentable: NSViewRepresentable {
         // Entering/leaving the alternate buffer invalidates any scrolled-up
         // viewport, so a stale HISTORY badge must clear.
         view.onBufferSwitch = { Task { @MainActor in model.setHistoryMode(false) } }
-        view.onFocusClick = { Task { @MainActor in model.focusPane(name) } }
+        view.onFocusRequest = { Task { @MainActor in model.focusPane(name) } }
         view.onWheelScroll = { Task { @MainActor in model.requestTerminalRefresh(name) } }
         model.setTerminalCommandHandler(for: name) { [weak view] command in
             guard let view else { return }

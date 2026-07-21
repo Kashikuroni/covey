@@ -1,6 +1,18 @@
 import AppKit
 import SwiftTerm
 
+private final class FileDropBorderView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        NSColor.controlAccentColor.setStroke()
+        let path = NSBezierPath(rect: bounds.insetBy(dx: 1, dy: 1))
+        path.lineWidth = 2
+        path.stroke()
+    }
+}
+
 /// TerminalView that makes the mouse wheel work in alternate-buffer TUIs:
 /// forwards wheel as SGR mouse reports when the app enabled mouse tracking,
 /// or as arrow keys otherwise (iTerm2-style "alternate scroll"). Normal-buffer
@@ -12,12 +24,22 @@ final class CoveyTerminalView: TerminalView {
     /// buffer (e.g. entering/leaving vim); the chrome resets history mode.
     var onBufferSwitch: (() -> Void)?
 
-    /// Fired when a click focused the terminal (the click itself is swallowed).
-    var onFocusClick: (() -> Void)?
+    /// Fired when pointer interaction requests pane focus. A focusing click is
+    /// swallowed; a successful file drop also uses this path.
+    var onFocusRequest: (() -> Void)?
 
     /// Fired after a wheel event scrolled a TUI (mouse-report / arrow route) so
     /// the host can kick the child into a full repaint.
     var onWheelScroll: (() -> Void)?
+
+    private(set) var isFileDropTarget = false
+    private var registeredForFileDrops = false
+    private lazy var fileDropBorderView: NSView = {
+        let view = FileDropBorderView(frame: bounds)
+        view.autoresizingMask = [.width, .height]
+        view.isHidden = true
+        return view
+    }()
 
     func wheelRoute() -> WheelRoute {
         let terminal = getTerminal()
@@ -88,6 +110,10 @@ final class CoveyTerminalView: TerminalView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        if !registeredForFileDrops {
+            registerForDraggedTypes([.fileURL])
+            registeredForFileDrops = true
+        }
         if window == nil {
             removeWheelMonitor()
         } else if wheelMonitor == nil {
@@ -141,7 +167,7 @@ final class CoveyTerminalView: TerminalView {
             guard self.bounds.contains(point) else { return event }
             guard self.window?.firstResponder !== self else { return event }
             self.window?.makeFirstResponder(self)
-            self.onFocusClick?()
+            self.onFocusRequest?()
             self.swallowNextMouseUp = true
             return nil
         }
@@ -163,8 +189,68 @@ final class CoveyTerminalView: TerminalView {
             scroller.frame = NSRect(x: bounds.width - w, y: scroller.frame.minY,
                                     width: w, height: scroller.frame.height)
         }
+        if fileDropBorderView.superview != nil {
+            fileDropBorderView.frame = bounds
+            addSubview(fileDropBorderView, positioned: .above, relativeTo: nil)
+        }
     }
 
+    func localFileURLs(in pasteboard: NSPasteboard) -> [URL] {
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [
+            .urlReadingFileURLsOnly: true,
+        ]
+        let objects = pasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: options
+        ) as? [NSURL] ?? []
+        return objects.map { $0 as URL }.filter(\.isFileURL)
+    }
+
+    @discardableResult
+    func updateFileDropTarget(from pasteboard: NSPasteboard) -> Bool {
+        let accepts = !localFileURLs(in: pasteboard).isEmpty
+        setFileDropTarget(accepts)
+        return accepts
+    }
+
+    func clearFileDropTarget() {
+        setFileDropTarget(false)
+    }
+
+    private func setFileDropTarget(_ active: Bool) {
+        isFileDropTarget = active
+        if fileDropBorderView.superview == nil {
+            addSubview(fileDropBorderView)
+        }
+        fileDropBorderView.isHidden = !active
+        fileDropBorderView.needsDisplay = active
+    }
+
+    @discardableResult
+    func performFileDrop(from pasteboard: NSPasteboard) -> Bool {
+        defer { clearFileDropTarget() }
+        let paths = localFileURLs(in: pasteboard).map(\.path)
+        guard !paths.isEmpty else { return false }
+        let delivered = sendDroppedPaths(paths)
+        if !delivered { NSSound.beep() }
+        return delivered
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        updateFileDropTarget(from: sender.draggingPasteboard) ? .copy : []
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        updateFileDropTarget(from: sender.draggingPasteboard) ? .copy : []
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        clearFileDropTarget()
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        performFileDrop(from: sender.draggingPasteboard)
+    }
 
     /// Emit `|lines|` SGR wheel reports (button 4 up / 5 down) to the TUI.
     func sendWheelReport(lines: Int, at point: CGPoint) {
@@ -195,6 +281,27 @@ final class CoveyTerminalView: TerminalView {
         bytes.reserveCapacity(count * 3)
         for _ in 0..<count { bytes += seq }
         send(bytes)
+    }
+
+    /// Writes Finder-dropped paths as shell-safe arguments without executing
+    /// the command. Each path is its own bracketed-paste unit when the child
+    /// application has enabled bracketed paste mode.
+    @discardableResult
+    func sendDroppedPaths(_ paths: [String]) -> Bool {
+        let accepted = paths.compactMap(shellQuotedTerminalPath)
+        guard !accepted.isEmpty else { return false }
+
+        window?.makeFirstResponder(self)
+        onFocusRequest?()
+
+        let bracketed = getTerminal().bracketedPasteMode
+        for (index, path) in accepted.enumerated() {
+            if index > 0 { send([0x20]) }
+            if bracketed { send(EscapeSequences.bracketedPasteStart) }
+            send(Array(path.utf8))
+            if bracketed { send(EscapeSequences.bracketedPasteEnd) }
+        }
+        return true
     }
 }
 

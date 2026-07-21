@@ -26,6 +26,19 @@ final class CoveyTerminalViewTests: XCTestCase {
         return (view, probe)
     }
 
+    private func filePasteboard(_ urls: [URL]) -> NSPasteboard {
+        let name = NSPasteboard.Name("covey-file-drop-\(UUID().uuidString)")
+        let pasteboard = NSPasteboard(name: name)
+        pasteboard.clearContents()
+        let items = urls.map { url in
+            let item = NSPasteboardItem()
+            item.setString(url.absoluteString, forType: .fileURL)
+            return item
+        }
+        XCTAssertTrue(pasteboard.writeObjects(items))
+        return pasteboard
+    }
+
     private func fillScrollback(_ view: CoveyTerminalView, lines: Int = 200) {
         for i in 0..<lines { view.feed(text: "line \(i)\r\n") }
     }
@@ -169,6 +182,135 @@ final class CoveyTerminalViewTests: XCTestCase {
         XCTAssertEqual(switches, 1)
         view.feed(text: "\u{1b}[?1049l")
         XCTAssertEqual(switches, 2)
+    }
+
+    func testDroppedPathSendsQuotedTextWithoutBracketedPaste() {
+        let (view, probe) = makeView()
+
+        XCTAssertTrue(view.sendDroppedPaths(["/tmp/My File.png"]))
+        XCTAssertEqual(probe.sent, Array("'/tmp/My File.png'".utf8))
+    }
+
+    func testFileDropReadsFilesAndDirectoriesInPasteboardOrder() {
+        let (view, _) = makeView()
+        let file = URL(fileURLWithPath: "/tmp/first image.png")
+        let directory = URL(fileURLWithPath: "/tmp/folder", isDirectory: true)
+        let pasteboard = filePasteboard([file, directory])
+
+        XCTAssertEqual(view.localFileURLs(in: pasteboard), [file, directory])
+    }
+
+    func testUnsupportedPasteboardDoesNotBecomeDropTarget() {
+        let (view, _) = makeView()
+        let pasteboard = NSPasteboard(
+            name: NSPasteboard.Name("covey-text-drop-\(UUID().uuidString)")
+        )
+        pasteboard.clearContents()
+        pasteboard.setString("not a file", forType: .string)
+
+        XCTAssertFalse(view.updateFileDropTarget(from: pasteboard))
+        XCTAssertFalse(view.isFileDropTarget)
+    }
+
+    func testMultipleDroppedPathsUseDistinctBracketedPasteUnits() {
+        let (view, probe) = makeView()
+        view.feed(text: "\u{1b}[?2004h")
+
+        XCTAssertTrue(view.sendDroppedPaths([
+            "/tmp/first image.png",
+            "/tmp/second.png",
+        ]))
+
+        let expected = "\u{1b}[200~'/tmp/first image.png'\u{1b}[201~ "
+            + "\u{1b}[200~'/tmp/second.png'\u{1b}[201~"
+        XCTAssertEqual(probe.sent, Array(expected.utf8))
+        XCTAssertFalse(probe.sent.contains(0x0d))
+        XCTAssertFalse(probe.sent.contains(0x0a))
+    }
+
+    @MainActor
+    func testDroppedPathsFocusOnlyWhenAtLeastOnePathIsSafe() {
+        let (view, probe) = makeView()
+        let window = hostTerminalForKeyboardInput(view)
+        window.makeFirstResponder(nil)
+        var focusRequests = 0
+        view.onFocusRequest = { focusRequests += 1 }
+
+        XCTAssertFalse(view.sendDroppedPaths([
+            "relative.png",
+            "/tmp/bad\nname.png",
+        ]))
+        XCTAssertEqual(focusRequests, 0)
+        XCTAssertTrue(probe.sent.isEmpty)
+        XCTAssertFalse(window.firstResponder === view)
+
+        XCTAssertTrue(view.sendDroppedPaths([
+            "/tmp/good.png",
+            "/tmp/bad\nname.png",
+        ]))
+        XCTAssertEqual(focusRequests, 1)
+        XCTAssertEqual(probe.sent, Array("'/tmp/good.png'".utf8))
+        XCTAssertTrue(window.firstResponder === view)
+    }
+
+    @MainActor
+    func testPerformFileDropSendsSafeSiblingsFocusesAndClearsFeedback() {
+        let (view, probe) = makeView()
+        let window = hostTerminalForKeyboardInput(view)
+        window.makeFirstResponder(nil)
+        var focusRequests = 0
+        view.onFocusRequest = { focusRequests += 1 }
+        let pasteboard = filePasteboard([
+            URL(fileURLWithPath: "/tmp/first image.png"),
+            URL(fileURLWithPath: "/tmp/bad\nname.png"),
+            URL(fileURLWithPath: "/tmp/folder", isDirectory: true),
+        ])
+
+        XCTAssertTrue(view.updateFileDropTarget(from: pasteboard))
+        XCTAssertTrue(view.isFileDropTarget)
+        XCTAssertTrue(view.performFileDrop(from: pasteboard))
+
+        XCTAssertEqual(
+            probe.sent,
+            Array("'/tmp/first image.png' '/tmp/folder'".utf8)
+        )
+        XCTAssertEqual(focusRequests, 1)
+        XCTAssertTrue(window.firstResponder === view)
+        XCTAssertFalse(view.isFileDropTarget)
+        XCTAssertFalse(probe.sent.contains(0x0d))
+        XCTAssertFalse(probe.sent.contains(0x0a))
+    }
+
+    @MainActor
+    func testAllUnsafeFileDropFailsWithoutFocusOrBytes() {
+        let (view, probe) = makeView()
+        let window = hostTerminalForKeyboardInput(view)
+        window.makeFirstResponder(nil)
+        var focusRequests = 0
+        view.onFocusRequest = { focusRequests += 1 }
+        let pasteboard = filePasteboard([
+            URL(fileURLWithPath: "/tmp/bad\nname.png"),
+        ])
+
+        XCTAssertTrue(view.updateFileDropTarget(from: pasteboard))
+        XCTAssertFalse(view.performFileDrop(from: pasteboard))
+
+        XCTAssertTrue(probe.sent.isEmpty)
+        XCTAssertEqual(focusRequests, 0)
+        XCTAssertFalse(window.firstResponder === view)
+        XCTAssertFalse(view.isFileDropTarget)
+    }
+
+    func testClearingFileDropTargetModelsDragExitOrCancellation() {
+        let (view, _) = makeView()
+        let pasteboard = filePasteboard([
+            URL(fileURLWithPath: "/tmp/image.png"),
+        ])
+
+        XCTAssertTrue(view.updateFileDropTarget(from: pasteboard))
+        view.clearFileDropTarget()
+
+        XCTAssertFalse(view.isFileDropTarget)
     }
 
     func testLinesShortOfBottom() {
