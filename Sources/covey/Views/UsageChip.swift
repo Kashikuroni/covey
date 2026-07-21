@@ -1,5 +1,21 @@
 import SwiftUI
 
+enum UsageChipItem: Equatable {
+    case plan(String)
+    case window(String, UsageWindow)
+}
+
+func usageChipItems(usage: Usage, plan: String?) -> [UsageChipItem] {
+    var items: [UsageChipItem] = []
+
+    if let plan { items.append(.plan(plan)) }
+    if let window = usage.fiveHour { items.append(.window("5h", window)) }
+    if let window = usage.sevenDay { items.append(.window("7d", window)) }
+    if let window = usage.sevenDaySonnet { items.append(.window("S 7d", window)) }
+
+    return items
+}
+
 /// "2h13m" until the window resets; ceils so it never understates.
 func remainingLabel(resetUnix: Int64, now: Date) -> String {
     let secs = resetUnix - Int64(now.timeIntervalSince1970)
@@ -37,15 +53,18 @@ struct UsageChip: View {
             // polled Usage snapshot is Equatable-equal (no re-render).
             TimelineView(.everyMinute) { ctx in
                 HStack(spacing: 8) {
-                    if let w = usage.fiveHour { pill("5h", w, now: ctx.date) }
-                    if let w = usage.sevenDay { pill("7d", w, now: ctx.date) }
-                    if let w = usage.sevenDaySonnet { pill("S 7d", w, now: ctx.date) }
-                    if let plan { badge(Text(plan)) }
+                    ForEach(Array(usageChipItems(usage: usage, plan: plan).enumerated()), id: \.offset) { entry in
+                        switch entry.element {
+                        case .plan(let label):
+                            badge(Text(label))
+                        case .window(let prefix, let window):
+                            pill(prefix, window, now: ctx.date)
+                        }
+                    }
                 }
-                .font(.caption)
             }
         } else if let error {
-            Text("usage: \(error)").font(.caption).foregroundStyle(.orange)
+            Text("usage: \(error)").foregroundStyle(.orange)
         } else {
             EmptyView()
         }

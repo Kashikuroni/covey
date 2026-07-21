@@ -1,6 +1,9 @@
 import SwiftUI
 import AppKit
 
+let topBarFontSize: CGFloat = 13
+let topBarFontDesign: Font.Design = .monospaced
+
 func topBarAlignment(_ placement: UsagePlacement) -> Alignment {
     switch placement {
     case .left: return .leading
@@ -24,11 +27,11 @@ struct TopBar: View {
             if isFullscreen {
                 TimelineView(.everyMinute) { ctx in
                     Text(clock(ctx.date))
-                        .font(.system(size: 12, design: .monospaced))
                         .foregroundStyle(tk.t3)
                 }
             }
         }
+        .font(.system(size: topBarFontSize, design: topBarFontDesign))
         .frame(maxWidth: .infinity,
                alignment: topBarAlignment(model.usagePlacement))
         // Room for the traffic lights overlaid by the hidden title bar.

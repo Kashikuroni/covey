@@ -2,6 +2,29 @@ import XCTest
 @testable import covey
 
 final class UsageChipTests: XCTestCase {
+    func testUsageChipItemsPutPlanBeforeWindows() {
+        let five = UsageWindow(utilization: 42, resetUnix: 1_750_003_600)
+        let seven = UsageWindow(utilization: 18, resetUnix: 1_750_086_400)
+        let sonnet = UsageWindow(utilization: 7, resetUnix: nil)
+        let usage = Usage(fiveHour: five, sevenDay: seven, sevenDaySonnet: sonnet)
+
+        XCTAssertEqual(usageChipItems(usage: usage, plan: "Claude"), [
+            .plan("Claude"),
+            .window("5h", five),
+            .window("7d", seven),
+            .window("S 7d", sonnet),
+        ])
+    }
+
+    func testUsageChipItemsStartWithFirstWindowWhenPlanMissing() {
+        let five = UsageWindow(utilization: 42, resetUnix: nil)
+        let usage = Usage(fiveHour: five, sevenDay: nil, sevenDaySonnet: nil)
+
+        XCTAssertEqual(usageChipItems(usage: usage, plan: nil), [
+            .window("5h", five),
+        ])
+    }
+
     private let now = Date(timeIntervalSince1970: 1_750_000_000)
 
     private func label(afterSeconds secs: Int64) -> String {

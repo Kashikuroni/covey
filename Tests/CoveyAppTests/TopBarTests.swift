@@ -3,6 +3,11 @@ import XCTest
 @testable import covey
 
 final class TopBarTests: XCTestCase {
+    func testUsageAndClockShareThirteenPointMonospacedTypography() {
+        XCTAssertEqual(topBarFontSize, 13)
+        XCTAssertEqual(topBarFontDesign, .monospaced)
+    }
+
     func testUsagePlacementMapsToTopBarAlignment() {
         XCTAssertEqual(topBarAlignment(.left), .leading)
         XCTAssertEqual(topBarAlignment(.center), .center)
