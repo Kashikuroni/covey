@@ -109,4 +109,17 @@ final class PersistedStateTests: XCTestCase {
         let json = String(data: try JSONEncoder().encode(PersistedState()), encoding: .utf8)!
         XCTAssertFalse(json.contains("usageNotified"))
     }
+
+    func testUsagePlacementRoundTripAndOmittedWhenNil() throws {
+        var state = PersistedState()
+        state.usagePlacement = "center"
+
+        let encoded = try JSONEncoder().encode(state)
+        let decoded = try JSONDecoder().decode(PersistedState.self, from: encoded)
+        XCTAssertEqual(decoded.usagePlacement, "center")
+
+        let emptyJSON = String(decoding: try JSONEncoder().encode(PersistedState()),
+                               as: UTF8.self)
+        XCTAssertFalse(emptyJSON.contains("usagePlacement"))
+    }
 }

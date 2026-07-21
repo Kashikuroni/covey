@@ -104,6 +104,9 @@ public struct PersistedState: Codable, Equatable {
     /// Usage-limit alert markers: window key ("5h"/"7d") -> resetUnix of the
     /// window cycle already alerted (0 when resets_at was absent).
     public var usageNotified: [String: Int64]?
+    /// Top-bar placement for the usage chip and fullscreen clock:
+    /// "left", "center", or "right". Unknown values are resolved by the GUI.
+    public var usagePlacement: String?
     /// Issue number bound to a session, keyed by session name. Migrated on
     /// rename so the binding survives (the name is the session's durable
     /// identity — it is preserved across relaunch, only rename changes it).
@@ -124,6 +127,7 @@ public struct PersistedState: Codable, Equatable {
         inspectorSplit: Bool? = nil,
         projects: [String]? = nil,
         usageNotified: [String: Int64]? = nil,
+        usagePlacement: String? = nil,
         issueBySession: [String: Int]? = nil,
         lastVersion: String? = nil
     ) {
@@ -140,6 +144,7 @@ public struct PersistedState: Codable, Equatable {
         self.inspectorSplit = inspectorSplit
         self.projects = projects
         self.usageNotified = usageNotified
+        self.usagePlacement = usagePlacement
         self.issueBySession = issueBySession
         self.lastVersion = lastVersion
     }
