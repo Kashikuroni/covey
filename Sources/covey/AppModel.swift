@@ -5,7 +5,7 @@ import CoveyKit
 
 /// ⌘1-5 zone targets (menu key equivalents — reachable from any focus).
 public enum FocusZone: Equatable {
-    case session, agent, note, issues, terminalSplit
+    case session, agent, note, issues, terminalSplit, trace
 }
 
 /// UI state machine. The daemon is the single source of truth about sessions:
@@ -942,6 +942,11 @@ public final class AppModel {
                 toast = "no split — space t v / h"; return
             }
             focusPane(comp.name)
+        case .trace:
+            guard showInspector else { toast = "inspector hidden — space u i"; return }
+            sendTerminalCommand(.blur)
+            setFocus(.inspector)
+            setInspectorMode(.trace)
         }
     }
 

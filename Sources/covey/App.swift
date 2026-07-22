@@ -117,6 +117,8 @@ struct CoveyApp: App {
                     .keyboardShortcut("4", modifiers: .command)
                 Button("Focus Terminal") { model?.focusZone(.terminalSplit) }
                     .keyboardShortcut("5", modifiers: .command)
+                Button("Focus Trace") { model?.focusZone(.trace) }
+                    .keyboardShortcut("6", modifiers: .command)
                 Divider()
                 Toggle("Vim Mode", isOn: Binding(
                     get: { model?.vimMode ?? false },

@@ -45,4 +45,15 @@ final class AppModelTraceTests: XCTestCase {
         XCTAssertEqual(model.visibleTraceEvents.count, model.traceEvents.count)
         await model.kill("s")
     }
+
+    func testFocusZoneTraceOpensInspectorInTraceMode() async throws {
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        model.setShowInspector(true)
+        model.focusZone(.trace)
+        XCTAssertEqual(model.inspectorMode, .trace)
+        XCTAssertEqual(model.focus, .inspector)
+    }
 }

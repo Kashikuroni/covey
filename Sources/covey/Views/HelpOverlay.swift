@@ -23,7 +23,7 @@ let helpGroups: [(String, [(String, String)])] = [
         ("⌃\\", "toggle split pane focus"),
         ("⌃k / ⌃j", "scroll terminal page up / down"),
         ("⌃h/⌃l (inspector)", "note/issue tab"),
-        ("⌘1-5", "zones: session · agent · note · issues · terminal"),
+        ("⌘1-6", "zones: session · agent · note · issues · terminal · trace"),
         ("j/k · enter · e/c/x · s/g (issues)",
          "nav · view · edit/close/delete · session new/jump"),
         ("G / end", "terminal to bottom"),
