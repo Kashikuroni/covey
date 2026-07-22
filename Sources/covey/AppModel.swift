@@ -1052,6 +1052,9 @@ public final class AppModel {
 
     public func selectInspectorTab(_ tab: InspectorTab) {
         inspectorTab = tab
+        // Choosing a Note/Issue tab returns the drawer from the trace back to
+        // the notes view (they never share the width).
+        if inspectorMode != .notes { inspectorMode = .notes; persist() }
         // Both zones are always "in the editor": hand the keyboard over at
         // once (the zone chords escape the fields via the key monitor).
         // The bump is deferred by one runloop turn: a freshly mounted view
