@@ -72,7 +72,7 @@ struct Tokens {
         diffAdd: Color(hex: 0x87D96C), diffDel: Color(hex: 0xF27983),
         shadowColor: Color.black.opacity(0.2),
         accent: Color(hex: 0xFFCC66),
-        claudeBrand: Color(hex: 0xD97757), codexBrand: Color(hex: 0x2DD4BF),
+        claudeBrand: Color(hex: 0x707A8C), codexBrand: Color(hex: 0x707A8C),
         isDark: true)
 
     static let light = Tokens(
@@ -92,7 +92,7 @@ struct Tokens {
         diffAdd: Color(hex: 0x6CBF43), diffDel: Color(hex: 0xFF7383),
         shadowColor: Color(hex: 0x6B7D8F).opacity(0.1),
         accent: Color(hex: 0xF29718),
-        claudeBrand: Color(hex: 0xC15F3C), codexBrand: Color(hex: 0x0D9488),
+        claudeBrand: Color(hex: 0x828E9F), codexBrand: Color(hex: 0x828E9F),
         isDark: false)
 }
 
