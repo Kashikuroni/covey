@@ -100,6 +100,21 @@ public final class AppModel {
     public enum InspectorTab: Equatable { case note, issue }
     public private(set) var inspectorTab: InspectorTab = .note
     public private(set) var inspectorSplit = false
+    /// The right drawer shows EITHER the Note/Issue inspector OR the agent
+    /// trace — never both (there is no room for two drawers).
+    public enum InspectorMode: Equatable { case notes, trace }
+    public private(set) var inspectorMode: InspectorMode = .notes
+    /// Agent trace for the selected session (streamed from the daemon).
+    public private(set) var traceEvents: [TraceEvent] = []
+    public private(set) var traceStoreBytes: Int = 0
+    public private(set) var traceAgentFilter: TraceEvent.AgentRef?
+
+    /// Trace rows narrowed to the selected agent (nil filter = all agents).
+    public var visibleTraceEvents: [TraceEvent] {
+        guard let f = traceAgentFilter else { return traceEvents }
+        return traceEvents.filter { $0.agent == f }
+    }
+    public func setTraceAgentFilter(_ ref: TraceEvent.AgentRef?) { traceAgentFilter = ref }
     /// Transient: a pane sets it while its editor/field owns the keyboard
     /// (drives the INSERT/NORMAL badge).
     public var inspectorEditing = false
@@ -212,6 +227,7 @@ public final class AppModel {
         showHeader = persisted.showHeader ?? true
         showInspector = persisted.showInspector ?? false
         inspectorSplit = persisted.inspectorSplit ?? false
+        inspectorMode = persisted.inspectorMode == "trace" ? .trace : .notes
         sbWidth = persisted.sbWidth ?? 360
         vimMode = persisted.vimMode ?? true
         notes = persisted.notes
@@ -279,6 +295,25 @@ public final class AppModel {
             await attachPane(name)
             if let comp = companion(of: name) { await attachPane(comp.name) }
         }
+        if inspectorMode == .trace { await subscribeTrace() }
+    }
+
+    public func setInspectorMode(_ mode: InspectorMode) {
+        inspectorMode = mode
+        if mode == .trace { Task { await subscribeTrace() } }
+        persist()
+    }
+
+    /// (Re)subscribe the selected session's trace: replace the buffer with the
+    /// daemon's backlog, then live `traceAppended` events accumulate onto it.
+    private func subscribeTrace() async {
+        traceEvents = []; traceAgentFilter = nil
+        guard let name = selected else { return }
+        do {
+            let out = try await client.traceSubscribe(name: name, sinceSeq: 0)
+            traceEvents = out.events
+            traceStoreBytes = out.storeBytes
+        } catch { toast = errorText(error) }
     }
 
     /// Names whose attach replay was already consumed by a mounted view. A
@@ -1124,6 +1159,7 @@ public final class AppModel {
         persisted.showHeader = showHeader
         persisted.showInspector = showInspector
         persisted.inspectorSplit = inspectorSplit
+        persisted.inspectorMode = inspectorMode == .trace ? "trace" : "notes"
         persisted.sbWidth = sbWidth
         persisted.vimMode = vimMode
         persisted.notes = notes
@@ -1250,8 +1286,11 @@ public final class AppModel {
                 // flushed when the view mounts
                 outputBuffers[name, default: []].append(contentsOf: bytes)
             }
-        case .traceAppended, .traceStoreBytes:
-            break   // handled in a later task
+        case let .traceAppended(name, events):
+            guard name == selected, inspectorMode == .trace else { return }
+            traceEvents.append(contentsOf: events)
+        case let .traceStoreBytes(bytes):
+            traceStoreBytes = bytes
         }
     }
 

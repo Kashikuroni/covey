@@ -101,6 +101,8 @@ public struct PersistedState: Codable, Equatable {
     public var issueDrafts: [String: IssueDraft]?
     /// The inspector's note/issue vertical split mode.
     public var inspectorSplit: Bool?
+    /// Which drawer the inspector shows: "notes" (Note/Issue) or "trace".
+    public var inspectorMode: String?
     /// Registered project roots: projects the sidebar shows even with
     /// zero live sessions (the note -> issue -> session pipeline entry).
     public var projects: [String]?
@@ -128,6 +130,7 @@ public struct PersistedState: Codable, Equatable {
         splitAxes: [String: String]? = nil,
         issueDrafts: [String: IssueDraft]? = nil,
         inspectorSplit: Bool? = nil,
+        inspectorMode: String? = nil,
         projects: [String]? = nil,
         usageNotified: [String: Int64]? = nil,
         usagePlacement: String? = nil,
@@ -145,6 +148,7 @@ public struct PersistedState: Codable, Equatable {
         self.splitAxes = splitAxes
         self.issueDrafts = issueDrafts
         self.inspectorSplit = inspectorSplit
+        self.inspectorMode = inspectorMode
         self.projects = projects
         self.usageNotified = usageNotified
         self.usagePlacement = usagePlacement
