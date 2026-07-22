@@ -83,4 +83,16 @@ final class RecentSheetStateTests: XCTestCase {
         XCTAssertEqual(state.failureTriggers["b"], trigger + 1)
         XCTAssertEqual(state.results(from: rows).map(\.id), ["b", "c"])
     }
+
+    func testRestoringLastVisibleRowSelectsPreviousRow() {
+        let rows = [item("a", stopped: 30), item("b", stopped: 20),
+                    item("c", stopped: 10)]
+        var state = RecentSheetState()
+        state.open(rows: rows)
+        state.move(-1, rows: rows)
+        XCTAssertEqual(state.selectedName, "c")
+        XCTAssertTrue(state.beginRestore("c"))
+        state.completeRestore("c", succeeded: true, visibleBefore: rows)
+        XCTAssertEqual(state.selectedName, "b")
+    }
 }

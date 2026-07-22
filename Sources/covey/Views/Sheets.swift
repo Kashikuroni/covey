@@ -21,138 +21,241 @@ extension AppModel.Modal: Identifiable {
     }
 }
 
-/// Recently-stopped sessions: cards, `/` filter over name+dir, j/k, Enter
-/// relaunches (claude resumes its conversation via the stored resumeCmd).
+/// Recently-stopped sessions: search, j/k navigation, multi-restore with h,
+/// and Enter to restore and focus the Agent pane.
 struct RecentSheet: View {
     let model: AppModel
-    @State private var cursor = 0
-    @State private var filter = ""
-    @State private var filtering = false
-    @FocusState private var listFocused: Bool
-    @FocusState private var filterFocused: Bool
+    @State private var state = RecentSheetState()
+    @State private var sourceItems: [RecentSearchItem] = []
+    @FocusState private var focused: RecentSheetFocus?
 
     private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
-    private var items: [RecentSession] {
-        filterRecents(model.visibleRecents(), filter: filter)
+    private var candidates: [RecentSearchItem] {
+        model.visibleRecents().map { recent in
+            let root = projectRoot(recent.dir)
+            return RecentSearchItem(session: recent, projectRoot: root,
+                                    projectName: model.displayName(forDir: root))
+        }
+    }
+    /// Keep rows stable until the create response arrives: sessionAdded can be
+    /// delivered first, and visibleRecents would otherwise skip the transition.
+    private var rows: [RecentSearchItem] { state.results(from: sourceItems) }
+    private var maximumScreenHeight: CGFloat {
+        let screen = NSApp.keyWindow?.screen ?? NSScreen.main
+        return screen?.visibleFrame.height ?? 900
+    }
+    private var height: CGFloat {
+        recentSheetHeight(rowCount: rows.count, screenHeight: maximumScreenHeight)
     }
 
     var body: some View {
-        let rows = items
-        let now = Int64(Date().timeIntervalSince1970)
         VStack(alignment: .leading, spacing: 10) {
             Text("Recent sessions").font(.headline)
-            if rows.isEmpty {
-                Text("no recently-stopped sessions")
-                    .font(.caption).foregroundStyle(tk.t4)
-                    .frame(maxWidth: .infinity, minHeight: 120)
-            } else {
-                VStack(spacing: 5) {
-                    ForEach(Array(rows.enumerated()), id: \.element.name) { idx, r in
-                        card(r, now: now, current: idx == cursor)
-                            .onTapGesture { relaunch(r) }
-                    }
+            TextField("Search sessions, branches, projects", text: $state.query)
+                .focused($focused, equals: .search)
+                .ayuField(tk, focused: focused == .search)
+                .onSubmit {
+                    state.commitSearch(rows: rows)
+                    focused = .list
                 }
-            }
-            if filtering {
-                HStack(spacing: 6) {
-                    Text("/").font(.caption.monospaced()).foregroundStyle(tk.accent)
-                    TextField("filter", text: $filter)
-                        .focused($filterFocused)
-                        .ayuField(tk, focused: filterFocused)
-                        .onSubmit { relaunchAtCursor() }
-                        .onExitCommand {
-                            filter = ""; filtering = false; listFocused = true
-                        }
+                .onExitCommand {
+                    state.query = ""
+                    state.commitSearch(rows: state.results(from: sourceItems))
+                    focused = .list
                 }
-            } else {
-                Text("j/k move · enter restore · / filter · esc close")
-                    .font(.caption2).foregroundStyle(.tertiary)
+            resultsList
+            HStack(spacing: 10) {
+                KbdBadge(key: "/", label: "search", tk: tk)
+                KbdBadge(key: "j/k", label: "move", tk: tk)
+                KbdBadge(key: "h", label: "restore", tk: tk)
+                KbdBadge(key: "enter", label: "open", tk: tk)
             }
         }
         .padding(20)
-        .frame(width: 480)
-        .focusable()
-        // Sheets live in their own window: the root focusEffectDisabled()
-        // does not reach here, so kill the blue focus ring locally.
+        .frame(width: 480, height: height)
         .focusEffectDisabled()
-        .focused($listFocused)
-        .onAppear { listFocused = true }
+        .onAppear {
+            let initial = candidates
+            sourceItems = initial
+            state.open(rows: recentResults(initial, query: state.query))
+            focused = .list
+        }
+        .onChange(of: state.query) { _, _ in state.reconcile(rows: rows) }
+        .onChange(of: focused) { _, value in
+            if value == .search {
+                state.focusSearch()
+            } else if value == .list {
+                state.commitSearch(rows: rows)
+            }
+        }
+        .onExitCommand { model.modal = nil }
+    }
+
+    private var resultsList: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                if rows.isEmpty {
+                    Text("no recently-stopped sessions")
+                        .font(.caption).foregroundStyle(tk.t4)
+                        .frame(maxWidth: .infinity, minHeight: 120)
+                } else {
+                    LazyVStack(spacing: 5) {
+                        ForEach(rows) { item in
+                            RecentResultCard(
+                                item: item,
+                                current: item.id == state.selectedName,
+                                restoring: state.restoringNames.contains(item.id),
+                                failureTrigger: state.failureTriggers[item.id, default: 0],
+                                now: Int64(Date().timeIntervalSince1970), tk: tk)
+                            .id(item.id)
+                            .contentShape(Rectangle())
+                            .onTapGesture { restore(item, activate: true) }
+                            .transition(.asymmetric(
+                                insertion: .identity,
+                                removal: .offset(x: -48)
+                                    .combined(with: .scale(scale: 0.72, anchor: .leading))
+                                    .combined(with: .opacity)))
+                        }
+                    }
+                    .animation(.easeInOut(duration: 0.14), value: rows.map(\.id))
+                }
+            }
+            .focusable()
+            .focused($focused, equals: .list)
+            .onChange(of: state.selectedName) { _, name in
+                if let name {
+                    withAnimation(.easeOut(duration: 0.08)) {
+                        proxy.scrollTo(name, anchor: .center)
+                    }
+                }
+            }
+        }
         .onKeyPress(phases: .down) { press in
-            guard !filterFocused else { return .ignored }
+            guard focused == .list else { return .ignored }
             switch latinize(press.characters.first ?? " ") {
-            case "j": move(1); return .handled
-            case "k": move(-1); return .handled
-            case "/": filtering = true; filterFocused = true; return .handled
+            case "j": state.move(1, rows: rows); return .handled
+            case "k": state.move(-1, rows: rows); return .handled
+            case "/": state.focusSearch(); focused = .search; return .handled
+            case "h": restoreSelected(activate: false); return .handled
             default: return .ignored
             }
         }
-        .onKeyPress(.downArrow) { move(1); return .handled }
-        .onKeyPress(.upArrow) { move(-1); return .handled }
-        .onKeyPress(.return, phases: .down) { _ in
-            guard !filterFocused else { return .ignored }   // onSubmit handles it
-            relaunchAtCursor(); return .handled
+        .onKeyPress(.downArrow) {
+            guard focused == .list else { return .ignored }
+            state.move(1, rows: rows); return .handled
         }
-        .onExitCommand { model.modal = nil }
-        .onChange(of: filter) { _, _ in
-            cursor = min(cursor, max(0, items.count - 1))
+        .onKeyPress(.upArrow) {
+            guard focused == .list else { return .ignored }
+            state.move(-1, rows: rows); return .handled
+        }
+        .onKeyPress(.return, phases: .down) { _ in
+            guard focused == .list else { return .ignored }
+            restoreSelected(activate: true); return .handled
         }
     }
 
-    private func card(_ r: RecentSession, now: Int64, current: Bool) -> some View {
+    private func restoreSelected(activate: Bool) {
+        guard let item = rows.first(where: { $0.id == state.selectedName }) else { return }
+        restore(item, activate: activate)
+    }
+
+    private func restore(_ item: RecentSearchItem, activate: Bool) {
+        let visibleBefore = rows
+        guard state.beginRestore(item.id) else { return }
+        Task {
+            let succeeded = await model.relaunchRecent(item.session, activate: activate)
+            if succeeded && activate {
+                model.modal = nil
+            } else if succeeded {
+                withAnimation(.easeInOut(duration: 0.14)) {
+                    state.completeRestore(item.id, succeeded: true,
+                                          visibleBefore: visibleBefore)
+                }
+                focused = .list
+            } else {
+                state.completeRestore(item.id, succeeded: false,
+                                      visibleBefore: visibleBefore)
+                focused = .list
+            }
+        }
+    }
+}
+
+private struct RecentRestoreFailureEffect: GeometryEffect {
+    var phase: CGFloat
+    var animatableData: CGFloat {
+        get { phase }
+        set { phase = newValue }
+    }
+
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        let x = -12 * abs(sin(phase * .pi))
+        return ProjectionTransform(CGAffineTransform(translationX: x, y: 0))
+    }
+}
+
+private struct RecentResultCard: View {
+    let item: RecentSearchItem
+    let current: Bool
+    let restoring: Bool
+    let failureTrigger: Int
+    let now: Int64
+    let tk: Tokens
+    @State private var failurePhase: CGFloat = 0
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
-                AgentIcon(agent: r.agent, tk: tk)
-                Text(r.name)
+                AgentIcon(agent: item.session.agent, tk: tk)
+                Text(item.session.name)
                     .font(.system(size: 13, weight: .medium, design: .monospaced))
-                    .foregroundStyle(current ? tk.t1 : tk.t2).lineLimit(1)
-                if r.resumeCmd != nil {
+                    .foregroundStyle(current ? tk.t1 : tk.t2)
+                    .lineLimit(1)
+                if item.session.resumeCmd != nil {
                     Text("↻").font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(tk.t4)
                         .help("relaunch resumes the conversation")
                 }
                 Spacer()
-                if let stopped = r.stoppedAt {
+                if let stopped = item.session.stoppedAt {
                     Text(humanizeAge(now - stopped))
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(tk.t4)
                 }
             }
-            Text(collapseHome(r.dir))
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(tk.t3).lineLimit(1).truncationMode(.head)
+            HStack(spacing: 6) {
+                Text(item.projectName)
+                if let branch = item.session.branch {
+                    Text("·").foregroundStyle(tk.t4)
+                    Text(branch)
+                }
+                Spacer()
+            }
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundStyle(tk.t3)
+            .lineLimit(1)
+            Text(collapseHome(item.session.dir))
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(tk.t4)
+                .lineLimit(1)
+                .truncationMode(.head)
         }
         .padding(EdgeInsets(top: 7, leading: 11, bottom: 8, trailing: 11))
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(current ? tk.cardHover : tk.card,
                     in: RoundedRectangle(cornerRadius: Tokens.r))
-        .overlay(
-            RoundedRectangle(cornerRadius: Tokens.r)
-                .strokeBorder(current ? tk.bd3 : tk.bd))
+        .overlay(RoundedRectangle(cornerRadius: Tokens.r)
+            .strokeBorder(current ? tk.bd3 : tk.bd))
         .overlay(alignment: .leading) {
             RoundedRectangle(cornerRadius: 1)
                 .fill(current ? tk.t1 : .clear)
                 .frame(width: 2)
                 .padding(.vertical, 8)
         }
-        .contentShape(Rectangle())
-    }
-
-    private func move(_ delta: Int) {
-        let count = items.count
-        guard count > 0 else { return }
-        cursor = ((cursor + delta) % count + count) % count
-    }
-
-    private func relaunchAtCursor() {
-        let rows = items
-        guard rows.indices.contains(cursor) else { return }
-        relaunch(rows[cursor])
-    }
-
-    private func relaunch(_ r: RecentSession) {
-        Task {
-            await model.relaunchRecent(r)
-            model.modal = nil
+        .opacity(restoring ? 0.72 : 1)
+        .modifier(RecentRestoreFailureEffect(phase: failurePhase))
+        .onChange(of: failureTrigger) { _, _ in
+            withAnimation(.easeInOut(duration: 0.20)) { failurePhase += 1 }
         }
     }
 }
