@@ -240,6 +240,43 @@ enum TracePresenter {
         return rows
     }
 
+    /// Compact magnitude: 999 -> "999", 1000 -> "1K", 1_200_000 -> "1.2M".
+    static func compact(_ n: Int) -> String {
+        let a = abs(n)
+        if a >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
+        if a >= 1000 { return "\(Int((Double(n) / 1000).rounded()))K" }
+        return "\(n)"
+    }
+
+    /// Total tokens on the request's input side (fresh + cache).
+    static func requestContext(_ u: TraceEvent.TokenUsage) -> Int {
+        u.input + u.cacheRead + u.cacheCreate
+    }
+
+    /// The collapsed usage line: "↑2 ↓455 · 417K ctx".
+    static func usageLine(_ u: TraceEvent.TokenUsage) -> String {
+        "↑\(u.input) ↓\(u.output) · \(compact(requestContext(u))) ctx"
+    }
+
+    struct UsageHistoryEntry: Equatable {
+        var time: String; var input: Int; var output: Int; var context: String
+    }
+
+    /// Up to `limit` most recent token-usage events with `seq <= upToSeq`,
+    /// newest first — the click-through history for a usage line.
+    static func usageHistory(_ events: [TraceEvent], upToSeq: Int, limit: Int = 10,
+                             timeZone: TimeZone = .current) -> [UsageHistoryEntry] {
+        let usages = events.compactMap { e -> (TraceEvent, TraceEvent.TokenUsage)? in
+            guard case let .tokenUsage(u) = e.kind, e.seq <= upToSeq else { return nil }
+            return (e, u)
+        }
+        return usages.suffix(limit).reversed().map { e, u in
+            UsageHistoryEntry(time: clock(e.timestamp, timeZone: timeZone),
+                              input: u.input, output: u.output,
+                              context: compact(requestContext(u)))
+        }
+    }
+
     static func tokenBadge(_ u: TraceEvent.TokenUsage) -> String {
         var parts = ["↑ \(groupedNumber(u.input))", "↓ \(groupedNumber(u.output))"]
         if u.cacheRead > 0 { parts.append("⚡ \(groupedNumber(u.cacheRead)) из кэша") }

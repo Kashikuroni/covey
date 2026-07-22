@@ -119,6 +119,32 @@ final class TracePaneTests: XCTestCase {
         XCTAssertNil(TracePresenter.latestRateLimit([ev(.turnStarted)]))
     }
 
+    func testCompactMagnitude() {
+        XCTAssertEqual(TracePresenter.compact(999), "999")
+        XCTAssertEqual(TracePresenter.compact(1000), "1K")
+        XCTAssertEqual(TracePresenter.compact(416914), "417K")
+        XCTAssertEqual(TracePresenter.compact(1_200_000), "1.2M")
+    }
+
+    func testUsageLineFormat() {
+        let line = TracePresenter.usageLine(.init(input: 2, output: 455, cacheRead: 416912,
+            cacheCreate: 0, reasoning: 0, total: 417369))
+        XCTAssertEqual(line, "↑2 ↓455 · 417K ctx")
+    }
+
+    func testUsageHistoryFiltersBySeqNewestFirstAndLimits() {
+        func u(_ seq: Int, out: Int) -> TraceEvent {
+            TraceEvent(seq: seq, agent: .main, cli: .claudeCode,
+                       timestamp: Date(timeIntervalSince1970: TimeInterval(seq)),
+                       kind: .tokenUsage(.init(input: 1, output: out, cacheRead: 0,
+                           cacheCreate: 0, reasoning: 0, total: out + 1)), raw: "{}")
+        }
+        let events = [u(0, out: 10), ev(.turnStarted), u(2, out: 20), u(4, out: 30), u(6, out: 40)]
+        let h = TracePresenter.usageHistory(events, upToSeq: 4, limit: 2,
+                                            timeZone: TimeZone(identifier: "UTC")!)
+        XCTAssertEqual(h.map(\.output), [30, 20], "newest-first, seq <= 4, last 2")
+    }
+
     func testResetLabelCoarseBuckets() {
         let now = Date(timeIntervalSince1970: 1_000_000)
         XCTAssertEqual(TracePresenter.resetLabel(now.addingTimeInterval(2 * 86400), now: now), "2 дн")

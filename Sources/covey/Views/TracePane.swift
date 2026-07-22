@@ -152,6 +152,7 @@ struct TracePane: View {
     @ViewBuilder private func row(for e: TraceEvent) -> some View {
         switch TracePresenter.kind(e) {
         case .thinking, .turn: thinRow(e)
+        case .usage: usageRow(e)
         default: card(e)
         }
     }
@@ -218,11 +219,10 @@ struct TracePane: View {
         case .bash: bashBody(e, isOpen: isOpen)
         case .read: readBody(e, isOpen: isOpen)
         case .edit: editBody(e, isOpen: isOpen)
-        case .usage: usageBody(e, isOpen: isOpen)
         case .assistant: assistantBody(e, isOpen: isOpen)
         case .result: resultBody(e, isOpen: isOpen)
         case .generic: genericBody(e, isOpen: isOpen)
-        case .thinking, .turn: EmptyView()
+        case .usage, .thinking, .turn: EmptyView()   // rendered as thin rows, not cards
         }
     }
 
@@ -341,46 +341,53 @@ struct TracePane: View {
         }
     }
 
-    // MARK: - Usage
+    // MARK: - Usage (thin row + last-10 history on click)
 
-    private func usageBody(_ e: TraceEvent, isOpen: Bool) -> some View {
-        guard case let .tokenUsage(u) = e.kind else { return AnyView(EmptyView()) }
-        return AnyView(VStack(alignment: .leading, spacing: 11) {
-            Text(TracePresenter.tokenBadge(u))
-                .font(.system(size: 12, design: .monospaced)).foregroundStyle(tk.t1)
-            if isOpen {
-                VStack(spacing: 0) {
-                    ForEach(Array(TracePresenter.tokenRows(u).enumerated()), id: \.offset) { _, r in
-                        HStack(spacing: 10) {
-                            Text(r.label).font(.system(size: 12.5)).foregroundStyle(tk.t1)
-                            tk.bd2.frame(height: 1).frame(maxWidth: .infinity)
-                            Text(r.value).font(.system(size: 12.5, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(tk.t1)
-                            Text(r.sub).font(.system(size: 10.5)).foregroundStyle(tk.t4)
-                                .frame(minWidth: 78, alignment: .trailing)
-                        }
-                        .padding(.horizontal, 12).padding(.vertical, 6)
-                    }
+    @ViewBuilder private func usageRow(_ e: TraceEvent) -> some View {
+        if case let .tokenUsage(u) = e.kind {
+            let isOpen = open.contains(e.seq)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 9) {
+                    Text(TracePresenter.usageLine(u))
+                        .font(.system(size: 11.5, design: .monospaced)).foregroundStyle(tk.t3)
+                    Spacer()
+                    Text(TracePresenter.clock(e.timestamp))
+                        .font(.system(size: 9.5, design: .monospaced)).foregroundStyle(tk.t4)
+                        .help(TracePresenter.stamp(e.timestamp))
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8, weight: .semibold)).foregroundStyle(tk.t4)
+                        .rotationEffect(.degrees(isOpen ? 90 : 0))
                 }
-                .background(tk.accent.opacity(0.05))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(tk.bd2, lineWidth: 1))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                let frac = TracePresenter.cacheFraction(u)
-                if frac > 0 {
-                    GeometryReader { geo in
-                        HStack(spacing: 0) {
-                            tk.diffAdd.frame(width: geo.size.width * frac)
-                            tk.accent
-                        }
-                    }
-                    .frame(height: 8).clipShape(Capsule())
-                    if let note = TracePresenter.cacheNote(u) {
-                        Text(note).font(.system(size: 11)).foregroundStyle(tk.t3)
-                    }
+                if isOpen { usageHistory(upToSeq: e.seq) }
+            }
+            .padding(.leading, 14).padding(.trailing, 10).padding(.vertical, 6)
+            .overlay(alignment: .leading) { tk.bd2.frame(width: 2) }
+            .contentShape(Rectangle())
+            .onTapGesture { toggle(&open, e.seq) }
+        }
+    }
+
+    private func usageHistory(upToSeq: Int) -> some View {
+        let history = TracePresenter.usageHistory(model.traceEvents, upToSeq: upToSeq)
+        return VStack(alignment: .leading, spacing: 3) {
+            Text("Usage · последние \(history.count)")
+                .font(.system(size: 10)).foregroundStyle(tk.t4)
+            ForEach(Array(history.enumerated()), id: \.offset) { _, h in
+                HStack(spacing: 10) {
+                    Text(h.time).foregroundStyle(tk.t4)
+                    Text("↑\(h.input)").foregroundStyle(tk.t3)
+                    Text("↓\(h.output)").foregroundStyle(tk.t3)
+                    Spacer()
+                    Text("\(h.context) ctx").foregroundStyle(tk.t4)
                 }
+                .font(.system(size: 10.5, design: .monospaced))
             }
         }
-        .padding(.horizontal, 14).padding(.bottom, 13))
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tk.accent.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .padding(.leading, 8)
     }
 
     // MARK: - Assistant / Result / Generic
