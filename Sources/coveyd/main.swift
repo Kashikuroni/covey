@@ -52,8 +52,13 @@ let gitMonitor = GitMonitor(snapshot: { registry.list().map { ($0.name, $0.dir) 
 let modelMonitor = ModelMonitor(snapshot: {
     registry.list().map { ($0.name, $0.cwd, $0.agent, $0.created, $0.resumeCmd) }
 })
+let traceStore = TraceStore()
+let traceMonitor = TraceMonitor(store: traceStore, snapshot: {
+    registry.list().map { ($0.name, $0.cwd, $0.agent, $0.created, $0.resumeCmd) }
+})
 let ipc = IPCServer(registry: registry, monitor: monitor, gitMonitor: gitMonitor,
-                    modelMonitor: modelMonitor)
+                    modelMonitor: modelMonitor, traceMonitor: traceMonitor,
+                    traceStore: traceStore)
 let server = SocketServer(path: socketPath)
 server.onAccept = { conn in
     ipc.register(conn)
@@ -86,5 +91,7 @@ do {
 monitor.start()
 gitMonitor.start()
 modelMonitor.start()
+traceStore.prune()   // drop traces older than the 7-day retention window
+traceMonitor.start()
 
 dispatchMain()

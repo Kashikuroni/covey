@@ -9,22 +9,39 @@ public final class IPCServer {
     private let monitor: StatusMonitor
     private let gitMonitor: GitMonitor?
     private let modelMonitor: ModelMonitor?
+    private let traceMonitor: TraceMonitor?
+    private let traceStore: TraceStore?
     private let server = DispatchQueue(label: "covey.ipc")
     private var sinks: [Int: ClientSink] = [:]
     private var subscribers: [String: Set<Int>] = [:]
+    private var traceSubscribers: [String: Set<Int>] = [:]
 
     public init(registry: SessionRegistry, monitor: StatusMonitor,
-                gitMonitor: GitMonitor? = nil, modelMonitor: ModelMonitor? = nil) {
+                gitMonitor: GitMonitor? = nil, modelMonitor: ModelMonitor? = nil,
+                traceMonitor: TraceMonitor? = nil, traceStore: TraceStore? = nil) {
         self.registry = registry
         self.monitor = monitor
         self.gitMonitor = gitMonitor
         self.modelMonitor = modelMonitor
+        self.traceMonitor = traceMonitor
+        self.traceStore = traceStore
         gitMonitor?.onGitChanged = { [weak self, weak registry] name, git in
             registry?.updateGit(name: name, git: git)
             self?.broadcast(.event(.gitChanged(name: name, git: git)))
         }
         modelMonitor?.onModelChanged = { [weak self] name, model in
             self?.broadcast(.event(.modelChanged(name: name, model: model)))
+        }
+        traceMonitor?.onTraceAppended = { [weak self] name, events in
+            self?.server.async {
+                guard let self, let subs = self.traceSubscribers[name], !subs.isEmpty else { return }
+                let appended = ServerMessage.event(.traceAppended(name: name, events: events))
+                for id in subs { self.sinks[id]?.send(appended) }
+                if let bytes = self.traceStore?.totalBytes() {
+                    let sizeMsg = ServerMessage.event(.traceStoreBytes(bytes: bytes))
+                    for id in subs { self.sinks[id]?.send(sizeMsg) }
+                }
+            }
         }
         monitor.onStatusChanged = { [weak self] name, status in
             self?.broadcast(.event(.statusChanged(name: name, status: status)))
@@ -52,7 +69,7 @@ public final class IPCServer {
         registry.onExit = { [weak self] name, code in
             guard let self else { return }
             self.broadcast(.event(.exited(name: name, code: code)))
-            self.server.async { self.subscribers[name] = nil }
+            self.server.async { self.subscribers[name] = nil; self.traceSubscribers[name] = nil }
         }
     }
 
@@ -65,6 +82,7 @@ public final class IPCServer {
             guard let self else { return }
             self.sinks[sink.id] = nil
             for name in self.subscribers.keys { self.subscribers[name]?.remove(sink.id) }
+            for name in self.traceSubscribers.keys { self.traceSubscribers[name]?.remove(sink.id) }
         }
     }
 
@@ -261,9 +279,15 @@ public final class IPCServer {
             guard registry.get(name: name) != nil else { return notFound(name) }
             registry.resize(name: name, cols: cols, rows: rows); reply(.ok)
 
-        case .traceSubscribe, .traceUnsubscribe:
-            // Wired in a later task; stubbed so the switch stays exhaustive.
-            reply(.error(code: "unsupported", message: "trace not wired"))
+        case let .traceSubscribe(name, sinceSeq):
+            guard registry.get(name: name) != nil else { return notFound(name) }
+            traceSubscribers[name, default: []].insert(sink.id)
+            let key = traceMonitor?.sessionKey(name: name)
+            let events = key.map { traceStore?.read(sessionKey: $0, sinceSeq: sinceSeq ?? 0) ?? [] } ?? []
+            reply(.traceBacklog(events: events, storeBytes: traceStore?.totalBytes() ?? 0))
+
+        case let .traceUnsubscribe(name):
+            traceSubscribers[name]?.remove(sink.id); reply(.ok)
         }
     }
 

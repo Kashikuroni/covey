@@ -88,6 +88,53 @@ final class IPCServerTests: XCTestCase {
         registry.kill(name: "s1")
     }
 
+    func testTraceSubscribeRepliesBacklogAndStreamsAppends() throws {
+        let root = "\(NSTemporaryDirectory())covey-ipctrace-\(UInt32.random(in: 0..<UInt32.max))"
+        try FileManager.default.createDirectory(atPath: "\(root)/projects/-usr",
+                                                withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        let uuid = "0b154175-0f2e-43e8-b5b0-97ec3cb0e6a4"
+        let jsonl = "\(root)/projects/-usr/\(uuid).jsonl"
+        func line(_ text: String) -> String {
+            #"{"type":"assistant","message":{"model":"m","content":[{"type":"text","text":"\#(text)"}]}}"# + "\n"
+        }
+        try line("first").write(toFile: jsonl, atomically: true, encoding: .utf8)
+
+        let registry = SessionRegistry(clock: { 1 })
+        let store = TraceStore(root: "\(root)/traces")
+        let monitor = TraceMonitor(store: store, projectsRoot: "\(root)/projects", snapshot: {
+            registry.list().map { ($0.name, $0.cwd, $0.agent, $0.created, $0.resumeCmd) }
+        })
+        let server = IPCServer(registry: registry,
+                               monitor: StatusMonitor(snapshot: { registry.snapshotScreens() }),
+                               traceMonitor: monitor, traceStore: store)
+        let sink = FakeSink(id: 1)
+        server.register(sink)
+        _ = try registry.create(dir: "/usr", agent: "claude", argv: ["/bin/cat"],
+                                name: "s1", resumeCmd: "claude --resume \(uuid)")
+        monitor.tick()   // persists backlog + maps name -> transcript key
+
+        server.handle(Request(id: 1, op: .traceSubscribe(name: "s1", sinceSeq: 0)), from: sink)
+        waitUntil({ sink.captured.contains {
+            if case .response(1, .traceBacklog(let events, _)) = $0 {
+                return events.contains { if case .assistantText("first") = $0.kind { return true }; return false }
+            }
+            return false
+        } }, "backlog on subscribe")
+
+        // A live append after subscribe fans out to the subscriber.
+        let fh = FileHandle(forWritingAtPath: jsonl)!
+        _ = try fh.seekToEnd(); try fh.write(contentsOf: Data(line("second").utf8)); try fh.close()
+        monitor.tick()
+        waitUntil({ sink.captured.contains {
+            if case .event(.traceAppended("s1", let events)) = $0 {
+                return events.contains { if case .assistantText("second") = $0.kind { return true }; return false }
+            }
+            return false
+        } }, "live append fans out to subscriber")
+        registry.kill(name: "s1")
+    }
+
     func testUnknownNameReturnsNotFound() {
         let registry = SessionRegistry()
         let server = IPCServer(registry: registry,
