@@ -1,57 +1,56 @@
 # Covey
 
-**Covey** — нативное macOS-приложение для управления сразу несколькими параллельными
-сессиями AI coding-агентов (Claude Code и подобных CLI-агентов).
+**Covey** is a native macOS application for managing multiple parallel sessions of AI coding agents (Claude Code and similar CLI agents) at once.
 
-Это переписанный с нуля на чистом Swift аналог Rust-приложения `agents_multiplexer`
-(`amux-desktop` + `amux-core`), без tmux и без Electron/WebView — только AppKit/SwiftUI
-и собственный демон, управляющий процессами напрямую.
+ It is a rewritten from scratch in pure Swift counterpart of Rust application `agents_multiplexer`
+(`amux-desktop` + `amux-core`), without tmux and without Electron/WebView — only AppKit/SwiftUI
+and its own daemon managing processes directly.
 
-## Цель проекта
+## Project goal
 
-Когда параллельно работает несколько agent-сессий (каждая — это долгоживущий процесс
-в своей PTY, часто привязанный к своему git-воркчтри), нужен единый центр, откуда видно
-их все: что происходит в каждой сессии, кто ждёт ответа, кто ещё работает, какие
-изменения появились в коде. Covey — это такой центр наблюдения и управления: пользователь
-переключается между сессиями, читает их вывод и git-диффы, ведёт заметки и следит за
-лимитами использования Claude.
+When several agent sessions are running in parallel (each is a long-lived process
+in its own PTY, often bound to its own git-worktree), you need a single center from which
+you can see them all: what is happening in each session, who is waiting for a response, who is still working, what
+changes appeared in the code. Covey is such a center of observation and management: the user
+switches between sessions, reads their output and git-diffs, keeps notes and monitors Claude's
+usage limits.
 
-## Архитектура
+## Architecture
 
-Приложение состоит из двух частей по модели клиент/сервер:
+The application consists of two parts in a client/server model:
 
-- **`coveyd`** — фоновый демон (запускается как `launchd` LaunchAgent). Владеет всеми
-  PTY и дочерними процессами агентов, хранит их scrollback-буферы, определяет статус
-  сессии по содержимому экрана и переживает перезапуск GUI.
-- **`covey`** — SwiftUI-приложение (тонкий клиент). Подключается к демону через Unix-сокет,
-  подписывается на события сессий, отрисовывает терминал через SwiftTerm и хранит
-  пользовательские настройки/заметки.
+- **`coveyd`** is a background daemon (launched as a `launchd` LaunchAgent). It owns all
+  PTY and child processes of agents, stores their scrollback buffers, determines the status
+  of the session by the screen content, and survives a GUI restart.
+- **`covey`** is a SwiftUI application (a thin client). It connects to the daemon via a Unix socket,
+  subscribes to session events, renders the terminal via SwiftTerm, and stores
+user settings/notes.
 
-## Функции
+## Functions
 
-- **Параллельные сессии агентов** — создание, переименование, остановка сессий;
-  список активных и недавних (recent) сессий, сгруппированных по проекту.
-- **Живой терминал** — рендеринг через SwiftTerm (только отображение, без запуска
-  процессов на стороне UI), со scrollback и индикатором режима истории.
-- **Автоопределение статуса сессии** — running / waiting / idle по анализу вывода
-  и обнаружению промпта агента, ожидающего ввода.
-- **Git-интеграция** — отображение ветки, статистики изменений (added/removed),
-  работа с git-воркчтри при создании сессий.
-- **Worktree-сессии** — создание сессии сразу в отдельном git worktree, с последующей
-  возможностью удалить и ветку при завершении.
-- **Issue-браузер** — просмотр, создание и редактирование issue прямо внутри приложения
-  (список, детальный просмотр, композер).
-- **Заметки** — markdown-заметки к сессиям и проектам с подсчётом чекбоксов задач.
-  черновики незавершённых сообщений сохраняются между сессиями.
-- **Лимиты использования Claude** — чтение OAuth-токена из Keychain, опрос
-  `GET /api/oauth/usage` и отображение окон использования (5ч / 7д) в виде чипа
-  в заголовке терминальной панели.
-- **Системные уведомления** — оповещения о смене статуса сессий, даже когда
-  приложение находится на переднем плане.
-- **Гибкая раскладка** — нативный `NSSplitView` с перетаскиваемыми разделителями
-  (список сессий / терминал / инспектор), сохраняемая между запусками.
-- **Клавиатурное управление** — нативные ⌘-сочетания и меню-бар как основа,
-  плюс опциональный vim-режим с leader-последовательностями и vim-подобным
-  редактором текста (normal/insert/visual режимы).
-- **Персистентность состояния** — настройки UI, порядок сессий, темы, заметки
-  и черновики сохраняются в `~/.covey/state.toml`.
+- **Parallel agent sessions** — create, rename, and stop sessions;
+  a list of active and recent sessions, grouped by project.
+- **Live Terminal** — rendering via SwiftTerm (display only, no startup
+  processes on the UI side), with scrollback and a history mode indicator.
+- **Auto-detection of session status** — running / waiting / idle by analyzing the output
+  and detecting the prompt of the agent waiting for input.
+- **Git integration** — displaying the branch, change statistics (added/removed),
+  working with git worktrees when creating sessions.
+- **Worktree sessions** — creating a session in a separate git worktree, with the subsequent
+  option to delete the branch when the session is completed.
+- **Issue-browser** - view, create and edit issue right inside the app
+  (list, detail view, composer).
+- **Notes** - markdown-notes to sessions and projects with counting checkboxes of tasks.
+  drafts of unfinished messages are saved between sessions.
+- **Claude usage limits** - read OAuth token from Keychain, poll
+  `GET /api/oauth/usage` and display usage windows (5h / 7d) as a chip
+  in the terminal bar header.
+- **System notifications** - alerts about session status changes, even when
+  the application is in the foreground.
+- **Flexible layout** - native `NSSplitView` with drag-and-drop dividers
+  (session list / terminal / inspector), saved between launches.
+- **Keyboard control** - native ⌘-combinations and menu bar as a basis,
+ plus an optional vim mode with leader-sequences and a vim-like
+ text editor (normal/insert/visual modes).
+- **State persistence** - UI settings, session order, themes, notes,
+ and drafts are saved in `~/.covey/state.toml`.
