@@ -258,6 +258,12 @@ enum TracePresenter {
         "↑\(u.input) ↓\(u.output) · \(compact(requestContext(u))) ctx"
     }
 
+    /// The most recent token-usage reading — shown collapsed on the pinned bar.
+    static func latestUsage(_ events: [TraceEvent]) -> TraceEvent.TokenUsage? {
+        for e in events.reversed() { if case let .tokenUsage(u) = e.kind { return u } }
+        return nil
+    }
+
     struct UsageHistoryEntry: Equatable {
         var time: String; var input: Int; var output: Int; var context: String
     }

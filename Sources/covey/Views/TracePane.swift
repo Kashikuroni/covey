@@ -52,14 +52,18 @@ struct TracePane: View {
     @Bindable var model: AppModel
     @State private var open: Set<Int> = []      // card body expanded
     @State private var src: Set<Int> = []       // raw-JSON source expanded
+    @State private var usageOpen = false        // pinned usage bar expanded
     private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
 
     var body: some View {
-        // Rate-limit readings are ambient state, not steps — pinned at the top,
-        // kept out of the card stream.
-        let stream = model.visibleTraceEvents.filter { TracePresenter.rateLimit($0) == nil }
+        // Usage and rate-limit readings are ambient state, not steps — pinned at
+        // the top, kept out of the card stream.
+        let stream = model.visibleTraceEvents.filter {
+            TracePresenter.rateLimit($0) == nil && TracePresenter.kind($0) != .usage
+        }
         return VStack(spacing: 0) {
             header
+            usageBar
             limitBar
             agentFilter
             if stream.isEmpty {
@@ -152,7 +156,7 @@ struct TracePane: View {
     @ViewBuilder private func row(for e: TraceEvent) -> some View {
         switch TracePresenter.kind(e) {
         case .thinking, .turn: thinRow(e)
-        case .usage: usageRow(e)
+        case .usage: EmptyView()   // shown in the pinned usage bar, not the stream
         default: card(e)
         }
     }
@@ -341,53 +345,54 @@ struct TracePane: View {
         }
     }
 
-    // MARK: - Usage (thin row + last-10 history on click)
+    // MARK: - Usage (single pinned bar → full-session history on click)
 
-    @ViewBuilder private func usageRow(_ e: TraceEvent) -> some View {
-        if case let .tokenUsage(u) = e.kind {
-            let isOpen = open.contains(e.seq)
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 9) {
+    @ViewBuilder private var usageBar: some View {
+        if let u = TracePresenter.latestUsage(model.traceEvents) {
+            VStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    Image(systemName: "circle.lefthalf.filled")
+                        .font(.system(size: 10)).foregroundStyle(tk.accent)
+                    Text("Usage").font(.system(size: 11, weight: .semibold)).foregroundStyle(tk.t2)
                     Text(TracePresenter.usageLine(u))
-                        .font(.system(size: 11.5, design: .monospaced)).foregroundStyle(tk.t3)
+                        .font(.system(size: 10.5, design: .monospaced)).foregroundStyle(tk.t3)
                     Spacer()
-                    Text(TracePresenter.clock(e.timestamp))
-                        .font(.system(size: 9.5, design: .monospaced)).foregroundStyle(tk.t4)
-                        .help(TracePresenter.stamp(e.timestamp))
                     Image(systemName: "chevron.right")
                         .font(.system(size: 8, weight: .semibold)).foregroundStyle(tk.t4)
-                        .rotationEffect(.degrees(isOpen ? 90 : 0))
+                        .rotationEffect(.degrees(usageOpen ? 90 : 0))
                 }
-                if isOpen { usageHistory(upToSeq: e.seq) }
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .contentShape(Rectangle())
+                .onTapGesture { usageOpen.toggle() }
+                if usageOpen { usageHistoryPanel }
             }
-            .padding(.leading, 14).padding(.trailing, 10).padding(.vertical, 6)
-            .overlay(alignment: .leading) { tk.bd2.frame(width: 2) }
-            .contentShape(Rectangle())
-            .onTapGesture { toggle(&open, e.seq) }
+            .background(tk.surface)
+            .overlay(alignment: .bottom) { tk.bd2.frame(height: 1) }
         }
     }
 
-    private func usageHistory(upToSeq: Int) -> some View {
-        let history = TracePresenter.usageHistory(model.traceEvents, upToSeq: upToSeq)
-        return VStack(alignment: .leading, spacing: 3) {
-            Text("Usage · последние \(history.count)")
-                .font(.system(size: 10)).foregroundStyle(tk.t4)
-            ForEach(Array(history.enumerated()), id: \.offset) { _, h in
-                HStack(spacing: 10) {
-                    Text(h.time).foregroundStyle(tk.t4)
-                    Text("↑\(h.input)").foregroundStyle(tk.t3)
-                    Text("↓\(h.output)").foregroundStyle(tk.t3)
-                    Spacer()
-                    Text("\(h.context) ctx").foregroundStyle(tk.t4)
+    /// Scrollable history of every usage reading in the session (newest first).
+    private var usageHistoryPanel: some View {
+        let history = TracePresenter.usageHistory(model.traceEvents, upToSeq: .max, limit: .max)
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(Array(history.enumerated()), id: \.offset) { _, h in
+                    HStack(spacing: 10) {
+                        Text(h.time).foregroundStyle(tk.t4)
+                        Text("↑\(h.input)").foregroundStyle(tk.t3)
+                        Text("↓\(h.output)").foregroundStyle(tk.t3)
+                        Spacer()
+                        Text("\(h.context) ctx").foregroundStyle(tk.t4)
+                    }
+                    .font(.system(size: 10.5, design: .monospaced))
                 }
-                .font(.system(size: 10.5, design: .monospaced))
             }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tk.accent.opacity(0.05))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .padding(.leading, 8)
+        .frame(maxHeight: 220)
+        .background(tk.accent.opacity(0.04))
+        .overlay(alignment: .bottom) { tk.bd2.frame(height: 1) }
     }
 
     // MARK: - Assistant / Result / Generic

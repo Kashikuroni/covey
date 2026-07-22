@@ -132,6 +132,16 @@ final class TracePaneTests: XCTestCase {
         XCTAssertEqual(line, "↑2 ↓455 · 417K ctx")
     }
 
+    func testLatestUsagePicksMostRecent() {
+        func u(_ seq: Int, out: Int) -> TraceEvent {
+            TraceEvent(seq: seq, agent: .main, cli: .claudeCode, timestamp: Date(),
+                       kind: .tokenUsage(.init(input: 1, output: out, cacheRead: 0,
+                           cacheCreate: 0, reasoning: 0, total: out + 1)), raw: "{}")
+        }
+        XCTAssertEqual(TracePresenter.latestUsage([u(0, out: 10), ev(.turnStarted), u(2, out: 99)])?.output, 99)
+        XCTAssertNil(TracePresenter.latestUsage([ev(.turnStarted)]))
+    }
+
     func testUsageHistoryFiltersBySeqNewestFirstAndLimits() {
         func u(_ seq: Int, out: Int) -> TraceEvent {
             TraceEvent(seq: seq, agent: .main, cli: .claudeCode,
