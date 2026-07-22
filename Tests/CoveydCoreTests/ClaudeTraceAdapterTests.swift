@@ -30,4 +30,24 @@ final class ClaudeTraceAdapterTests: XCTestCase {
     func testMalformedLineSkipped() {
         XCTAssertEqual(run("not-json\n{}\n").count, 0)
     }
+
+    func testToolResultAndThinking() {
+        let jsonl = #"{"type":"assistant","message":{"model":"m","content":[{"type":"thinking","thinking":"plan"}]}}"# + "\n" +
+                    #"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","is_error":true,"content":"err"}]}}"#
+        let events = run(jsonl + "\n")
+        guard case .thinking(let t) = events[0].kind else { return XCTFail() }
+        XCTAssertEqual(t, "plan")
+        guard case .toolResult(let id, let isError, let p) = events[1].kind else { return XCTFail() }
+        XCTAssertEqual(id, "toolu_1"); XCTAssertTrue(isError); XCTAssertEqual(p, "err")
+    }
+
+    func testSidechainEntriesGroupUnderOneSubagent() {
+        let jsonl = #"{"type":"assistant","uuid":"a","isSidechain":true,"message":{"model":"m","content":[{"type":"text","text":"root"}]}}"# + "\n" +
+                    #"{"type":"assistant","uuid":"b","parentUuid":"a","isSidechain":true,"message":{"model":"m","content":[{"type":"text","text":"child"}]}}"# + "\n" +
+                    #"{"type":"assistant","uuid":"c","isSidechain":false,"message":{"model":"m","content":[{"type":"text","text":"main"}]}}"#
+        let events = run(jsonl + "\n")
+        XCTAssertEqual(events[0].agent.id, "a")
+        XCTAssertEqual(events[1].agent.id, "a", "child inherits chain root via parentUuid")
+        XCTAssertEqual(events[2].agent, .main)
+    }
 }

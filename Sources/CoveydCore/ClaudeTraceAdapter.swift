@@ -18,29 +18,46 @@ public struct ClaudeTraceAdapter {
     }
 
     private mutating func events(from obj: [String: Any], seq: inout Int) -> [TraceEvent] {
-        guard obj["type"] as? String == "assistant",
-              let message = obj["message"] as? [String: Any] else { return [] }
+        let agent = resolveAgent(obj)
+        let ts = timestamp(obj["timestamp"] as? String)
+        let type = obj["type"] as? String
+
+        if type == "user", let message = obj["message"] as? [String: Any],
+           let content = message["content"] as? [[String: Any]] {
+            var out: [TraceEvent] = []
+            for block in content where block["type"] as? String == "tool_result" {
+                let id = block["tool_use_id"] as? String ?? ""
+                let isError = block["is_error"] as? Bool ?? false
+                let text = resultText(block["content"])
+                defer { seq += 1 }
+                out.append(TraceEvent(seq: seq, agent: agent, cli: .claudeCode,
+                    timestamp: ts, kind: .toolResult(callId: id, isError: isError,
+                    preview: preview(text)), raw: json(block)))
+            }
+            return out
+        }
+
+        guard type == "assistant", let message = obj["message"] as? [String: Any]
+        else { return [] }
         let version = obj["version"] as? String
         let model = message["model"] as? String
         let effort = obj["effort"] as? String
-        let ts = timestamp(obj["timestamp"] as? String)
         var out: [TraceEvent] = []
         func make(_ kind: TraceEvent.Kind, _ raw: String) -> TraceEvent {
             defer { seq += 1 }
-            return TraceEvent(seq: seq, agent: .main, cli: .claudeCode,
-                              cliVersion: version, model: model, effort: effort,
-                              timestamp: ts, kind: kind, raw: raw)
+            return TraceEvent(seq: seq, agent: agent, cli: .claudeCode,
+                cliVersion: version, model: model, effort: effort,
+                timestamp: ts, kind: kind, raw: raw)
         }
         for block in message["content"] as? [[String: Any]] ?? [] {
             switch block["type"] as? String {
             case "text":
-                let text = block["text"] as? String ?? ""
-                out.append(make(.assistantText(preview: preview(text)), json(block)))
+                out.append(make(.assistantText(preview: preview(block["text"] as? String ?? "")), json(block)))
+            case "thinking":
+                out.append(make(.thinking(preview: preview(block["thinking"] as? String ?? "")), json(block)))
             case "tool_use":
-                let id = block["id"] as? String ?? ""
-                let name = block["name"] as? String ?? "?"
-                out.append(make(.toolCall(id: id, name: name),
-                                json(block["input"] ?? [:])))
+                out.append(make(.toolCall(id: block["id"] as? String ?? "",
+                    name: block["name"] as? String ?? "?"), json(block["input"] ?? [:])))
             default: break
             }
         }
@@ -48,6 +65,28 @@ public struct ClaudeTraceAdapter {
             out.append(make(.tokenUsage(tokenUsage(usage)), json(usage)))
         }
         return out
+    }
+
+    /// Sidechain entries belong to a subagent keyed by the root uuid of their
+    /// parentUuid chain; non-sidechain entries are the main agent.
+    private mutating func resolveAgent(_ obj: [String: Any]) -> TraceEvent.AgentRef {
+        guard obj["isSidechain"] as? Bool == true else { return .main }
+        let uuid = obj["uuid"] as? String ?? UUID().uuidString
+        if let parent = obj["parentUuid"] as? String, let inherited = subagents[parent] {
+            subagents[uuid] = inherited
+            return inherited
+        }
+        let ref = TraceEvent.AgentRef(id: uuid, label: "subagent")
+        subagents[uuid] = ref
+        return ref
+    }
+
+    private func resultText(_ content: Any?) -> String {
+        if let s = content as? String { return s }
+        if let arr = content as? [[String: Any]] {
+            return arr.compactMap { $0["text"] as? String }.joined(separator: "\n")
+        }
+        return ""
     }
 
     private func tokenUsage(_ u: [String: Any]) -> TraceEvent.TokenUsage {
