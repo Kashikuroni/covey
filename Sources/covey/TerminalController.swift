@@ -136,6 +136,8 @@ struct TerminalRepresentable: NSViewRepresentable {
     final class Coordinator: TerminalViewDelegate {
         let model: AppModel
         let name: String
+        private let resizeGate = TerminalResizeGate()
+
         init(model: AppModel, name: String) { self.model = model; self.name = name }
 
         func send(source: TerminalView, data: ArraySlice<UInt8>) {
@@ -144,9 +146,16 @@ struct TerminalRepresentable: NSViewRepresentable {
         }
 
         func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
-            guard newCols > 0, newRows > 0 else { return }
-            let (cols, rows) = (UInt16(newCols), UInt16(newRows))
-            Task { @MainActor in await model.resize(cols: cols, rows: rows, name: name) }
+            guard let request = resizeGate.register(cols: newCols, rows: newRows) else {
+                return
+            }
+            let gate = resizeGate
+            let model = model
+            let name = name
+            Task { @MainActor in
+                guard gate.isLatest(request) else { return }
+                await model.resize(cols: request.cols, rows: request.rows, name: name)
+            }
         }
 
         func scrolled(source: TerminalView, position: Double) {
