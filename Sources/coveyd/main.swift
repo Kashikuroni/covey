@@ -50,7 +50,7 @@ let registry = SessionRegistry(persisted: registryStore.load(),
 let monitor = StatusMonitor(snapshot: { registry.snapshotScreens() })
 let gitMonitor = GitMonitor(snapshot: { registry.list().map { ($0.name, $0.dir) } })
 let modelMonitor = ModelMonitor(snapshot: {
-    registry.list().map { ($0.name, $0.cwd, $0.resumeCmd) }
+    registry.list().map { ($0.name, $0.cwd, $0.agent, $0.created, $0.resumeCmd) }
 })
 let ipc = IPCServer(registry: registry, monitor: monitor, gitMonitor: gitMonitor,
                     modelMonitor: modelMonitor)

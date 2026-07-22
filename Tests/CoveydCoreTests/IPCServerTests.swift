@@ -64,7 +64,7 @@ final class IPCServerTests: XCTestCase {
 
         let registry = SessionRegistry(clock: { 1 })
         let modelMonitor = ModelMonitor(projectsRoot: root, snapshot: {
-            registry.list().map { ($0.name, $0.cwd, $0.resumeCmd) }
+            registry.list().map { ($0.name, $0.cwd, $0.agent, $0.created, $0.resumeCmd) }
         })
         let server = IPCServer(registry: registry,
                                monitor: StatusMonitor(snapshot: { registry.snapshotScreens() }),

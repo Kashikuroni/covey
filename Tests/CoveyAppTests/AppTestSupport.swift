@@ -25,7 +25,7 @@ final class TestDaemon {
         monitor = StatusMonitor(snapshot: { registry.snapshotScreens() })
         gitMonitor = GitMonitor(snapshot: { registry.list().map { ($0.name, $0.dir) } })
         modelMonitor = ModelMonitor(projectsRoot: modelRoot, snapshot: {
-            registry.list().map { ($0.name, $0.cwd, $0.resumeCmd) }
+            registry.list().map { ($0.name, $0.cwd, $0.agent, $0.created, $0.resumeCmd) }
         })
         ipc = IPCServer(registry: registry, monitor: monitor, gitMonitor: gitMonitor,
                         modelMonitor: modelMonitor)

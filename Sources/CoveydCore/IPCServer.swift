@@ -45,7 +45,8 @@ public final class IPCServer {
             // and re-read right away (the dir may have changed too).
             gitMonitor?.forget(name: s.name)
             gitMonitor?.poke(name: s.name, dir: s.dir)
-            modelMonitor?.poke(name: s.name, cwd: s.cwd, resumeCmd: s.resumeCmd)
+            modelMonitor?.poke(name: s.name, cwd: s.cwd, agent: s.agent,
+                               created: s.created, resumeCmd: s.resumeCmd)
             self.broadcast(.event(.sessionAdded(session: s)))   // client upserts
         }
         registry.onExit = { [weak self] name, code in
@@ -131,7 +132,8 @@ public final class IPCServer {
                 // The card's git line should not wait out the poll interval.
                 gitMonitor?.poke(name: s.name, dir: s.dir)
                 // A resumed session's transcript already exists — badge now.
-                modelMonitor?.poke(name: s.name, cwd: s.cwd, resumeCmd: s.resumeCmd)
+                modelMonitor?.poke(name: s.name, cwd: s.cwd, agent: s.agent,
+                                   created: s.created, resumeCmd: s.resumeCmd)
                 reply(.session(s))
             } catch let e as RegistryError {
                 reply(errorResult(e))
