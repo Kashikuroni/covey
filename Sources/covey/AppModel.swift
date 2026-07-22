@@ -83,6 +83,11 @@ public final class AppModel {
     public private(set) var usage: Usage?
     public private(set) var plan: String?
     public private(set) var usageError: String?
+    // Codex limits are consumed only in-module (TopBar) + @testable tests, so
+    // these stay internal — their types (CodexRateLimitsSnapshot/State) are too.
+    private(set) var codexUsage: CodexRateLimitsSnapshot?
+    private(set) var codexPlan: String?
+    private(set) var codexState: CodexServerState = .stopped
     public private(set) var order: [String] = []
     public private(set) var projectOrder: [String] = []
     public var filter: String = ""
@@ -171,6 +176,7 @@ public final class AppModel {
     private let fetchAccount: () async -> Account
     private let usageInterval: TimeInterval
     private var usagePoller: Task<Void, Never>?
+    @ObservationIgnored private var codexServer: CodexAppServer?
 
     public init(client: IPCClient,
                 makeClient: @escaping () throws -> IPCClient,
@@ -257,6 +263,7 @@ public final class AppModel {
                 try? await Task.sleep(nanoseconds: UInt64(self.usageInterval * 1_000_000_000))
             }
         }
+        startCodexServer()
     }
 
     public func select(_ name: String?) async {
@@ -1128,12 +1135,60 @@ public final class AppModel {
         // current window's dedup survives network gaps.
         guard let usage = acc.usage else { return }
         let old = persisted.usageNotified ?? [:]
-        let (alerts, marks) = limitAlerts(usage: usage, notified: old, now: Date())
+        // Sonnet's 7d window is deliberately absent: chip-only, no alerts.
+        let (alerts, marks) = limitAlerts(
+            agent: "Claude",
+            windows: [("5h", usage.fiveHour), ("7d", usage.sevenDay)],
+            notified: old, now: Date())
         for alert in alerts { Notifier.post(alert) }
         if marks != old {
             persisted.usageNotified = marks
             persist()
         }
+    }
+
+    /// Spawn codex app-server if the binary resolves; wire snapshots/state in.
+    /// No binary → stays `.stopped`, chip empty. Passive-only.
+    private func startCodexServer() {
+        guard codexServer == nil, let path = resolveCodexPath() else { return }
+        let server = CodexAppServer()
+        server.onState = { [weak self] state in self?.setCodexState(state) }
+        server.onRateLimits = { [weak self] snap in self?.ingestCodexRateLimits(snap) }
+        codexServer = server
+        server.start(codexPath: path)
+    }
+
+    func setCodexState(_ state: CodexServerState) {
+        codexState = state
+        if case .active(let acc) = state {
+            codexPlan = codexPlanLabel(acc.planType)
+        } else {
+            codexPlan = nil
+            codexUsage = nil          // no chip when not active
+        }
+    }
+
+    /// Merge a (possibly partial) Codex snapshot into the live one, then run
+    /// the same 80%-alert machinery as Claude under the "codex" marker prefix.
+    func ingestCodexRateLimits(_ update: CodexRateLimitsSnapshot, now: Date = Date()) {
+        codexUsage = mergeCodex(into: codexUsage, update: update)
+        guard let usage = codexUsage else { return }
+        let old = persisted.usageNotified ?? [:]
+        let windows: [(key: String, window: UsageWindow?)] =
+            usage.windows.map { ($0.label, $0.window) }
+        let (alerts, marks) = limitAlerts(agent: "Codex", windows: windows,
+                                          notified: old, now: now)
+        for alert in alerts { Notifier.post(alert) }
+        if marks != old {
+            persisted.usageNotified = marks
+            persist()
+        }
+    }
+
+    /// App teardown: terminate the codex subprocess.
+    func stopCodexServer() {
+        codexServer?.stop()
+        codexServer = nil
     }
 
     private func apply(_ event: DaemonEvent) {

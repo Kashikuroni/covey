@@ -23,7 +23,9 @@ struct TopBar: View {
     var body: some View {
         HStack(spacing: 12) {
             UsageChip(usage: model.usage, plan: model.plan,
-                      error: model.usageError, tk: tk)
+                      error: model.usageError,
+                      codexUsage: model.codexUsage, codexPlan: model.codexPlan,
+                      tk: tk)
             if isFullscreen {
                 TimelineView(.everyMinute) { ctx in
                     Text(clock(ctx.date))

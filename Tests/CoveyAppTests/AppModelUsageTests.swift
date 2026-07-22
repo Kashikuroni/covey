@@ -72,7 +72,50 @@ final class AppModelUsageTests: XCTestCase {
             guard let data = FileManager.default.contents(atPath: statePath),
                   let st = try? JSONDecoder().decode(PersistedState.self, from: data)
             else { return false }
-            return st.usageNotified == ["5h": 1_008_000]
+            return st.usageNotified == ["claude:5h": 1_008_000]
+        }
+        XCTAssertTrue(persisted)
+    }
+
+    @MainActor
+    func testCodexIngestMergesAndExposesWindows() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let model = try makeUsageModel(daemon, fetch: { Account() })
+        await model.start()
+        model.setCodexState(.active(CodexAccount(type: "chatgpt", planType: "pro")))
+        model.ingestCodexRateLimits(CodexRateLimitsSnapshot(
+            primary: LabeledWindow(label: "5h", window: UsageWindow(utilization: 12, resetUnix: 1)),
+            secondary: LabeledWindow(label: "7d", window: UsageWindow(utilization: 40, resetUnix: 2))))
+        // Partial update: only primary — secondary must survive.
+        model.ingestCodexRateLimits(CodexRateLimitsSnapshot(
+            primary: LabeledWindow(label: "5h", window: UsageWindow(utilization: 55, resetUnix: 3)),
+            secondary: nil))
+        XCTAssertEqual(model.codexPlan, "Pro")
+        XCTAssertEqual(model.codexUsage?.primary?.window.utilization, 55)
+        XCTAssertEqual(model.codexUsage?.secondary?.window.utilization, 40)
+    }
+
+    @MainActor
+    func testCodexLimitCrossingPersistsPrefixedMarker() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let statePath = "\(NSTemporaryDirectory())covey-codex-\(UInt32.random(in: 0..<UInt32.max)).json"
+        let client = IPCClient(path: daemon.path); try client.connect()
+        let model = AppModel(
+            client: client,
+            makeClient: { let c = IPCClient(path: daemon.path); try c.connect(); return c },
+            store: StateStore(path: statePath, debounce: 0.05),
+            fetchAccount: { Account() },
+            usageInterval: 60)
+        await model.start()
+        model.setCodexState(.active(CodexAccount(type: "chatgpt", planType: "plus")))
+        model.ingestCodexRateLimits(CodexRateLimitsSnapshot(
+            primary: LabeledWindow(label: "5h", window: UsageWindow(utilization: 88, resetUnix: 1_008_000)),
+            secondary: nil))
+        let persisted = await eventually {
+            guard let data = FileManager.default.contents(atPath: statePath),
+                  let st = try? JSONDecoder().decode(PersistedState.self, from: data)
+            else { return false }
+            return st.usageNotified?["codex:5h"] == 1_008_000
         }
         XCTAssertTrue(persisted)
     }
