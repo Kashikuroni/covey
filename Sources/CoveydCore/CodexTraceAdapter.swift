@@ -31,6 +31,8 @@ public struct CodexTraceAdapter {
             return []
         case "response_item":
             return responseItem(payload, seq: &seq)
+        case "event_msg":
+            return eventMsg(payload, seq: &seq)
         default:
             return []
         }
@@ -53,6 +55,55 @@ public struct CodexTraceAdapter {
             let id = p["call_id"] as? String ?? ""
             let text = (p["output"] as? String) ?? ""
             return [make(.toolResult(callId: id, isError: false, preview: preview(text)), p)]
+        case "reasoning":
+            let text = ((p["summary"] as? [[String: Any]])?.compactMap { $0["text"] as? String }
+                .joined(separator: "\n")) ?? ""
+            return [make(.thinking(preview: preview(text)), p)]
+        default:
+            return []
+        }
+    }
+
+    private func eventMsg(_ p: [String: Any], seq: inout Int) -> [TraceEvent] {
+        let ts = Date()
+        func make(_ kind: TraceEvent.Kind, _ raw: Any) -> TraceEvent {
+            defer { seq += 1 }
+            return TraceEvent(seq: seq, agent: .main, cli: .codex, cliVersion: version,
+                model: model, effort: effort, timestamp: ts, kind: kind, raw: json(raw))
+        }
+        switch p["type"] as? String {
+        case "task_started":  return [make(.turnStarted, p)]
+        case "task_complete": return [make(.turnCompleted(durationMs: nil), p)]
+        case "token_count":
+            var out: [TraceEvent] = []
+            if let info = p["info"] as? [String: Any],
+               let last = info["last_token_usage"] as? [String: Any] {
+                func int(_ d: [String: Any], _ k: String) -> Int { (d[k] as? NSNumber)?.intValue ?? 0 }
+                let usage = TraceEvent.TokenUsage(
+                    input: int(last, "input_tokens"), output: int(last, "output_tokens"),
+                    cacheRead: int(last, "cached_input_tokens"), cacheCreate: 0,
+                    reasoning: int(last, "reasoning_output_tokens"),
+                    total: int(last, "total_tokens"),
+                    contextWindow: (info["model_context_window"] as? NSNumber)?.intValue)
+                out.append(make(.tokenUsage(usage), info))
+            }
+            if let limits = p["rate_limits"] as? [String: Any],
+               let primary = limits["primary"] as? [String: Any],
+               let pct = (primary["used_percent"] as? NSNumber)?.doubleValue {
+                let resets = (primary["resets_at"] as? NSNumber).map {
+                    Date(timeIntervalSince1970: $0.doubleValue) }
+                out.append(make(.rateLimit(usedPercent: pct, resetsAt: resets,
+                    plan: p["plan_type"] as? String), limits))
+            }
+            return out
+        case "patch_apply_end":
+            guard let changes = p["changes"] as? [String: [String: Any]] else { return [] }
+            return changes.sorted { $0.key < $1.key }.map { path, delta in
+                make(.fileEdit(path: path,
+                    added: (delta["added"] as? NSNumber)?.intValue ?? 0,
+                    removed: (delta["removed"] as? NSNumber)?.intValue ?? 0,
+                    diff: delta["diff"] as? String), delta)
+            }
         default:
             return []
         }
