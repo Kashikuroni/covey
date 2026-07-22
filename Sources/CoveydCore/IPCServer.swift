@@ -283,7 +283,10 @@ public final class IPCServer {
             guard registry.get(name: name) != nil else { return notFound(name) }
             traceSubscribers[name, default: []].insert(sink.id)
             let key = traceMonitor?.sessionKey(name: name)
-            let events = key.map { traceStore?.read(sessionKey: $0, sinceSeq: sinceSeq ?? 0) ?? [] } ?? []
+            // Cap the backlog: the panel only shows recent activity, and reading
+            // a long session's whole store here would block the IPC queue.
+            let events = key.map { traceStore?.read(sessionKey: $0, sinceSeq: sinceSeq ?? 0,
+                                                    limit: 500) ?? [] } ?? []
             reply(.traceBacklog(events: events, storeBytes: traceStore?.totalBytes() ?? 0))
 
         case let .traceUnsubscribe(name):

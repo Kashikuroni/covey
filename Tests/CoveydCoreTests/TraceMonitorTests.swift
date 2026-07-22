@@ -31,6 +31,22 @@ final class TraceMonitorTests: XCTestCase {
         return (m, s)
     }
 
+    func testRestartDoesNotDuplicateAlreadyProcessedEvents() throws {
+        try line("first").write(toFile: jsonl, atomically: true, encoding: .utf8)
+        let sharedStore = TraceStore(root: store)
+        func freshMonitor() -> TraceMonitor {
+            TraceMonitor(store: sharedStore, interval: 5, projectsRoot: claudeRoot,
+                         codexSessionsRoot: codexRoot, snapshot: { [self.entry()] })
+        }
+        freshMonitor().tick()
+        XCTAssertEqual(sharedStore.read(sessionKey: uuid, sinceSeq: 0).count, 1)
+        // Simulate a daemon restart: a brand-new monitor over the SAME store and
+        // the SAME (unchanged) transcript must not re-append what it already has.
+        freshMonitor().tick()
+        XCTAssertEqual(sharedStore.read(sessionKey: uuid, sinceSeq: 0).count, 1,
+                       "restart re-read the transcript from 0 and duplicated events")
+    }
+
     func testTailsOnlyNewBytesAndAssignsMonotonicSeq() throws {
         try line("first").write(toFile: jsonl, atomically: true, encoding: .utf8)
         let (monitor, store) = makeMonitor()

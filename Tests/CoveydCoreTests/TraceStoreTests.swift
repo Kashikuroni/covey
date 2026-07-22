@@ -49,4 +49,21 @@ final class TraceStoreTests: XCTestCase {
         store.append(sessionKey: "s1", events: [ev(0)])
         XCTAssertGreaterThan(store.totalBytes(), 0)
     }
+
+    func testReadLimitKeepsNewest() {
+        let store = TraceStore(root: root)
+        store.append(sessionKey: "s1", events: (0..<10).map { ev($0) })
+        XCTAssertEqual(store.read(sessionKey: "s1", sinceSeq: 0, limit: 3).map(\.seq), [7, 8, 9])
+    }
+
+    func testOffsetCursorRoundTripAndReset() {
+        let store = TraceStore(root: root)
+        XCTAssertNil(store.loadOffset(sessionKey: "s1"))
+        store.append(sessionKey: "s1", events: [ev(0)])
+        store.saveOffset(sessionKey: "s1", offset: 4096)
+        XCTAssertEqual(store.loadOffset(sessionKey: "s1"), 4096)
+        store.reset(sessionKey: "s1")
+        XCTAssertNil(store.loadOffset(sessionKey: "s1"))
+        XCTAssertTrue(store.read(sessionKey: "s1", sinceSeq: 0).isEmpty)
+    }
 }

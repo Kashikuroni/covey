@@ -16,10 +16,14 @@ public final class TraceStore {
         try? FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
     }
 
-    private func path(_ key: String) -> String {
-        let safe = String(key.map { $0.isLetter || $0.isNumber || $0 == "-" ? $0 : "-" })
-        return "\(root)/\(safe).ndjson"
+    private func safeKey(_ key: String) -> String {
+        String(key.map { $0.isLetter || $0.isNumber || $0 == "-" ? $0 : "-" })
     }
+    private func path(_ key: String) -> String { "\(root)/\(safeKey(key)).ndjson" }
+    /// Sidecar holding the source-file byte offset already folded into this
+    /// session's trace, so a daemon restart resumes instead of re-reading (and
+    /// re-appending) the whole transcript.
+    private func cursorPath(_ key: String) -> String { "\(root)/\(safeKey(key)).cursor" }
 
     public func append(sessionKey: String, events: [TraceEvent]) {
         guard !events.isEmpty else { return }
@@ -36,18 +40,48 @@ public final class TraceStore {
         }
     }
 
-    public func read(sessionKey: String, sinceSeq: Int) -> [TraceEvent] {
+    /// Events with `seq >= sinceSeq`. `limit` keeps only the newest `limit`
+    /// of them — the panel and the subscribe backlog never need the whole
+    /// history, and reading it wholesale blocks the IPC queue.
+    public func read(sessionKey: String, sinceSeq: Int, limit: Int? = nil) -> [TraceEvent] {
         queue.sync {
             guard let data = FileManager.default.contents(atPath: path(sessionKey)) else { return [] }
             var framer = LineFramer()
             let lines = (try? framer.feed([UInt8](data))) ?? []
-            return lines.compactMap { try? NDJSON.decoder.decode(TraceEvent.self, from: Data($0)) }
+            let matched = lines.compactMap { try? NDJSON.decoder.decode(TraceEvent.self, from: Data($0)) }
                 .filter { $0.seq >= sinceSeq }
+            if let limit, matched.count > limit { return Array(matched.suffix(limit)) }
+            return matched
         }
     }
 
     public func lastSeq(sessionKey: String) -> Int {
         read(sessionKey: sessionKey, sinceSeq: 0).last?.seq ?? -1
+    }
+
+    /// The persisted source byte offset for a session, or nil if none is
+    /// recorded (a fresh session, or a pre-cursor store to be migrated).
+    public func loadOffset(sessionKey: String) -> UInt64? {
+        queue.sync {
+            guard let text = try? String(contentsOfFile: cursorPath(sessionKey), encoding: .utf8)
+            else { return nil }
+            return UInt64(text.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+    }
+
+    public func saveOffset(sessionKey: String, offset: UInt64) {
+        queue.sync {
+            try? "\(offset)".write(toFile: cursorPath(sessionKey), atomically: true, encoding: .utf8)
+        }
+    }
+
+    /// Drop a session's trace and cursor — used to migrate a pre-cursor
+    /// (possibly duplicated) store before a clean re-read.
+    public func reset(sessionKey: String) {
+        queue.sync {
+            try? FileManager.default.removeItem(atPath: path(sessionKey))
+            try? FileManager.default.removeItem(atPath: cursorPath(sessionKey))
+        }
     }
 
     public func totalBytes() -> Int {

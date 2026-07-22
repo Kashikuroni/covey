@@ -313,7 +313,16 @@ public final class AppModel {
             let out = try await client.traceSubscribe(name: name, sinceSeq: 0)
             traceEvents = out.events
             traceStoreBytes = out.storeBytes
+            capTrace()
         } catch { toast = errorText(error) }
+    }
+
+    /// Bound the in-memory trace so a long-running session can't grow the render
+    /// list without limit (older rows drop off the bottom of the stack).
+    private func capTrace(_ maximum: Int = 1000) {
+        if traceEvents.count > maximum {
+            traceEvents.removeFirst(traceEvents.count - maximum)
+        }
     }
 
     /// Names whose attach replay was already consumed by a mounted view. A
@@ -1311,6 +1320,7 @@ public final class AppModel {
         case let .traceAppended(name, events):
             guard name == selected, inspectorMode == .trace else { return }
             traceEvents.append(contentsOf: events)
+            capTrace()
         case let .traceStoreBytes(bytes):
             traceStoreBytes = bytes
         }
