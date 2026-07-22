@@ -151,6 +151,22 @@ public final class IPCClient {
         try await expectOK(.detach(name: name))
     }
 
+    /// Subscribe to a session's agent trace. Returns the backlog since
+    /// `sinceSeq` and the current store size; live `traceAppended` events follow
+    /// via the events stream.
+    public func traceSubscribe(name: String, sinceSeq: Int? = nil)
+        async throws -> (events: [TraceEvent], storeBytes: Int) {
+        if case let .traceBacklog(events, storeBytes)
+            = try await request(.traceSubscribe(name: name, sinceSeq: sinceSeq)) {
+            return (events, storeBytes)
+        }
+        throw IPCClientError.daemonError(code: "badResponse", message: "expected traceBacklog")
+    }
+
+    public func traceUnsubscribe(name: String) async throws {
+        try await expectOK(.traceUnsubscribe(name: name))
+    }
+
     /// Ask the daemon to SIGWINCH-kick the child for a full repaint.
     public func refresh(name: String) async throws {
         try await expectOK(.refresh(name: name))
