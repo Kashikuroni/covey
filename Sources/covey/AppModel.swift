@@ -1250,6 +1250,8 @@ public final class AppModel {
                 // flushed when the view mounts
                 outputBuffers[name, default: []].append(contentsOf: bytes)
             }
+        case .traceAppended, .traceStoreBytes:
+            break   // handled in a later task
         }
     }
 

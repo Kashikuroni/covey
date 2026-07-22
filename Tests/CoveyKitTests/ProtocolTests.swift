@@ -122,6 +122,17 @@ final class ProtocolTests: XCTestCase {
                                                                lost: nil, models: nil)))
     }
 
+    func testTraceOpsAndEventsRoundTrip() throws {
+        let e = TraceEvent(seq: 0, agent: .main, cli: .claudeCode,
+                           timestamp: Date(timeIntervalSince1970: 1), kind: .turnStarted, raw: "{}")
+        try roundTrip(Request(id: 1, op: .traceSubscribe(name: "s", sinceSeq: 5)))
+        try roundTrip(Request(id: 2, op: .traceUnsubscribe(name: "s")))
+        try roundTrip(ServerMessage.response(id: 1,
+            result: .traceBacklog(events: [e], storeBytes: 42)))
+        try roundTrip(ServerMessage.event(.traceAppended(name: "s", events: [e])))
+        try roundTrip(ServerMessage.event(.traceStoreBytes(bytes: 42)))
+    }
+
     func testStatusChangedGoldenWireFormat() throws {
         let data = try encoder().encode(DaemonEvent.statusChanged(name: "s-1", status: .waiting))
         XCTAssertEqual(

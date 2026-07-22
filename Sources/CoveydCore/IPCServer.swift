@@ -260,6 +260,10 @@ public final class IPCServer {
         case let .resize(name, cols, rows):
             guard registry.get(name: name) != nil else { return notFound(name) }
             registry.resize(name: name, cols: cols, rows: rows); reply(.ok)
+
+        case .traceSubscribe, .traceUnsubscribe:
+            // Wired in a later task; stubbed so the switch stays exhaustive.
+            reply(.error(code: "unsupported", message: "trace not wired"))
         }
     }
 
