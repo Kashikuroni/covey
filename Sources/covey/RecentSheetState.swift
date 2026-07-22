@@ -13,6 +13,17 @@ struct RecentSearchItem: Identifiable, Equatable {
     var id: String { session.name }
 }
 
+func recentSearchItems(current: [RecentSession], retaining: [RecentSession] = [],
+                       displayName: (String) -> String) -> [RecentSearchItem] {
+    var seen = Set(current.map(\.name))
+    let sessions = current + retaining.filter { seen.insert($0.name).inserted }
+    return sessions.map { session in
+        let root = projectRoot(session.dir)
+        return RecentSearchItem(session: session, projectRoot: root,
+                                projectName: displayName(root))
+    }
+}
+
 func recentResults(_ candidates: [RecentSearchItem], query: String,
                    excluding: Set<String> = []) -> [RecentSearchItem] {
     let ordered = candidates.enumerated().sorted { lhs, rhs in
@@ -79,15 +90,19 @@ struct RecentSheetState {
     }
 
     mutating func completeRestore(_ name: String, succeeded: Bool,
-                                  visibleBefore: [RecentSearchItem]) {
+                                  visibleBefore: [RecentSearchItem],
+                                  visibleNow: [RecentSearchItem]? = nil) {
         restoringNames.remove(name)
         if succeeded {
             let oldIndex = visibleBefore.firstIndex(where: { $0.id == name }) ?? 0
             restoredNames.insert(name)
-            let remaining = visibleBefore.filter { $0.id != name }
+            let remaining = (visibleNow ?? visibleBefore)
+                .filter { !restoredNames.contains($0.id) }
             selectedName = remaining.isEmpty ? nil : remaining[min(oldIndex, remaining.count - 1)].id
         } else {
-            selectedName = name
+            let current = visibleNow ?? visibleBefore
+            selectedName = current.contains(where: { $0.id == name })
+                ? name : current.first?.id
             failureTriggers[name, default: 0] &+= 1
         }
     }

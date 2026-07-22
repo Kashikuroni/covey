@@ -42,6 +42,24 @@ final class RecentSheetStateTests: XCTestCase {
         XCTAssertEqual(recentResults([after], query: "mentor").map(\.id), ["api"])
     }
 
+    func testSearchItemsRebuildProjectNameAndRetainOnlyMissingPendingSessions() {
+        let activeRecent = RecentSession(name: "api", dir: "/repos/ms", agent: "claude")
+        let pending = RecentSession(name: "worker", dir: "/repos/ms", agent: "codex")
+        var projectName = "MS"
+
+        var items = recentSearchItems(current: [activeRecent], retaining: [activeRecent, pending]) {
+            _ in projectName
+        }
+        XCTAssertEqual(items.map(\.id), ["api", "worker"])
+        XCTAssertTrue(recentResults(items, query: "mentor").isEmpty)
+
+        projectName = "Mentor Solution"
+        items = recentSearchItems(current: [activeRecent], retaining: [activeRecent, pending]) {
+            _ in projectName
+        }
+        XCTAssertEqual(recentResults(items, query: "mentor").map(\.id), ["api", "worker"])
+    }
+
     func testSheetHeightUsesIntrinsicRowsAndCapsAtSixtyPercent() {
         XCTAssertEqual(recentSheetHeight(rowCount: 1, screenHeight: 1000), 250)
         XCTAssertEqual(recentSheetHeight(rowCount: 20, screenHeight: 1000), 600)
@@ -93,6 +111,51 @@ final class RecentSheetStateTests: XCTestCase {
         XCTAssertEqual(state.selectedName, "c")
         XCTAssertTrue(state.beginRestore("c"))
         state.completeRestore("c", succeeded: true, visibleBefore: rows)
+        XCTAssertEqual(state.selectedName, "b")
+    }
+
+    func testOutOfOrderRestoreCompletionsNeverSelectAnAlreadyRestoredRow() {
+        let rows = [item("a", stopped: 30), item("b", stopped: 20),
+                    item("c", stopped: 10)]
+        var state = RecentSheetState()
+        state.open(rows: rows)
+
+        XCTAssertTrue(state.beginRestore("a"))
+        XCTAssertTrue(state.beginRestore("b"))
+        state.completeRestore("b", succeeded: true, visibleBefore: rows)
+        state.completeRestore("a", succeeded: true, visibleBefore: rows)
+
+        XCTAssertEqual(state.results(from: rows).map(\.id), ["c"])
+        XCTAssertEqual(state.selectedName, "c")
+    }
+
+    func testRestoreCompletionCannotSelectARowHiddenByAChangedQuery() {
+        let rows = [item("a", stopped: 30), item("b", stopped: 20)]
+        var state = RecentSheetState()
+        state.open(rows: rows)
+        XCTAssertTrue(state.beginRestore("a"))
+
+        state.query = "no-match"
+        let visibleNow = state.results(from: rows)
+        state.completeRestore("a", succeeded: true, visibleBefore: rows,
+                              visibleNow: visibleNow)
+
+        XCTAssertTrue(visibleNow.isEmpty)
+        XCTAssertNil(state.selectedName)
+    }
+
+    func testFailedRestoreSelectsAVisibleRowWhenQueryHidesTheFailedRow() {
+        let rows = [item("a", stopped: 30), item("b", stopped: 20)]
+        var state = RecentSheetState()
+        state.open(rows: rows)
+        XCTAssertTrue(state.beginRestore("a"))
+
+        state.query = "b"
+        let visibleNow = state.results(from: rows)
+        state.completeRestore("a", succeeded: false, visibleBefore: rows,
+                              visibleNow: visibleNow)
+
+        XCTAssertEqual(visibleNow.map(\.id), ["b"])
         XCTAssertEqual(state.selectedName, "b")
     }
 }

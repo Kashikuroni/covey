@@ -26,20 +26,18 @@ extension AppModel.Modal: Identifiable {
 struct RecentSheet: View {
     let model: AppModel
     @State private var state = RecentSheetState()
-    @State private var sourceItems: [RecentSearchItem] = []
+    @State private var retainedSessions: [RecentSession] = []
     @FocusState private var focused: RecentSheetFocus?
 
     private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
     private var candidates: [RecentSearchItem] {
-        model.visibleRecents().map { recent in
-            let root = projectRoot(recent.dir)
-            return RecentSearchItem(session: recent, projectRoot: root,
-                                    projectName: model.displayName(forDir: root))
+        recentSearchItems(current: model.visibleRecents(), retaining: retainedSessions) { root in
+            model.displayName(forDir: root)
         }
     }
-    /// Keep rows stable until the create response arrives: sessionAdded can be
-    /// delivered first, and visibleRecents would otherwise skip the transition.
-    private var rows: [RecentSearchItem] { state.results(from: sourceItems) }
+    /// A restoring row is retained until the create response arrives because
+    /// sessionAdded can be delivered first and hide it from visibleRecents.
+    private var rows: [RecentSearchItem] { state.results(from: candidates) }
     private var maximumScreenHeight: CGFloat {
         let screen = NSApp.keyWindow?.screen ?? NSScreen.main
         return screen?.visibleFrame.height ?? 900
@@ -60,7 +58,7 @@ struct RecentSheet: View {
                 }
                 .onExitCommand {
                     state.query = ""
-                    state.commitSearch(rows: state.results(from: sourceItems))
+                    state.commitSearch(rows: state.results(from: candidates))
                     focused = .list
                 }
             resultsList
@@ -75,9 +73,7 @@ struct RecentSheet: View {
         .frame(width: 480, height: height)
         .focusEffectDisabled()
         .onAppear {
-            let initial = candidates
-            sourceItems = initial
-            state.open(rows: recentResults(initial, query: state.query))
+            state.open(rows: recentResults(candidates, query: state.query))
             focused = .list
         }
         .onChange(of: state.query) { _, _ in state.reconcile(rows: rows) }
@@ -162,19 +158,26 @@ struct RecentSheet: View {
     private func restore(_ item: RecentSearchItem, activate: Bool) {
         let visibleBefore = rows
         guard state.beginRestore(item.id) else { return }
+        retainedSessions.append(item.session)
         Task {
             let succeeded = await model.relaunchRecent(item.session, activate: activate)
             if succeeded && activate {
                 model.modal = nil
             } else if succeeded {
+                let visibleNow = rows
                 withAnimation(.easeInOut(duration: 0.14)) {
                     state.completeRestore(item.id, succeeded: true,
-                                          visibleBefore: visibleBefore)
+                                          visibleBefore: visibleBefore,
+                                          visibleNow: visibleNow)
+                    retainedSessions.removeAll { $0.name == item.id }
                 }
                 focused = .list
             } else {
+                let visibleNow = rows
                 state.completeRestore(item.id, succeeded: false,
-                                      visibleBefore: visibleBefore)
+                                      visibleBefore: visibleBefore,
+                                      visibleNow: visibleNow)
+                retainedSessions.removeAll { $0.name == item.id }
                 focused = .list
             }
         }
