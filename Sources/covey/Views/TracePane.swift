@@ -55,17 +55,21 @@ struct TracePane: View {
     private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
 
     var body: some View {
-        VStack(spacing: 0) {
+        // Rate-limit readings are ambient state, not steps — pinned at the top,
+        // kept out of the card stream.
+        let stream = model.visibleTraceEvents.filter { TracePresenter.rateLimit($0) == nil }
+        return VStack(spacing: 0) {
             header
+            limitBar
             agentFilter
-            if model.visibleTraceEvents.isEmpty {
+            if stream.isEmpty {
                 Text("no activity yet")
                     .font(.caption).foregroundStyle(tk.t4)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
-                        ForEach(TraceRow.displayOrder(model.visibleTraceEvents), id: \.seq) { e in
+                        ForEach(TraceRow.displayOrder(stream), id: \.seq) { e in
                             row(for: e)
                         }
                     }
@@ -74,6 +78,35 @@ struct TracePane: View {
             }
         }
         .background(tk.bg)
+    }
+
+    /// Thin pinned strip with the newest rate-limit reading; hidden when the
+    /// session's CLI never reports limits (e.g. Claude transcripts).
+    @ViewBuilder private var limitBar: some View {
+        if let rl = TracePresenter.latestRateLimit(model.visibleTraceEvents) {
+            let color = rl.percent > 85 ? tk.err : rl.percent > 60 ? tk.wait : tk.ok
+            HStack(spacing: 8) {
+                Text(rl.plan ?? "limit")
+                    .font(.system(size: 10.5, design: .monospaced)).foregroundStyle(tk.t3)
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(tk.bd2)
+                        Capsule().fill(color)
+                            .frame(width: geo.size.width * min(max(rl.percent / 100, 0), 1))
+                    }
+                }
+                .frame(height: 5)
+                Text("\(Int(rl.percent.rounded()))%")
+                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced)).foregroundStyle(tk.t2)
+                if let reset = TracePresenter.resetLabel(rl.resetsAt) {
+                    Text("сброс \(reset)")
+                        .font(.system(size: 10, design: .monospaced)).foregroundStyle(tk.t4)
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 5)
+            .background(tk.surface)
+            .overlay(alignment: .bottom) { tk.bd2.frame(height: 1) }
+        }
     }
 
     // MARK: - Chrome
@@ -168,6 +201,9 @@ struct TracePane: View {
             if !meta.isEmpty {
                 Text(meta).font(.system(size: 10.5, design: .monospaced)).foregroundStyle(tk.t3)
             }
+            Text(TracePresenter.clock(e.timestamp))
+                .font(.system(size: 10, design: .monospaced)).foregroundStyle(tk.t4)
+                .help(TracePresenter.stamp(e.timestamp))
             Image(systemName: "chevron.right")
                 .font(.system(size: 9, weight: .semibold)).foregroundStyle(tk.t4)
                 .rotationEffect(.degrees(isOpen ? 90 : 0))
@@ -395,6 +431,9 @@ struct TracePane: View {
                 if TracePresenter.kind(e) == .thinking {
                     Text("скрыто").font(.system(size: 10)).foregroundStyle(tk.t4)
                 }
+                Text(TracePresenter.clock(e.timestamp))
+                    .font(.system(size: 9.5, design: .monospaced)).foregroundStyle(tk.t4)
+                    .help(TracePresenter.stamp(e.timestamp))
             }
             if isOpen, !preview.isEmpty {
                 Text(preview).font(.system(size: 11.5)).foregroundStyle(tk.t3)

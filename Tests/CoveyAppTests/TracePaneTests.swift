@@ -101,4 +101,30 @@ final class TracePaneTests: XCTestCase {
         XCTAssertTrue(rows.contains { $0.label == "Прочитано из кэша" && $0.value == "324 308" })
         XCTAssertTrue(rows.contains { $0.label == "Контекст запроса" })
     }
+
+    func testClockAndStampFormatInFixedZone() {
+        let utc = TimeZone(identifier: "UTC")!
+        let d = Date(timeIntervalSince1970: 0)
+        XCTAssertEqual(TracePresenter.clock(d, timeZone: utc), "00:00:00")
+        XCTAssertEqual(TracePresenter.stamp(d, timeZone: utc), "1970-01-01 00:00:00")
+    }
+
+    func testLatestRateLimitPicksMostRecent() {
+        func rl(_ seq: Int, _ pct: Double) -> TraceEvent {
+            TraceEvent(seq: seq, agent: .main, cli: .codex, timestamp: Date(),
+                       kind: .rateLimit(usedPercent: pct, resetsAt: nil, plan: "plus"), raw: "{}")
+        }
+        let events = [rl(0, 10), ev(.turnStarted), rl(2, 42)]
+        XCTAssertEqual(TracePresenter.latestRateLimit(events)?.percent, 42)
+        XCTAssertNil(TracePresenter.latestRateLimit([ev(.turnStarted)]))
+    }
+
+    func testResetLabelCoarseBuckets() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        XCTAssertEqual(TracePresenter.resetLabel(now.addingTimeInterval(2 * 86400), now: now), "2 дн")
+        XCTAssertEqual(TracePresenter.resetLabel(now.addingTimeInterval(3 * 3600), now: now), "3 ч")
+        XCTAssertEqual(TracePresenter.resetLabel(now.addingTimeInterval(120), now: now), "2 мин")
+        XCTAssertEqual(TracePresenter.resetLabel(now.addingTimeInterval(-5), now: now), "сейчас")
+        XCTAssertNil(TracePresenter.resetLabel(nil, now: now))
+    }
 }

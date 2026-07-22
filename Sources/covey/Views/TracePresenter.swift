@@ -258,4 +258,50 @@ enum TracePresenter {
         let pct = cacheFraction(u) * 100
         return String(format: "%.1f%% контекста прочитано из кэша — почти без затрат", pct)
     }
+
+    // MARK: - Timestamps
+
+    private static func formatter(_ format: String, _ timeZone: TimeZone) -> DateFormatter {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = timeZone
+        f.dateFormat = format
+        return f
+    }
+
+    /// "16:26:03" in the given zone (local by default).
+    static func clock(_ date: Date, timeZone: TimeZone = .current) -> String {
+        formatter("HH:mm:ss", timeZone).string(from: date)
+    }
+
+    /// "2026-07-22 16:26:03" — the full stamp (hover / tooltip).
+    static func stamp(_ date: Date, timeZone: TimeZone = .current) -> String {
+        formatter("yyyy-MM-dd HH:mm:ss", timeZone).string(from: date)
+    }
+
+    // MARK: - Rate limits (pinned bar, not cards)
+
+    struct RateLimit: Equatable { var percent: Double; var plan: String?; var resetsAt: Date? }
+
+    static func rateLimit(_ e: TraceEvent) -> RateLimit? {
+        guard case let .rateLimit(pct, resets, plan) = e.kind else { return nil }
+        return RateLimit(percent: pct, plan: plan, resetsAt: resets)
+    }
+
+    /// The most recent rate-limit reading in a stream (events are seq-ordered).
+    static func latestRateLimit(_ events: [TraceEvent]) -> RateLimit? {
+        for e in events.reversed() { if let r = rateLimit(e) { return r } }
+        return nil
+    }
+
+    /// Coarse "resets in" label: days / hours / minutes, or nil when unknown.
+    static func resetLabel(_ date: Date?, now: Date = Date()) -> String? {
+        guard let date else { return nil }
+        let secs = Int(date.timeIntervalSince(now))
+        if secs <= 0 { return "сейчас" }
+        let d = secs / 86400, h = (secs % 86400) / 3600, m = (secs % 3600) / 60
+        if d > 0 { return "\(d) дн" }
+        if h > 0 { return "\(h) ч" }
+        return "\(m) мин"
+    }
 }
