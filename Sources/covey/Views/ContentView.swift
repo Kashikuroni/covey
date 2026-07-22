@@ -54,7 +54,7 @@ struct ContentView: View {
             }
         }
         .overlay {
-            if model.inputMode == .help { HelpOverlay() }
+            if model.inputMode == .help { HelpOverlay(tk: tokens) }
         }
         .onAppear {
             keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
