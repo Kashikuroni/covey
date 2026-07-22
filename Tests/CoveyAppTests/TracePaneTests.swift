@@ -29,4 +29,24 @@ final class TracePaneTests: XCTestCase {
         let agents = TraceRow.agents([e(sub), e(.main), e(sub)])
         XCTAssertEqual(agents, [.main, sub])
     }
+
+    func testDisplayOrderIsNewestFirst() {
+        func e(_ seq: Int) -> TraceEvent {
+            TraceEvent(seq: seq, agent: .main, cli: .codex, timestamp: Date(),
+                       kind: .turnStarted, raw: "{}")
+        }
+        XCTAssertEqual(TraceRow.displayOrder([e(0), e(1), e(2)]).map(\.seq), [2, 1, 0])
+    }
+
+    func testPrettyJSONFormatsObjectsSortedAndMultiline() {
+        let pretty = TraceRow.prettyJSON(#"{"b":2,"a":1}"#)
+        XCTAssertTrue(pretty.contains("\n"), "pretty output is multi-line")
+        let a = pretty.range(of: "\"a\"")!.lowerBound
+        let b = pretty.range(of: "\"b\"")!.lowerBound
+        XCTAssertLessThan(a, b, "keys are sorted")
+    }
+
+    func testPrettyJSONPassesThroughNonJSON() {
+        XCTAssertEqual(TraceRow.prettyJSON("ls -la"), "ls -la")
+    }
 }

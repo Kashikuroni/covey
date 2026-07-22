@@ -36,6 +36,23 @@ enum TraceRow {
         }
         return out
     }
+
+    /// Newest first: the trace grows as a stack (new calls on top, older
+    /// below) rather than a top-to-bottom chat log.
+    static func displayOrder(_ events: [TraceEvent]) -> [TraceEvent] {
+        events.reversed()
+    }
+
+    /// Re-serialize a stored raw JSON string as indented, human-readable JSON.
+    /// Non-JSON payloads (e.g. a bare shell command) pass through unchanged.
+    static func prettyJSON(_ raw: String) -> String {
+        guard let data = raw.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data),
+              let pretty = try? JSONSerialization.data(withJSONObject: obj,
+                  options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]),
+              let text = String(data: pretty, encoding: .utf8) else { return raw }
+        return text
+    }
 }
 
 /// Right-drawer agent trace: header (title + store size), agent filter, and a
@@ -74,7 +91,7 @@ struct TracePane: View {
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(model.visibleTraceEvents, id: \.seq) { e in
+                    ForEach(TraceRow.displayOrder(model.visibleTraceEvents), id: \.seq) { e in
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(spacing: 6) {
                                 Text(e.cli == .claudeCode ? "C" : "Cx")
@@ -88,9 +105,10 @@ struct TracePane: View {
                             .contentShape(Rectangle())
                             .onTapGesture { toggle(e.seq) }
                             if expanded.contains(e.seq) {
-                                Text(e.raw)
+                                Text(TraceRow.prettyJSON(e.raw))
                                     .font(.system(.caption2, design: .monospaced))
                                     .textSelection(.enabled).foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                                     .padding(6).background(tk.surface)
                             }
                         }
