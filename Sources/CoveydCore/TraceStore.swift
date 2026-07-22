@@ -49,4 +49,31 @@ public final class TraceStore {
     public func lastSeq(sessionKey: String) -> Int {
         read(sessionKey: sessionKey, sinceSeq: 0).last?.seq ?? -1
     }
+
+    public func totalBytes() -> Int {
+        queue.sync {
+            let names = (try? FileManager.default.contentsOfDirectory(atPath: root)) ?? []
+            return names.filter { $0.hasSuffix(".ndjson") }.reduce(0) { sum, name in
+                let attrs = try? FileManager.default.attributesOfItem(atPath: "\(root)/\(name)")
+                return sum + ((attrs?[.size] as? NSNumber)?.intValue ?? 0)
+            }
+        }
+    }
+
+    public func prune() {
+        let cutoff = now().addingTimeInterval(-retention)
+        queue.sync {
+            let names = (try? FileManager.default.contentsOfDirectory(atPath: root)) ?? []
+            for name in names where name.hasSuffix(".ndjson") {
+                let p = "\(root)/\(name)"
+                guard let data = FileManager.default.contents(atPath: p) else { continue }
+                var framer = LineFramer()
+                let lines = (try? framer.feed([UInt8](data))) ?? []
+                let newest = lines.compactMap {
+                    try? NDJSON.decoder.decode(TraceEvent.self, from: Data($0)) }
+                    .map(\.timestamp).max()
+                if let newest, newest < cutoff { try? FileManager.default.removeItem(atPath: p) }
+            }
+        }
+    }
 }

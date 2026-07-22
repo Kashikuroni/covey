@@ -28,4 +28,25 @@ final class TraceStoreTests: XCTestCase {
         TraceStore(root: root).append(sessionKey: "s1", events: [ev(0), ev(1)])
         XCTAssertEqual(TraceStore(root: root).read(sessionKey: "s1", sinceSeq: 0).count, 2)
     }
+
+    func testPruneDropsFilesOlderThanRetention() {
+        let clock = Date(timeIntervalSince1970: 1_000_000)
+        let store = TraceStore(root: root, retention: 100, now: { clock })
+        func evAt(_ t: TimeInterval) -> TraceEvent {
+            TraceEvent(seq: 0, agent: .main, cli: .codex,
+                       timestamp: Date(timeIntervalSince1970: t), kind: .turnStarted, raw: "{}")
+        }
+        store.append(sessionKey: "old", events: [evAt(1_000_000 - 200)])
+        store.append(sessionKey: "fresh", events: [evAt(1_000_000 - 10)])
+        store.prune()
+        XCTAssertTrue(store.read(sessionKey: "old", sinceSeq: 0).isEmpty)
+        XCTAssertEqual(store.read(sessionKey: "fresh", sinceSeq: 0).count, 1)
+    }
+
+    func testTotalBytesSumsFiles() {
+        let store = TraceStore(root: root)
+        XCTAssertEqual(store.totalBytes(), 0)
+        store.append(sessionKey: "s1", events: [ev(0)])
+        XCTAssertGreaterThan(store.totalBytes(), 0)
+    }
 }
