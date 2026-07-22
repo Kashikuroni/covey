@@ -62,17 +62,20 @@ final class PersistedStateTests: XCTestCase {
         XCTAssertEqual(humanizeAge(-5), "0s", "clock skew clamps to zero")
     }
 
-    func testRecentSessionStoppedAtRoundTripsAndOldPayloadDecodes() throws {
+    func testRecentSessionBranchAndStoppedAtRoundTripAndOldPayloadDecodes() throws {
         let r = RecentSession(name: "a", dir: "/d", agent: "claude",
-                              resumeCmd: "claude --resume u", stoppedAt: 1_700_000_000)
+                              resumeCmd: "claude --resume u", stoppedAt: 1_700_000_000,
+                              branch: "feature/search")
         let data = try JSONEncoder().encode(r)
         let back = try JSONDecoder().decode(RecentSession.self, from: data)
         XCTAssertEqual(back, r)
-        // Payload written before the field existed decodes with stoppedAt nil.
+        XCTAssertEqual(back.branch, "feature/search")
+        // Payload written before the optional fields existed still decodes.
         let old = #"{"name":"b","dir":"/d","agent":"sh"}"#.data(using: .utf8)!
         let decoded = try JSONDecoder().decode(RecentSession.self, from: old)
         XCTAssertNil(decoded.stoppedAt)
         XCTAssertNil(decoded.resumeCmd)
+        XCTAssertNil(decoded.branch)
     }
 
     func testPushRecentTruncatesToMax() {

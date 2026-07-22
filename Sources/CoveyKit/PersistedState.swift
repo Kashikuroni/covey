@@ -20,10 +20,13 @@ public struct RecentSession: Codable, Equatable {
     /// Epoch seconds when the session stopped; optional so payloads written
     /// before the field existed keep decoding.
     public var stoppedAt: Int64?
+    public var branch: String?
     public init(name: String, dir: String, agent: String,
-                resumeCmd: String? = nil, stoppedAt: Int64? = nil) {
+                resumeCmd: String? = nil, stoppedAt: Int64? = nil,
+                branch: String? = nil) {
         self.name = name; self.dir = dir; self.agent = agent
         self.resumeCmd = resumeCmd; self.stoppedAt = stoppedAt
+        self.branch = branch
     }
 }
 
