@@ -197,12 +197,19 @@ final class AppModelTests: XCTestCase {
         await model.create(dir: "/usr", agent: "/bin/cat")
         _ = await eventually { model.sessions.count == 1 }
         let name = model.sessions[0].name
+        daemon.gitMonitor.onGitChanged?(
+            name, GitInfo(branch: "feature/recent-search", added: 0, removed: 0))
+        _ = await eventually {
+            model.sessions.first(where: { $0.name == name })?.git?.branch
+                == "feature/recent-search"
+        }
         await model.kill(name)                        // -> .exited
         let recorded = await eventually { model.recents.contains { $0.name == name } }
         XCTAssertTrue(recorded)
         let r = model.recents.first { $0.name == name }
         XCTAssertEqual(r?.dir, "/usr")
         XCTAssertEqual(r?.agent, "/bin/cat")
+        XCTAssertEqual(r?.branch, "feature/recent-search")
     }
 
     @MainActor
@@ -243,15 +250,34 @@ final class AppModelTests: XCTestCase {
     }
 
     @MainActor
-    func testRelaunchRecentCreatesSession() async throws {
-        let daemon = try TestDaemon()
-        defer { daemon.stop() }
+    func testRelaunchRecentCanRestoreWithoutActivating() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
         await model.start()
         let r = RecentSession(name: "back", dir: "/usr", agent: "/bin/cat")
-        await model.relaunchRecent(r)
-        let alive = await eventually { model.sessions.contains { $0.name == "back" } }
-        XCTAssertTrue(alive)
+        let restored = await model.relaunchRecent(r, activate: false)
+        XCTAssertTrue(restored)
+        let appeared = await eventually { model.sessions.contains { $0.name == "back" } }
+        XCTAssertTrue(appeared)
+        XCTAssertNil(model.selected)
+        XCTAssertEqual(model.focus, .sessions)
+        await model.kill("back")
+    }
+
+    @MainActor
+    func testRelaunchRecentActivatesByDefaultAndReportsFailure() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        let r = RecentSession(name: "back", dir: "/usr", agent: "/bin/cat")
+        let restored = await model.relaunchRecent(r)
+        XCTAssertTrue(restored)
+        let selected = await eventually { model.selected == "back" }
+        XCTAssertTrue(selected)
+        XCTAssertEqual(model.focus, .terminal)
+        let duplicate = await model.relaunchRecent(r, activate: false)
+        XCTAssertFalse(duplicate)
+        XCTAssertNotNil(model.toast)
         await model.kill("back")
     }
 
@@ -323,6 +349,8 @@ final class AppModelTests: XCTestCase {
                              makeClient: { let c = IPCClient(path: daemon.path); try c.connect(); return c },
                              store: store)
         await model.start()
+        XCTAssertNil(model.recents.first(where: { $0.name == "lost1" })?.branch,
+                     "daemon-lost metadata has no live GitInfo")
         XCTAssertTrue(model.recents.contains { $0.name == "lost1" && $0.agent == "claude" })
         store.flush()
         XCTAssertTrue(store.load().recents.contains { $0.name == "lost1" })

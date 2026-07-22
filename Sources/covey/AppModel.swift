@@ -495,13 +495,20 @@ public final class AppModel {
         persist()
     }
 
-    public func relaunchRecent(_ r: RecentSession) async {
+    @discardableResult
+    public func relaunchRecent(_ r: RecentSession, activate: Bool = true) async -> Bool {
         do {
             let s = try await client.create(dir: r.dir, agent: r.agent, name: r.name,
                                             resume: r.resumeCmd)
-            await select(s.name)
-            setFocus(.terminal)
-        } catch { toast = errorText(error) }
+            if activate {
+                await select(s.name)
+                setFocus(.terminal)
+            }
+            return true
+        } catch {
+            toast = errorText(error)
+            return false
+        }
     }
 
     /// Sessions that get cards/numbers/counts — companions are invisible.
@@ -1216,7 +1223,8 @@ public final class AppModel {
             if let s = sessions.first(where: { $0.name == name }), s.companionOf == nil {
                 pushRecent(&recents, RecentSession(name: s.name, dir: s.dir, agent: s.agent,
                                                    resumeCmd: s.resumeCmd,
-                                                   stoppedAt: Int64(Date().timeIntervalSince1970)))
+                                                   stoppedAt: Int64(Date().timeIntervalSince1970),
+                                                   branch: s.git?.branch))
                 persist()
             }
             sessions.removeAll { $0.name == name }
