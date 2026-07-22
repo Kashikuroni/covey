@@ -861,6 +861,20 @@ public final class AppModel {
             inputMode = .normal
             if showInspector, focus == .inspector { setFocus(.sessions) }
             setShowInspector(!showInspector)
+        case .toggleTracePanel:
+            inputMode = .normal
+            if showInspector, inspectorMode == .trace {
+                // Trace is showing → close the drawer and return it to notes so
+                // `space u i` opens the note/issue inspector as usual.
+                if focus == .inspector { setFocus(.sessions) }
+                setInspectorMode(.notes)
+                setShowInspector(false)
+            } else {
+                if !showInspector { setShowInspector(true) }
+                sendTerminalCommand(.blur)
+                setFocus(.inspector)
+                setInspectorMode(.trace)
+            }
         case .toggleFooterPanel:
             inputMode = .normal
             setShowFooter(!showFooter)

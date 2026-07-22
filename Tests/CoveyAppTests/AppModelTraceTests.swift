@@ -56,4 +56,34 @@ final class AppModelTraceTests: XCTestCase {
         XCTAssertEqual(model.inspectorMode, .trace)
         XCTAssertEqual(model.focus, .inspector)
     }
+
+    func testToggleTracePanelOpensFromHiddenAndClosesToHidden() async throws {
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        XCTAssertFalse(model.showInspector)
+
+        model.apply(.toggleTracePanel)   // open
+        XCTAssertTrue(model.showInspector)
+        XCTAssertEqual(model.inspectorMode, .trace)
+        XCTAssertEqual(model.focus, .inspector)
+
+        model.apply(.toggleTracePanel)   // close
+        XCTAssertFalse(model.showInspector)
+        XCTAssertEqual(model.inspectorMode, .notes)
+    }
+
+    func testToggleTracePanelSwitchesNotesInspectorToTrace() async throws {
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        model.setShowInspector(true)     // inspector open in notes mode
+        XCTAssertEqual(model.inspectorMode, .notes)
+
+        model.apply(.toggleTracePanel)   // swaps the open drawer to trace
+        XCTAssertTrue(model.showInspector)
+        XCTAssertEqual(model.inspectorMode, .trace)
+    }
 }

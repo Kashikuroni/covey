@@ -54,6 +54,7 @@ extension LeaderMenu {
         case .ui: return [
             LeaderRow(key: "s", label: "toggle session list", implemented: true),
             LeaderRow(key: "i", label: "toggle inspector", implemented: true),
+            LeaderRow(key: "a", label: "toggle agent trace", implemented: true),
             LeaderRow(key: "f", label: "toggle footer", implemented: true),
             LeaderRow(key: "h", label: "toggle header", implemented: true),
             LeaderRow(key: "t", label: "toggle dark / light theme", implemented: true),
@@ -122,6 +123,7 @@ enum KeyAction: Equatable {
     case inspectorSplitToggle
     case toggleSessionsPanel
     case toggleInspectorPanel
+    case toggleTracePanel
     case toggleFooterPanel
     case toggleHeaderPanel
     case cycleUsagePlacement
@@ -259,6 +261,7 @@ enum KeyRouter {
         case (.root, "p"): return .leaderDescend(.project)
         case (.ui, "s"): return .toggleSessionsPanel
         case (.ui, "i"): return .toggleInspectorPanel
+        case (.ui, "a"): return .toggleTracePanel
         case (.ui, "f"): return .toggleFooterPanel
         case (.ui, "h"): return .toggleHeaderPanel
         case (.ui, "t"): return .toggleTheme

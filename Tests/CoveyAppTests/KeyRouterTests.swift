@@ -97,6 +97,8 @@ final class KeyRouterTests: XCTestCase {
         XCTAssertEqual(KeyRouter.route(key("U"), context: session), .restartAllPrompt)
         XCTAssertEqual(KeyRouter.route(key("t"), context: ctx(mode: .leader(.ui))),
                        .toggleTheme)
+        XCTAssertEqual(KeyRouter.route(key("a"), context: ctx(mode: .leader(.ui))),
+                       .toggleTracePanel)
         XCTAssertEqual(KeyRouter.route(key("r"), context: git), .returnToRoot)
     }
 
