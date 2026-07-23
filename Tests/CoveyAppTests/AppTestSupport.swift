@@ -12,14 +12,18 @@ final class TestDaemon {
     let monitor: StatusMonitor
     var gitMonitor: GitMonitor!
     var modelMonitor: ModelMonitor!
+    var traceMonitor: TraceMonitor!
+    let traceStore: TraceStore
     /// Fake ~/.claude/projects for transcript fixtures.
     let modelRoot: String
+    let traceRoot: String
     private let ipc: IPCServer
     private let server: SocketServer
 
     init(persisted: [SessionMeta] = []) throws {
         path = "\(NSTemporaryDirectory())covey-app-\(UInt32.random(in: 0..<UInt32.max)).sock"
         modelRoot = "\(NSTemporaryDirectory())covey-app-models-\(UInt32.random(in: 0..<UInt32.max))"
+        traceRoot = "\(NSTemporaryDirectory())covey-app-traces-\(UInt32.random(in: 0..<UInt32.max))"
         let registry = SessionRegistry(persisted: persisted)
         self.registry = registry
         monitor = StatusMonitor(snapshot: { registry.snapshotScreens() })
@@ -27,8 +31,14 @@ final class TestDaemon {
         modelMonitor = ModelMonitor(projectsRoot: modelRoot, snapshot: {
             registry.list().map { ($0.name, $0.cwd, $0.agent, $0.created, $0.resumeCmd) }
         })
+        let traceStore = TraceStore(root: traceRoot)
+        self.traceStore = traceStore
+        traceMonitor = TraceMonitor(store: traceStore, projectsRoot: modelRoot, snapshot: {
+            registry.list().map { ($0.name, $0.cwd, $0.agent, $0.created, $0.resumeCmd) }
+        })
         ipc = IPCServer(registry: registry, monitor: monitor, gitMonitor: gitMonitor,
-                        modelMonitor: modelMonitor)
+                        modelMonitor: modelMonitor, traceMonitor: traceMonitor,
+                        traceStore: traceStore)
         server = SocketServer(path: path)
         let ipc = self.ipc
         server.onAccept = { conn in
@@ -44,6 +54,7 @@ final class TestDaemon {
     func stop() {
         server.stop()
         try? FileManager.default.removeItem(atPath: modelRoot)
+        try? FileManager.default.removeItem(atPath: traceRoot)
     }
 }
 

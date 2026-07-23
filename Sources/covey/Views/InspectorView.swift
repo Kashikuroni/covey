@@ -15,21 +15,30 @@ struct InspectorView: View {
         // the project changes, which re-drives both panes; `.id(root)` remounts
         // Note with a fresh editor so its NSTextView can't keep stale text.
         let root = model.inspectorRoot
-        return VStack(spacing: 0) {
-            if model.inspectorSplit {
-                // Split shows both panes — a shared tab row would lie about
-                // what a click does. Each pane carries its own zone header.
-                paneHeader("Note", badge: 3, tab: .note)
-                NotePane(model: model).id(root)
-                Divider()
-                paneHeader("Issue", badge: 4, tab: .issue)
-                IssueBrowserPane(model: model)
+        return Group {
+            if model.inspectorMode == .trace {
+                // The trace takes over the whole drawer — Note/Issue and the
+                // trace never share the width. ⌘3/⌘4 switch back.
+                TracePane(model: model)
             } else {
-                tabsHeader
-                if model.inspectorTab == .note {
-                    NotePane(model: model).id(root)
-                } else {
-                    IssueBrowserPane(model: model)
+                VStack(spacing: 0) {
+                    if model.inspectorSplit {
+                        // Split shows both panes — a shared tab row would lie
+                        // about what a click does. Each pane carries its own
+                        // zone header.
+                        paneHeader("Note", badge: 3, tab: .note)
+                        NotePane(model: model).id(root)
+                        Divider()
+                        paneHeader("Issue", badge: 4, tab: .issue)
+                        IssueBrowserPane(model: model)
+                    } else {
+                        tabsHeader
+                        if model.inspectorTab == .note {
+                            NotePane(model: model).id(root)
+                        } else {
+                            IssueBrowserPane(model: model)
+                        }
+                    }
                 }
             }
         }

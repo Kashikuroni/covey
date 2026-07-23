@@ -30,6 +30,10 @@ public struct Request: Codable, Equatable {
         // SIGWINCH-kick the child into a full repaint (wheel-scroll of a TUI
         // leaves the alt buffer partially redrawn until the app repaints).
         case refresh(name: String)
+        // Subscribe to a session's agent trace: reply is a `traceBacklog` with
+        // events since `sinceSeq`, then live `traceAppended` events follow.
+        case traceSubscribe(name: String, sinceSeq: Int?)
+        case traceUnsubscribe(name: String)
     }
 }
 
@@ -50,6 +54,9 @@ public enum ServerMessage: Codable, Equatable{
         case branches([String])
         case branchStatus(dirty: Bool, merged: Bool)
         case error(code: String, message: String)
+        // Reply to `traceSubscribe`: events since the requested cursor plus the
+        // current total on-disk size of the trace store.
+        case traceBacklog(events: [TraceEvent], storeBytes: Int)
     }
 }
 
@@ -61,4 +68,8 @@ public enum DaemonEvent: Codable, Equatable {
     case statusChanged(name: String, status: Status)
     case gitChanged(name: String, git: GitInfo?)
     case modelChanged(name: String, model: String)
+    // Live agent-trace events for a session the client subscribed to, plus the
+    // periodic total trace-store size for the header.
+    case traceAppended(name: String, events: [TraceEvent])
+    case traceStoreBytes(bytes: Int)
 }

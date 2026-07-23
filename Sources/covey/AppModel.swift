@@ -5,7 +5,7 @@ import CoveyKit
 
 /// ⌘1-5 zone targets (menu key equivalents — reachable from any focus).
 public enum FocusZone: Equatable {
-    case session, agent, note, issues, terminalSplit
+    case session, agent, note, issues, terminalSplit, trace
 }
 
 /// UI state machine. The daemon is the single source of truth about sessions:
@@ -100,6 +100,21 @@ public final class AppModel {
     public enum InspectorTab: Equatable { case note, issue }
     public private(set) var inspectorTab: InspectorTab = .note
     public private(set) var inspectorSplit = false
+    /// The right drawer shows EITHER the Note/Issue inspector OR the agent
+    /// trace — never both (there is no room for two drawers).
+    public enum InspectorMode: Equatable { case notes, trace }
+    public private(set) var inspectorMode: InspectorMode = .notes
+    /// Agent trace for the selected session (streamed from the daemon).
+    public private(set) var traceEvents: [TraceEvent] = []
+    public private(set) var traceStoreBytes: Int = 0
+    public private(set) var traceAgentFilter: TraceEvent.AgentRef?
+
+    /// Trace rows narrowed to the selected agent (nil filter = all agents).
+    public var visibleTraceEvents: [TraceEvent] {
+        guard let f = traceAgentFilter else { return traceEvents }
+        return traceEvents.filter { $0.agent == f }
+    }
+    public func setTraceAgentFilter(_ ref: TraceEvent.AgentRef?) { traceAgentFilter = ref }
     /// Transient: a pane sets it while its editor/field owns the keyboard
     /// (drives the INSERT/NORMAL badge).
     public var inspectorEditing = false
@@ -212,6 +227,7 @@ public final class AppModel {
         showHeader = persisted.showHeader ?? true
         showInspector = persisted.showInspector ?? false
         inspectorSplit = persisted.inspectorSplit ?? false
+        inspectorMode = persisted.inspectorMode == "trace" ? .trace : .notes
         sbWidth = persisted.sbWidth ?? 360
         vimMode = persisted.vimMode ?? true
         notes = persisted.notes
@@ -278,6 +294,34 @@ public final class AppModel {
         if let name {
             await attachPane(name)
             if let comp = companion(of: name) { await attachPane(comp.name) }
+        }
+        if inspectorMode == .trace { await subscribeTrace() }
+    }
+
+    public func setInspectorMode(_ mode: InspectorMode) {
+        inspectorMode = mode
+        if mode == .trace { Task { await subscribeTrace() } }
+        persist()
+    }
+
+    /// (Re)subscribe the selected session's trace: replace the buffer with the
+    /// daemon's backlog, then live `traceAppended` events accumulate onto it.
+    private func subscribeTrace() async {
+        traceEvents = []; traceAgentFilter = nil
+        guard let name = selected else { return }
+        do {
+            let out = try await client.traceSubscribe(name: name, sinceSeq: 0)
+            traceEvents = out.events
+            traceStoreBytes = out.storeBytes
+            capTrace()
+        } catch { toast = errorText(error) }
+    }
+
+    /// Bound the in-memory trace so a long-running session can't grow the render
+    /// list without limit (older rows drop off the bottom of the stack).
+    private func capTrace(_ maximum: Int = 1000) {
+        if traceEvents.count > maximum {
+            traceEvents.removeFirst(traceEvents.count - maximum)
         }
     }
 
@@ -826,6 +870,20 @@ public final class AppModel {
             inputMode = .normal
             if showInspector, focus == .inspector { setFocus(.sessions) }
             setShowInspector(!showInspector)
+        case .toggleTracePanel:
+            inputMode = .normal
+            if showInspector, inspectorMode == .trace {
+                // Trace is showing → close the drawer and return it to notes so
+                // `space u i` opens the note/issue inspector as usual.
+                if focus == .inspector { setFocus(.sessions) }
+                setInspectorMode(.notes)
+                setShowInspector(false)
+            } else {
+                if !showInspector { setShowInspector(true) }
+                sendTerminalCommand(.blur)
+                setFocus(.inspector)
+                setInspectorMode(.trace)
+            }
         case .toggleFooterPanel:
             inputMode = .normal
             setShowFooter(!showFooter)
@@ -907,6 +965,11 @@ public final class AppModel {
                 toast = "no split — space t v / h"; return
             }
             focusPane(comp.name)
+        case .trace:
+            guard showInspector else { toast = "inspector hidden — space u i"; return }
+            sendTerminalCommand(.blur)
+            setFocus(.inspector)
+            setInspectorMode(.trace)
         }
     }
 
@@ -1012,6 +1075,9 @@ public final class AppModel {
 
     public func selectInspectorTab(_ tab: InspectorTab) {
         inspectorTab = tab
+        // Choosing a Note/Issue tab returns the drawer from the trace back to
+        // the notes view (they never share the width).
+        if inspectorMode != .notes { inspectorMode = .notes; persist() }
         // Both zones are always "in the editor": hand the keyboard over at
         // once (the zone chords escape the fields via the key monitor).
         // The bump is deferred by one runloop turn: a freshly mounted view
@@ -1124,6 +1190,7 @@ public final class AppModel {
         persisted.showHeader = showHeader
         persisted.showInspector = showInspector
         persisted.inspectorSplit = inspectorSplit
+        persisted.inspectorMode = inspectorMode == .trace ? "trace" : "notes"
         persisted.sbWidth = sbWidth
         persisted.vimMode = vimMode
         persisted.notes = notes
@@ -1250,6 +1317,12 @@ public final class AppModel {
                 // flushed when the view mounts
                 outputBuffers[name, default: []].append(contentsOf: bytes)
             }
+        case let .traceAppended(name, events):
+            guard name == selected, inspectorMode == .trace else { return }
+            traceEvents.append(contentsOf: events)
+            capTrace()
+        case let .traceStoreBytes(bytes):
+            traceStoreBytes = bytes
         }
     }
 
