@@ -21,6 +21,17 @@ final class TerminalPaneRemountTests: XCTestCase {
         return found
     }
 
+    private func coordinator(
+        named name: String,
+        in root: NSView
+    ) -> TerminalRepresentable.Coordinator? {
+        terminalViews(in: root)
+            .compactMap {
+                $0.terminalDelegate as? TerminalRepresentable.Coordinator
+            }
+            .first { $0.name == name }
+    }
+
     private func restoredAgentView(in root: NSView) -> CoveyTerminalView? {
         terminalViews(in: root).first {
             $0.getTerminal().isCurrentBufferAlternate
@@ -74,6 +85,12 @@ final class TerminalPaneRemountTests: XCTestCase {
             return self.restoredAgentView(in: root) != nil
         }
         XCTAssertTrue(mounted, "agent pane should restore alt buffer and Kitty flags")
+        let initialCoordinator = try XCTUnwrap(
+            window.contentView.flatMap {
+                coordinator(named: "agent", in: $0)
+            }
+        )
+        XCTAssertTrue(model.isTerminalViewLeaseCurrent(initialCoordinator.lease))
 
         model.apply(.splitVertical)
         _ = await eventually { model.companion(of: "agent") != nil }
@@ -84,6 +101,14 @@ final class TerminalPaneRemountTests: XCTestCase {
         }
         XCTAssertTrue(openRestored,
                       "agent pane must restore Kitty flags after split open")
+        let splitCoordinator = try XCTUnwrap(
+            window.contentView.flatMap {
+                coordinator(named: "agent", in: $0)
+            }
+        )
+        XCTAssertNotEqual(initialCoordinator.lease, splitCoordinator.lease)
+        XCTAssertFalse(model.isTerminalViewLeaseCurrent(initialCoordinator.lease))
+        XCTAssertTrue(model.isTerminalViewLeaseCurrent(splitCoordinator.lease))
         if let root = window.contentView,
            let agentView = restoredAgentView(in: root) {
             assertShiftEnterIsKittyEncoded(by: agentView, in: window)
@@ -100,6 +125,14 @@ final class TerminalPaneRemountTests: XCTestCase {
         }
         XCTAssertTrue(closeRestored,
                       "agent pane must restore Kitty flags after split close")
+        let restoredCoordinator = try XCTUnwrap(
+            window.contentView.flatMap {
+                coordinator(named: "agent", in: $0)
+            }
+        )
+        XCTAssertNotEqual(splitCoordinator.lease, restoredCoordinator.lease)
+        XCTAssertFalse(model.isTerminalViewLeaseCurrent(splitCoordinator.lease))
+        XCTAssertTrue(model.isTerminalViewLeaseCurrent(restoredCoordinator.lease))
         if let root = window.contentView,
            let agentView = restoredAgentView(in: root) {
             assertShiftEnterIsKittyEncoded(by: agentView, in: window)
@@ -108,5 +141,86 @@ final class TerminalPaneRemountTests: XCTestCase {
         }
 
         daemon.registry.kill(name: "agent")
+    }
+
+    func testSessionSwitchRotatesAgentResizeLease() async throws {
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+
+        _ = try daemon.registry.create(
+            dir: "/usr",
+            agent: "cat",
+            argv: ["/bin/cat"],
+            name: "agent-a"
+        )
+        _ = try daemon.registry.create(
+            dir: "/usr",
+            agent: "cat",
+            argv: ["/bin/cat"],
+            name: "agent-b"
+        )
+        let loaded = await eventually {
+            model.sessions.contains { $0.name == "agent-a" }
+                && model.sessions.contains { $0.name == "agent-b" }
+        }
+        XCTAssertTrue(loaded)
+
+        await model.select("agent-a")
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = NSHostingView(
+            rootView: TerminalPaneView(model: model)
+        )
+
+        let firstMounted = await eventually {
+            guard let root = window.contentView else { return false }
+            return self.coordinator(named: "agent-a", in: root) != nil
+        }
+        XCTAssertTrue(firstMounted)
+        let firstCoordinator = try XCTUnwrap(
+            window.contentView.flatMap {
+                coordinator(named: "agent-a", in: $0)
+            }
+        )
+        XCTAssertTrue(model.isTerminalViewLeaseCurrent(firstCoordinator.lease))
+
+        await model.select("agent-b")
+        let secondSessionMounted = await eventually {
+            guard let root = window.contentView else { return false }
+            return self.coordinator(named: "agent-b", in: root) != nil
+        }
+        XCTAssertTrue(secondSessionMounted)
+
+        await model.select("agent-a")
+        let replacementMounted = await eventually {
+            guard let root = window.contentView,
+                  let coordinator = self.coordinator(
+                    named: "agent-a",
+                    in: root
+                  ) else { return false }
+            return coordinator.lease != firstCoordinator.lease
+        }
+        XCTAssertTrue(replacementMounted)
+        let replacementCoordinator = try XCTUnwrap(
+            window.contentView.flatMap {
+                coordinator(named: "agent-a", in: $0)
+            }
+        )
+
+        XCTAssertFalse(
+            model.isTerminalViewLeaseCurrent(firstCoordinator.lease)
+        )
+        XCTAssertTrue(
+            model.isTerminalViewLeaseCurrent(replacementCoordinator.lease)
+        )
+
+        daemon.registry.kill(name: "agent-a")
+        daemon.registry.kill(name: "agent-b")
     }
 }

@@ -64,7 +64,11 @@ final class CoveyTerminalViewTests: XCTestCase {
         let daemon = try TestDaemon()
         defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
-        let coordinator = TerminalRepresentable.Coordinator(model: model, name: "s")
+        let coordinator = TerminalRepresentable.Coordinator(
+            model: model,
+            name: "s",
+            lease: model.mountTerminalView("s")
+        )
         let view = CoveyTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
         view.terminalDelegate = coordinator
         fillScrollback(view)
@@ -327,7 +331,11 @@ final class CoveyTerminalViewTests: XCTestCase {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
         await model.start()
-        let coordinator = TerminalRepresentable.Coordinator(model: model, name: "s-1")
+        let coordinator = TerminalRepresentable.Coordinator(
+            model: model,
+            name: "s-1",
+            lease: model.mountTerminalView("s-1")
+        )
         let (view, _) = makeView()
         view.feed(text: "\u{1b}[?1049h")   // enter the alternate buffer
         model.setHistoryMode(true)          // stale badge from a prior shell scroll

@@ -158,6 +158,8 @@ public final class AppModel {
     private var outputBuffers: [String: [UInt8]] = [:]
     /// Focus/scroll command handlers per mounted terminal view.
     private var terminalCommands: [String: (TerminalCommand) -> Void] = [:]
+    @ObservationIgnored
+    private var terminalResizeOwnership = TerminalResizeOwnership()
     /// Names this client is attached to (selected + visible companion).
     private var attachedNames: Set<String> = []
 
@@ -501,8 +503,29 @@ public final class AppModel {
         sessions.first { $0.name == name }?.agent.split(separator: " ").first == "claude"
     }
 
-    public func resize(cols: UInt16, rows: UInt16, name: String) async {
-        try? await client.resize(name: name, cols: cols, rows: rows)
+    func mountTerminalView(_ name: String) -> TerminalViewLease {
+        terminalResizeOwnership.mount(session: name)
+    }
+
+    func unmountTerminalView(_ lease: TerminalViewLease) {
+        terminalResizeOwnership.unmount(lease)
+    }
+
+    func isTerminalViewLeaseCurrent(_ lease: TerminalViewLease) -> Bool {
+        terminalResizeOwnership.isCurrent(lease)
+    }
+
+    func resize(
+        cols: UInt16,
+        rows: UInt16,
+        lease: TerminalViewLease
+    ) async {
+        guard isTerminalViewLeaseCurrent(lease) else { return }
+        try? await client.resize(
+            name: lease.session,
+            cols: cols,
+            rows: rows
+        )
     }
 
     /// Sheets fire-and-forget outcomes (issue created after Esc-hide, …).

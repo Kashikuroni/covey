@@ -41,7 +41,13 @@ struct TerminalRepresentable: NSViewRepresentable {
     let model: AppModel
     let name: String
 
-    func makeCoordinator() -> Coordinator { Coordinator(model: model, name: name) }
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            model: model,
+            name: name,
+            lease: model.mountTerminalView(name)
+        )
+    }
 
     func makeNSView(context: Context) -> TerminalView {
         let view = CoveyTerminalView(frame: .zero)
@@ -112,6 +118,13 @@ struct TerminalRepresentable: NSViewRepresentable {
         view.syncSequenceSettleMs = model.agentIsClaude(name) ? 0 : 16
     }
 
+    static func dismantleNSView(
+        _ nsView: TerminalView,
+        coordinator: Coordinator
+    ) {
+        coordinator.model.unmountTerminalView(coordinator.lease)
+    }
+
     private func applyTheme(to view: TerminalView) {
         let theme = Theme(raw: model.themeRaw)
         view.nativeBackgroundColor = theme.background
@@ -136,25 +149,45 @@ struct TerminalRepresentable: NSViewRepresentable {
     final class Coordinator: TerminalViewDelegate {
         let model: AppModel
         let name: String
+        let lease: TerminalViewLease
         private let resizeGate = TerminalResizeGate()
 
-        init(model: AppModel, name: String) { self.model = model; self.name = name }
+        init(
+            model: AppModel,
+            name: String,
+            lease: TerminalViewLease
+        ) {
+            self.model = model
+            self.name = name
+            self.lease = lease
+        }
 
         func send(source: TerminalView, data: ArraySlice<UInt8>) {
             let bytes = Array(data)
             Task { @MainActor in await model.sendInput(bytes, to: name) }
         }
 
-        func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
-            guard let request = resizeGate.register(cols: newCols, rows: newRows) else {
+        func sizeChanged(
+            source: TerminalView,
+            newCols: Int,
+            newRows: Int
+        ) {
+            guard let request = resizeGate.register(
+                cols: newCols,
+                rows: newRows
+            ) else {
                 return
             }
             let gate = resizeGate
             let model = model
-            let name = name
+            let lease = lease
             Task { @MainActor in
                 guard gate.isLatest(request) else { return }
-                await model.resize(cols: request.cols, rows: request.rows, name: name)
+                await model.resize(
+                    cols: request.cols,
+                    rows: request.rows,
+                    lease: lease
+                )
             }
         }
 
