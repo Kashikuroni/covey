@@ -1,37 +1,5 @@
 import SwiftUI
 
-/// Renders one AgentUsageChip: colored name, muted plan, threshold-colored
-/// window pills. Used only by the `leader l` detail popover now — the top
-/// bar itself shows just the compact percent (see `UsageChip`).
-struct AgentChipView: View {
-    let chip: AgentUsageChip
-    let color: Color
-    let now: Date
-    let tk: Tokens
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Text(chip.name).foregroundStyle(color)
-            if let plan = chip.plan { Text(plan).foregroundStyle(tk.t3) }
-            ForEach(Array(chip.windows.enumerated()), id: \.offset) { entry in
-                pill(entry.element.label, entry.element.window)
-            }
-        }
-    }
-
-    private func pill(_ prefix: String, _ w: UsageWindow) -> some View {
-        let pct = Int(w.utilization.rounded())
-        let pctText = Text("\(pct)%").foregroundStyle(levelColor(usageLevel(pct), tk: tk))
-        let text: Text
-        if let reset = w.resetUnix {
-            text = Text("\(prefix) \(pctText) · \(remainingLabel(resetUnix: reset, now: now))")
-        } else {
-            text = Text("\(prefix) \(pctText)")
-        }
-        return text.foregroundStyle(tk.t3)
-    }
-}
-
 /// Maps `UsagePlacement` to a top-anchored overlay alignment — `LimitsOverlay`
 /// always opens directly under wherever the compact header currently sits.
 func topOverlayAlignment(_ placement: UsagePlacement) -> Alignment {
@@ -43,10 +11,11 @@ func topOverlayAlignment(_ placement: UsagePlacement) -> Alignment {
 }
 
 /// `leader l` detail popover: full Claude/Codex breakdown (plan + every
-/// window + reset countdown), glass-styled like `HelpOverlay`/`WhichKeyView`.
-/// Each provider row carries its own display/polling toggle — off dims the
-/// row and freezes it on the last known snapshot (see
-/// `AppModel.setClaudeUsageEnabled`/`setCodexUsageEnabled`).
+/// window + reset countdown + a threshold-colored progress bar), glass-styled
+/// like `HelpOverlay`/`WhichKeyView`. Layout follows the "AI Limits Panel"
+/// design mockup; colors come from `Tokens` instead of the mockup's own
+/// palette, and the per-provider switch is the native `Toggle` tinted with
+/// `tk.accent` rather than the mockup's hand-drawn pill.
 struct LimitsOverlay: View {
     let usage: Usage?
     let plan: String?
@@ -59,60 +28,111 @@ struct LimitsOverlay: View {
     let onSetCodexUsageEnabled: (Bool) -> Void
     let tk: Tokens
 
+    private let cardWidth: CGFloat = 260
+
     var body: some View {
         TimelineView(.everyMinute) { ctx in
             let claude = claudeChip(usage: usage, plan: plan)
             let codex = codexChip(snapshot: codexUsage, plan: codexPlan)
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 0) {
+                cardHeader(now: ctx.date)
                 if let claude {
-                    row(chip: claude, color: tk.claudeBrand, now: ctx.date,
-                        enabled: claudeUsageEnabled, stale: error != nil,
-                        onSetEnabled: onSetClaudeUsageEnabled)
+                    providerSection(chip: claude, now: ctx.date,
+                                    enabled: claudeUsageEnabled, stale: error != nil,
+                                    onSetEnabled: onSetClaudeUsageEnabled)
                 } else if let error {
-                    Text("usage: \(error)").foregroundStyle(.orange)
+                    Text("usage: \(error)")
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 16).padding(.vertical, 12)
                 }
                 if let codex {
                     // Codex has no separate error signal today (a failed
                     // poll just silently keeps the last snapshot), so only
                     // the disabled state gets a marker here, not staleness.
-                    row(chip: codex, color: tk.codexBrand, now: ctx.date,
-                        enabled: codexUsageEnabled, stale: false,
-                        onSetEnabled: onSetCodexUsageEnabled)
+                    providerSection(chip: codex, now: ctx.date,
+                                    enabled: codexUsageEnabled, stale: false,
+                                    onSetEnabled: onSetCodexUsageEnabled)
                 }
             }
-            .padding(14)
-            .glassEffect(.regular, in: .rect(cornerRadius: 10))
-            .shadow(radius: 10)
+            .frame(width: cardWidth)
+            .glassEffect(.regular, in: .rect(cornerRadius: 16))
+            .shadow(radius: 12)
         }
     }
 
-    private func row(chip: AgentUsageChip, color: Color, now: Date,
-                      enabled: Bool, stale: Bool,
-                      onSetEnabled: @escaping (Bool) -> Void) -> some View {
-        HStack(spacing: 8) {
-            AgentChipView(chip: chip, color: color, now: now, tk: tk)
-                .opacity(enabled ? 1 : 0.4)
-            if enabled, stale {
-                Text("*").foregroundStyle(tk.warn)
+    private func cardHeader(now: Date) -> some View {
+        HStack {
+            Text("AI Usage Limits")
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .tracking(0.8)
+                .textCase(.uppercase)
+                .foregroundStyle(tk.t4)
+            Spacer()
+            Text(headerDateTime(now))
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(tk.t4)
+        }
+        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 10)
+    }
+
+    private func providerSection(chip: AgentUsageChip, now: Date,
+                                  enabled: Bool, stale: Bool,
+                                  onSetEnabled: @escaping (Bool) -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Text(chip.name)
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .foregroundStyle(tk.t1)
+                if let plan = chip.plan {
+                    Text(plan)
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(tk.t3)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(tk.surf2, in: Capsule())
+                }
+                if stale { Text("*").foregroundStyle(tk.warn) }
+                Spacer()
+                Toggle("", isOn: Binding(get: { enabled }, set: onSetEnabled))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .tint(tk.accent)
             }
-            miniToggle(enabled: enabled, onSetEnabled: onSetEnabled)
+            .opacity(enabled ? 1 : 0.55)
+            ForEach(Array(chip.windows.enumerated()), id: \.offset) { entry in
+                windowRow(entry.element, now: now)
+            }
+            .opacity(enabled ? 1 : 0.55)
         }
+        .padding(.horizontal, 16).padding(.vertical, 14)
+        .overlay(alignment: .top) { Rectangle().fill(tk.bd2).frame(height: 1) }
     }
 
-    /// A `KbdBadge`-style chip standing in for a checkbox — bordered
-    /// monospaced "on"/"off" pill, sized to its own text (no `Toggle`, whose
-    /// default macOS checkbox style clashes with the rest of this glass
-    /// popover, and no `Spacer`, which would stretch the whole popover to
-    /// the window's width instead of hugging its content).
-    private func miniToggle(enabled: Bool, onSetEnabled: @escaping (Bool) -> Void) -> some View {
-        Text(enabled ? "on" : "off")
-            .font(.system(size: 10, design: .monospaced))
-            .foregroundStyle(enabled ? tk.t1 : tk.t4)
-            .padding(.horizontal, 6).padding(.vertical, 1)
-            .background(enabled ? tk.accent.opacity(0.18) : tk.surf2,
-                       in: RoundedRectangle(cornerRadius: 3))
-            .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(tk.bd2))
-            .contentShape(Rectangle())
-            .onTapGesture { onSetEnabled(!enabled) }
+    private func windowRow(_ w: LabeledWindow, now: Date) -> some View {
+        let pct = Int(w.window.utilization.rounded())
+        let color = levelColor(usageLevel(pct), tk: tk)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Text(w.label)
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(tk.t2)
+                if let reset = w.window.resetUnix {
+                    Text("resets in \(remainingLabel(resetUnix: reset, now: now))")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(tk.t4)
+                }
+                Spacer()
+                Text("\(pct)%")
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundStyle(color)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(tk.surf2)
+                    Capsule().fill(color).frame(width: geo.size.width * CGFloat(pct) / 100)
+                }
+            }
+            .frame(height: 5)
+        }
     }
 }
