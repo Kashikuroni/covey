@@ -70,7 +70,12 @@ struct ContentView: View {
         .overlay(alignment: topOverlayAlignment(model.usagePlacement)) {
             if model.inputMode == .limits {
                 LimitsOverlay(usage: model.usage, plan: model.plan, error: model.usageError,
-                              codexUsage: model.codexUsage, codexPlan: model.codexPlan, tk: tokens)
+                              codexUsage: model.codexUsage, codexPlan: model.codexPlan,
+                              claudeUsageEnabled: model.claudeUsageEnabled,
+                              codexUsageEnabled: model.codexUsageEnabled,
+                              onSetClaudeUsageEnabled: { model.setClaudeUsageEnabled($0) },
+                              onSetCodexUsageEnabled: { model.setCodexUsageEnabled($0) },
+                              tk: tokens)
                     .padding(.top, 42)
                     .transition(.scale(scale: 0.92, anchor: .top).combined(with: .opacity))
                     .animation(.spring(response: 0.28, dampingFraction: 0.86), value: model.inputMode)

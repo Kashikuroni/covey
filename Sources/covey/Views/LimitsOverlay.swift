@@ -44,12 +44,19 @@ func topOverlayAlignment(_ placement: UsagePlacement) -> Alignment {
 
 /// `leader l` detail popover: full Claude/Codex breakdown (plan + every
 /// window + reset countdown), glass-styled like `HelpOverlay`/`WhichKeyView`.
+/// Each provider row carries its own display/polling toggle — off dims the
+/// row and freezes it on the last known snapshot (see
+/// `AppModel.setClaudeUsageEnabled`/`setCodexUsageEnabled`).
 struct LimitsOverlay: View {
     let usage: Usage?
     let plan: String?
     let error: String?
     let codexUsage: CodexRateLimitsSnapshot?
     let codexPlan: String?
+    let claudeUsageEnabled: Bool
+    let codexUsageEnabled: Bool
+    let onSetClaudeUsageEnabled: (Bool) -> Void
+    let onSetCodexUsageEnabled: (Bool) -> Void
     let tk: Tokens
 
     var body: some View {
@@ -58,17 +65,41 @@ struct LimitsOverlay: View {
             let codex = codexChip(snapshot: codexUsage, plan: codexPlan)
             VStack(alignment: .leading, spacing: 10) {
                 if let claude {
-                    AgentChipView(chip: claude, color: tk.claudeBrand, now: ctx.date, tk: tk)
+                    row(chip: claude, color: tk.claudeBrand, now: ctx.date,
+                        enabled: claudeUsageEnabled, stale: error != nil,
+                        onSetEnabled: onSetClaudeUsageEnabled)
                 } else if let error {
                     Text("usage: \(error)").foregroundStyle(.orange)
                 }
                 if let codex {
-                    AgentChipView(chip: codex, color: tk.codexBrand, now: ctx.date, tk: tk)
+                    // Codex has no separate error signal today (a failed
+                    // poll just silently keeps the last snapshot), so only
+                    // the disabled state gets a marker here, not staleness.
+                    row(chip: codex, color: tk.codexBrand, now: ctx.date,
+                        enabled: codexUsageEnabled, stale: false,
+                        onSetEnabled: onSetCodexUsageEnabled)
                 }
             }
             .padding(14)
             .glassEffect(.regular, in: .rect(cornerRadius: 10))
             .shadow(radius: 10)
         }
+    }
+
+    private func row(chip: AgentUsageChip, color: Color, now: Date,
+                      enabled: Bool, stale: Bool,
+                      onSetEnabled: @escaping (Bool) -> Void) -> some View {
+        HStack(spacing: 8) {
+            AgentChipView(chip: chip, color: color, now: now, tk: tk)
+            if !enabled {
+                Text("off").foregroundStyle(tk.t3)
+            } else if stale {
+                Text("*").foregroundStyle(tk.warn)
+            }
+            Spacer()
+            Toggle("", isOn: Binding(get: { enabled }, set: onSetEnabled))
+                .labelsHidden()
+        }
+        .opacity(enabled ? 1 : 0.4)
     }
 }
