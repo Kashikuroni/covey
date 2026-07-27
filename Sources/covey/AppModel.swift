@@ -236,6 +236,10 @@ public final class AppModel {
         projectNotes = persisted.projectNotes
         projectNames = persisted.projectNames
         projects = persisted.projects ?? []
+        if let cached = persisted.claudeUsage { usage = cached.live }
+        plan = persisted.claudePlan
+        if let cached = persisted.codexUsage { codexUsage = cached.live }
+        codexPlan = persisted.codexPlan
         do {
             let (list, statuses, lost, models) = try await client.list()
             sessions = list.sorted { $0.created < $1.created }
@@ -1222,13 +1226,22 @@ public final class AppModel {
         persisted.projectNotes = projectNotes
         persisted.projectNames = projectNames
         persisted.projects = projects
+        persisted.claudeUsage = usage.map(PersistedUsage.init)
+        persisted.claudePlan = plan
+        persisted.codexUsage = codexUsage.map(PersistedCodexUsage.init)
+        persisted.codexPlan = codexPlan
         store.save(persisted)
     }
 
     private func tickUsage() async {
         let acc = await fetchAccount()
-        usage = acc.usage
-        plan = acc.plan
+        // usage and plan come from two independent API calls — each only
+        // replaces the cache on its own success, so a transient failure of
+        // either never blanks out the other's last known value.
+        var changed = false
+        if let newUsage = acc.usage { usage = newUsage; changed = true }
+        if let newPlan = acc.plan { plan = newPlan; changed = true }
+        if changed { persist() }
         usageError = acc.usageError
         // Failed fetch (nil usage) must not touch alert markers: the
         // current window's dedup survives network gaps.
@@ -1259,11 +1272,17 @@ public final class AppModel {
 
     func setCodexState(_ state: CodexServerState) {
         codexState = state
-        if case .active(let acc) = state {
+        switch state {
+        case .active(let acc):
             codexPlan = codexPlanLabel(acc.planType)
-        } else {
+        case .unauthed:
+            // A different (non-chatgpt) account really has no data — unlike
+            // .stopped/.starting this isn't a transient gap, so the cache
+            // does not carry over.
             codexPlan = nil
-            codexUsage = nil          // no chip when not active
+            codexUsage = nil
+        case .stopped, .starting:
+            break   // keep the last-known cache; server down != data invalid
         }
     }
 
@@ -1271,6 +1290,7 @@ public final class AppModel {
     /// the same 80%-alert machinery as Claude under the "codex" marker prefix.
     func ingestCodexRateLimits(_ update: CodexRateLimitsSnapshot, now: Date = Date()) {
         codexUsage = mergeCodex(into: codexUsage, update: update)
+        persist()
         guard let usage = codexUsage else { return }
         let old = persisted.usageNotified ?? [:]
         let windows: [(key: String, window: UsageWindow?)] =

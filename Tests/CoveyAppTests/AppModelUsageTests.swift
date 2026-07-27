@@ -119,6 +119,81 @@ final class AppModelUsageTests: XCTestCase {
         }
         XCTAssertTrue(persisted)
     }
+    @MainActor
+    func testTickUsagePreservesLastKnownOnError() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let box = AccountBox()
+        box.value = Account(usage: Usage(fiveHour: UsageWindow(utilization: 40, resetUnix: nil),
+                                         sevenDay: nil, sevenDaySonnet: nil), plan: "Pro")
+        let model = try makeUsageModel(daemon, fetch: { box.value })
+        await model.start()
+        _ = await eventually { model.usage?.fiveHour?.utilization == 40 }
+        box.value = Account(usageError: "network")
+        let ok = await eventually { model.usageError == "network" }
+        XCTAssertTrue(ok)
+        XCTAssertEqual(model.usage?.fiveHour?.utilization, 40,
+                       "a later error must not blank out a prior success")
+        XCTAssertEqual(model.plan, "Pro")
+    }
+
+    @MainActor
+    func testSetCodexStateStoppedPreservesCache() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let model = try makeUsageModel(daemon, fetch: { Account() })
+        await model.start()
+        model.setCodexState(.active(CodexAccount(type: "chatgpt", planType: "pro")))
+        model.ingestCodexRateLimits(CodexRateLimitsSnapshot(
+            primary: LabeledWindow(label: "5h", window: UsageWindow(utilization: 12, resetUnix: 1)),
+            secondary: nil))
+        model.setCodexState(.stopped)
+        XCTAssertEqual(model.codexPlan, "Pro")
+        XCTAssertEqual(model.codexUsage?.primary?.window.utilization, 12)
+    }
+
+    @MainActor
+    func testSetCodexStateUnauthedClearsCache() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let model = try makeUsageModel(daemon, fetch: { Account() })
+        await model.start()
+        model.setCodexState(.active(CodexAccount(type: "chatgpt", planType: "pro")))
+        model.ingestCodexRateLimits(CodexRateLimitsSnapshot(
+            primary: LabeledWindow(label: "5h", window: UsageWindow(utilization: 12, resetUnix: 1)),
+            secondary: nil))
+        model.setCodexState(.unauthed)
+        XCTAssertNil(model.codexPlan)
+        XCTAssertNil(model.codexUsage)
+    }
+
+    @MainActor
+    func testRestartRestoresCachedUsageBeforeFirstPoll() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let statePath = "\(NSTemporaryDirectory())covey-usage-cache-\(UInt32.random(in: 0..<UInt32.max)).json"
+        let client1 = IPCClient(path: daemon.path); try client1.connect()
+        let model1 = AppModel(
+            client: client1,
+            makeClient: { let c = IPCClient(path: daemon.path); try c.connect(); return c },
+            store: StateStore(path: statePath, debounce: 0.05),
+            fetchAccount: { Account(usage: Usage(fiveHour: UsageWindow(utilization: 61, resetUnix: nil),
+                                                 sevenDay: nil, sevenDaySonnet: nil), plan: "Max") },
+            usageInterval: 0.05)
+        await model1.start()
+        _ = await eventually { model1.usage?.fiveHour?.utilization == 61 }
+        try? await Task.sleep(nanoseconds: 150_000_000)   // let the debounced (0.05s) save land
+
+        let client2 = IPCClient(path: daemon.path); try client2.connect()
+        let model2 = AppModel(
+            client: client2,
+            makeClient: { let c = IPCClient(path: daemon.path); try c.connect(); return c },
+            store: StateStore(path: statePath, debounce: 0.05),
+            fetchAccount: { Account() },   // always empty: proves a real (empty) poll can't clobber it either
+            usageInterval: 0.05)
+        await model2.start()
+        XCTAssertEqual(model2.usage?.fiveHour?.utilization, 61,
+                       "cached usage restores from disk before/around the first poll")
+        XCTAssertEqual(model2.plan, "Max")
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        XCTAssertEqual(model2.usage?.fiveHour?.utilization, 61, "still 61 after several more empty polls")
+    }
 }
 
 /// Mutable holder so the fetch closure can return changing values across ticks.
