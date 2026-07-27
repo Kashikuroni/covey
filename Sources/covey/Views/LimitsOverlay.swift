@@ -91,15 +91,28 @@ struct LimitsOverlay: View {
                       onSetEnabled: @escaping (Bool) -> Void) -> some View {
         HStack(spacing: 8) {
             AgentChipView(chip: chip, color: color, now: now, tk: tk)
-            if !enabled {
-                Text("off").foregroundStyle(tk.t3)
-            } else if stale {
+                .opacity(enabled ? 1 : 0.4)
+            if enabled, stale {
                 Text("*").foregroundStyle(tk.warn)
             }
-            Spacer()
-            Toggle("", isOn: Binding(get: { enabled }, set: onSetEnabled))
-                .labelsHidden()
+            miniToggle(enabled: enabled, onSetEnabled: onSetEnabled)
         }
-        .opacity(enabled ? 1 : 0.4)
+    }
+
+    /// A `KbdBadge`-style chip standing in for a checkbox — bordered
+    /// monospaced "on"/"off" pill, sized to its own text (no `Toggle`, whose
+    /// default macOS checkbox style clashes with the rest of this glass
+    /// popover, and no `Spacer`, which would stretch the whole popover to
+    /// the window's width instead of hugging its content).
+    private func miniToggle(enabled: Bool, onSetEnabled: @escaping (Bool) -> Void) -> some View {
+        Text(enabled ? "on" : "off")
+            .font(.system(size: 10, design: .monospaced))
+            .foregroundStyle(enabled ? tk.t1 : tk.t4)
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            .background(enabled ? tk.accent.opacity(0.18) : tk.surf2,
+                       in: RoundedRectangle(cornerRadius: 3))
+            .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(tk.bd2))
+            .contentShape(Rectangle())
+            .onTapGesture { onSetEnabled(!enabled) }
     }
 }
