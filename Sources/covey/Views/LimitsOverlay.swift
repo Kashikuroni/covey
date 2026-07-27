@@ -28,7 +28,7 @@ struct LimitsOverlay: View {
     let onSetCodexUsageEnabled: (Bool) -> Void
     let tk: Tokens
 
-    private let cardWidth: CGFloat = 260
+    private let cardWidth: CGFloat = 320
 
     var body: some View {
         TimelineView(.everyMinute) { ctx in
@@ -42,9 +42,9 @@ struct LimitsOverlay: View {
                                     onSetEnabled: onSetClaudeUsageEnabled)
                 } else if let error {
                     Text("usage: \(error)")
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(.system(size: 13, design: .monospaced))
                         .foregroundStyle(.orange)
-                        .padding(.horizontal, 16).padding(.vertical, 12)
+                        .padding(.horizontal, 18).padding(.vertical, 12)
                 }
                 if let codex {
                     // Codex has no separate error signal today (a failed
@@ -56,7 +56,10 @@ struct LimitsOverlay: View {
                 }
             }
             .frame(width: cardWidth)
-            .glassEffect(.regular, in: .rect(cornerRadius: 16))
+            // Tinted with our own surface color so whatever sits behind the
+            // popover (terminal text, in particular) doesn't bleed through
+            // enough to fight the card's own text for legibility.
+            .glassEffect(.regular.tint(tk.surface.opacity(0.6)), in: .rect(cornerRadius: 16))
             .shadow(radius: 12)
         }
     }
@@ -64,31 +67,31 @@ struct LimitsOverlay: View {
     private func cardHeader(now: Date) -> some View {
         HStack {
             Text("AI Usage Limits")
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
                 .tracking(0.8)
                 .textCase(.uppercase)
-                .foregroundStyle(tk.t4)
+                .foregroundStyle(tk.t3)
             Spacer()
             Text(headerDateTime(now))
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(tk.t4)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(tk.t3)
         }
-        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 10)
+        .padding(.horizontal, 18).padding(.top, 16).padding(.bottom, 12)
     }
 
     private func providerSection(chip: AgentUsageChip, now: Date,
                                   enabled: Bool, stale: Bool,
                                   onSetEnabled: @escaping (Bool) -> Void) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 Text(chip.name)
-                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .font(.system(size: 17, weight: .bold, design: .monospaced))
                     .foregroundStyle(tk.t1)
                 if let plan = chip.plan {
                     Text(plan)
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(tk.t3)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(tk.t2)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
                         .background(tk.surf2, in: Capsule())
                 }
                 if stale { Text("*").foregroundStyle(tk.warn) }
@@ -97,6 +100,8 @@ struct LimitsOverlay: View {
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .tint(tk.accent)
+                    .controlSize(.small)
+                    .scaleEffect(0.8)
             }
             .opacity(enabled ? 1 : 0.55)
             ForEach(Array(chip.windows.enumerated()), id: \.offset) { entry in
@@ -104,26 +109,26 @@ struct LimitsOverlay: View {
             }
             .opacity(enabled ? 1 : 0.55)
         }
-        .padding(.horizontal, 16).padding(.vertical, 14)
+        .padding(.horizontal, 18).padding(.vertical, 16)
         .overlay(alignment: .top) { Rectangle().fill(tk.bd2).frame(height: 1) }
     }
 
     private func windowRow(_ w: LabeledWindow, now: Date) -> some View {
         let pct = Int(w.window.utilization.rounded())
         let color = levelColor(usageLevel(pct), tk: tk)
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 4) {
+        return VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 6) {
                 Text(w.label)
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(tk.t2)
+                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(tk.t1)
                 if let reset = w.window.resetUnix {
                     Text("resets in \(remainingLabel(resetUnix: reset, now: now))")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(tk.t4)
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundStyle(tk.t2)
                 }
                 Spacer()
                 Text("\(pct)%")
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
                     .foregroundStyle(color)
             }
             GeometryReader { geo in
@@ -132,7 +137,7 @@ struct LimitsOverlay: View {
                     Capsule().fill(color).frame(width: geo.size.width * CGFloat(pct) / 100)
                 }
             }
-            .frame(height: 5)
+            .frame(height: 6)
         }
     }
 }
