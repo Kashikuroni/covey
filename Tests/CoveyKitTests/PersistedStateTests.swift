@@ -125,4 +125,36 @@ final class PersistedStateTests: XCTestCase {
                                as: UTF8.self)
         XCTAssertFalse(emptyJSON.contains("usagePlacement"))
     }
+
+    func testUsageCacheFieldsRoundTrip() throws {
+        var st = PersistedState()
+        st.claudeUsageEnabled = false
+        st.codexUsageEnabled = true
+        st.claudeUsage = PersistedUsage(fiveHour: PersistedUsageWindow(utilization: 42, resetUnix: 1),
+                                        sevenDay: nil, sevenDaySonnet: nil)
+        st.claudePlan = "Max 5×"
+        st.codexUsage = PersistedCodexUsage(primaryLabel: "5h",
+                                            primary: PersistedUsageWindow(utilization: 8, resetUnix: 1),
+                                            secondaryLabel: "7d",
+                                            secondary: PersistedUsageWindow(utilization: 22, resetUnix: 2))
+        st.codexPlan = "Plus"
+        let back = try JSONDecoder().decode(PersistedState.self, from: JSONEncoder().encode(st))
+        XCTAssertEqual(back, st)
+    }
+
+    func testUsageCacheFieldsOmittedWhenNilAndOldPayloadDecodes() throws {
+        let json = String(decoding: try JSONEncoder().encode(PersistedState()), as: UTF8.self)
+        XCTAssertFalse(json.contains("claudeUsageEnabled"))
+        XCTAssertFalse(json.contains("codexUsageEnabled"))
+        XCTAssertFalse(json.contains("claudeUsage"))
+        XCTAssertFalse(json.contains("claudePlan"))
+        XCTAssertFalse(json.contains("codexUsage"))
+        XCTAssertFalse(json.contains("codexPlan"))
+        // A state.json written before these fields existed still decodes.
+        let old = #"{"recents":[],"order":[],"projectOrder":[],"projectNames":{},"#
+                + #""projectNotes":{},"notes":{},"drafts":{},"sessions":{}}"#
+        let decoded = try JSONDecoder().decode(PersistedState.self, from: old.data(using: .utf8)!)
+        XCTAssertNil(decoded.claudeUsageEnabled)
+        XCTAssertNil(decoded.claudeUsage)
+    }
 }

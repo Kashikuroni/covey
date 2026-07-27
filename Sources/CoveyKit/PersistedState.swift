@@ -72,6 +72,46 @@ public struct IssueDraft: Codable, Equatable {
     }
 }
 
+/// A single usage window's percentage + reset time — the persistence mirror
+/// of both Claude's fixed windows and Codex's labeled primary/secondary
+/// windows. The live types (`Usage`, `CodexRateLimitsSnapshot`) live in the
+/// `covey` target, which depends on `CoveyKit` (not the reverse), so they
+/// can't be referenced here directly — `covey`'s `UsagePersistence.swift`
+/// converts between the two.
+public struct PersistedUsageWindow: Codable, Equatable {
+    public var utilization: Double
+    public var resetUnix: Int64?
+    public init(utilization: Double, resetUnix: Int64? = nil) {
+        self.utilization = utilization; self.resetUnix = resetUnix
+    }
+}
+
+/// Persistence mirror of Claude's `Usage`.
+public struct PersistedUsage: Codable, Equatable {
+    public var fiveHour: PersistedUsageWindow?
+    public var sevenDay: PersistedUsageWindow?
+    public var sevenDaySonnet: PersistedUsageWindow?
+    public init(fiveHour: PersistedUsageWindow? = nil, sevenDay: PersistedUsageWindow? = nil,
+                sevenDaySonnet: PersistedUsageWindow? = nil) {
+        self.fiveHour = fiveHour; self.sevenDay = sevenDay; self.sevenDaySonnet = sevenDaySonnet
+    }
+}
+
+/// Persistence mirror of Codex's `CodexRateLimitsSnapshot`. The label is
+/// stored alongside each window because Codex windows carry a label
+/// ("5h"/"7d"/"primary"/"secondary") that isn't fixed like Claude's.
+public struct PersistedCodexUsage: Codable, Equatable {
+    public var primaryLabel: String?
+    public var primary: PersistedUsageWindow?
+    public var secondaryLabel: String?
+    public var secondary: PersistedUsageWindow?
+    public init(primaryLabel: String? = nil, primary: PersistedUsageWindow? = nil,
+                secondaryLabel: String? = nil, secondary: PersistedUsageWindow? = nil) {
+        self.primaryLabel = primaryLabel; self.primary = primary
+        self.secondaryLabel = secondaryLabel; self.secondary = secondary
+    }
+}
+
 /// Persisted UI state (`~/.covey/state.json`). Owned by the GUI. Optional scalars
 /// are omitted from JSON when nil (Swift synthesizes `encodeIfPresent`); empty
 /// collections round-trip as `[]`/`{}`.
@@ -117,6 +157,15 @@ public struct PersistedState: Codable, Equatable {
     /// identity — it is preserved across relaunch, only rename changes it).
     public var issueBySession: [String: Int]?
     public var lastVersion: String?
+    /// Per-provider limits display/polling toggle (nil = enabled) and the
+    /// last successfully fetched snapshot, so a disabled provider — or a
+    /// cold start before the first poll lands — still has something to show.
+    public var claudeUsageEnabled: Bool?
+    public var codexUsageEnabled: Bool?
+    public var claudeUsage: PersistedUsage?
+    public var claudePlan: String?
+    public var codexUsage: PersistedCodexUsage?
+    public var codexPlan: String?
 
     public init(
         theme: String? = nil, splitPct: Int? = nil, recents: [RecentSession] = [],
@@ -135,7 +184,13 @@ public struct PersistedState: Codable, Equatable {
         usageNotified: [String: Int64]? = nil,
         usagePlacement: String? = nil,
         issueBySession: [String: Int]? = nil,
-        lastVersion: String? = nil
+        lastVersion: String? = nil,
+        claudeUsageEnabled: Bool? = nil,
+        codexUsageEnabled: Bool? = nil,
+        claudeUsage: PersistedUsage? = nil,
+        claudePlan: String? = nil,
+        codexUsage: PersistedCodexUsage? = nil,
+        codexPlan: String? = nil
     ) {
         self.theme = theme; self.splitPct = splitPct; self.recents = recents
         self.order = order; self.projectOrder = projectOrder
@@ -154,5 +209,11 @@ public struct PersistedState: Codable, Equatable {
         self.usagePlacement = usagePlacement
         self.issueBySession = issueBySession
         self.lastVersion = lastVersion
+        self.claudeUsageEnabled = claudeUsageEnabled
+        self.codexUsageEnabled = codexUsageEnabled
+        self.claudeUsage = claudeUsage
+        self.claudePlan = claudePlan
+        self.codexUsage = codexUsage
+        self.codexPlan = codexPlan
     }
 }
