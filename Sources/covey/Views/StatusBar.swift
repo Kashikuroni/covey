@@ -92,6 +92,7 @@ struct StatusBar: View {
         case .leader: return [("esc", "close"), ("⌫", "back")]
         case .selectSession: return [("1-9", "jump"), ("esc", "cancel")]
         case .help: return [("any key", "closes")]
+        case .limits: return [("any key", "closes")]
         case .normal:
             guard model.vimMode else { return [("⌘N", "new"), ("⌘F", "filter")] }
             return [

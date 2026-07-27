@@ -243,4 +243,14 @@ final class KeyRouterTests: XCTestCase {
         XCTAssertEqual(KeyRouter.route(key("2"), context: ctx(mode: .selectSession)),
                        .selectByNumber(2))
     }
+
+    func testLimitsOverlayOpensFromRootAndClosesOnAnyKey() {
+        XCTAssertEqual(KeyRouter.route(key("l"), context: ctx(mode: .leader(.root))),
+                       .toggleLimitsOverlay)
+        XCTAssertTrue(LeaderMenu.root.rows.contains { $0.key == "l" && $0.implemented },
+                      "space l must be advertised in the which-key root panel")
+        let limits = ctx(mode: .limits)
+        XCTAssertEqual(KeyRouter.route(key("x"), context: limits), .closeOverlay)
+        XCTAssertEqual(KeyRouter.route(special(.escape), context: limits), .closeOverlay)
+    }
 }

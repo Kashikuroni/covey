@@ -5,6 +5,7 @@ enum InputMode: Equatable {
     case leader(LeaderMenu)
     case selectSession
     case help
+    case limits
 }
 
 enum LeaderMenu: Equatable { case root, git, session, terminal, ui, project }
@@ -28,6 +29,7 @@ extension LeaderMenu {
             LeaderRow(key: "t", label: "terminal — split v · split h · close", implemented: true),
             LeaderRow(key: "u", label: "ui — session list · inspector · footer · header · theme · split", implemented: true),
             LeaderRow(key: "p", label: "project — add · remove", implemented: true),
+            LeaderRow(key: "l", label: "limits detail", implemented: true),
         ]
         case .git: return [
             LeaderRow(key: "i", label: "create github issue", implemented: true),
@@ -127,6 +129,7 @@ enum KeyAction: Equatable {
     case toggleFooterPanel
     case toggleHeaderPanel
     case cycleUsagePlacement
+    case toggleLimitsOverlay
     case addProject
     case removeProject
 }
@@ -197,6 +200,8 @@ enum KeyRouter {
             return nil   // anything else is ignored; the mode stays
         case .help:
             return .closeOverlay
+        case .limits:
+            return .closeOverlay
         }
     }
 
@@ -259,6 +264,7 @@ enum KeyRouter {
         case (.root, "t"): return .leaderDescend(.terminal)
         case (.root, "u"): return .leaderDescend(.ui)
         case (.root, "p"): return .leaderDescend(.project)
+        case (.root, "l"): return .toggleLimitsOverlay
         case (.ui, "s"): return .toggleSessionsPanel
         case (.ui, "i"): return .toggleInspectorPanel
         case (.ui, "a"): return .toggleTracePanel
