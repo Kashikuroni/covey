@@ -24,6 +24,15 @@ func usageLevel(_ pct: Int) -> UsageLevel {
     return .ok
 }
 
+/// Threshold color for a usage level.
+func levelColor(_ level: UsageLevel, tk: Tokens) -> Color {
+    switch level {
+    case .ok: return tk.ok
+    case .warn: return tk.warn
+    case .err: return tk.err
+    }
+}
+
 /// One agent's chip contents: colored name + plan badge + labeled windows.
 struct AgentUsageChip: Equatable {
     let name: String
@@ -55,6 +64,58 @@ func codexChip(snapshot: CodexRateLimitsSnapshot?, plan: String?) -> AgentUsageC
     guard let snapshot, !snapshot.windows.isEmpty else { return nil }
     return AgentUsageChip(name: "Codex", plan: distinctPlan(plan, name: "Codex"),
                           windows: snapshot.windows)
+}
+
+/// The Codex window to treat as "current session" in the compact header:
+/// the window labeled `7d`, falling back to `secondary` then `primary` —
+/// tolerant of the same missing-duration cases `codexChip` already is.
+func codexHeaderWindow(_ snapshot: CodexRateLimitsSnapshot?) -> UsageWindow? {
+    guard let snapshot else { return nil }
+    if let sevenDay = snapshot.windows.first(where: { $0.label == "7d" }) {
+        return sevenDay.window
+    }
+    return (snapshot.secondary ?? snapshot.primary)?.window
+}
+
+/// One compact top-bar segment: a provider label with its threshold-colored
+/// percent, or (Claude only, when usage failed to load) a plain error label
+/// with no percent.
+struct HeaderSegment: Equatable {
+    let label: String
+    let value: String?
+    let level: UsageLevel?
+}
+
+/// Claude and Codex segments for the compact header, in display order.
+/// Claude's error string takes its slot when there's no usage snapshot yet;
+/// a provider with no data at all contributes no segment.
+func headerSegments(usage: Usage?, usageError: String?,
+                    codexUsage: CodexRateLimitsSnapshot?) -> [HeaderSegment] {
+    var segments: [HeaderSegment] = []
+    if let window = usage?.fiveHour {
+        let pct = Int(window.utilization.rounded())
+        segments.append(HeaderSegment(label: "Claude", value: "\(pct)%", level: usageLevel(pct)))
+    } else if let usageError {
+        segments.append(HeaderSegment(label: "usage: \(usageError)", value: nil, level: nil))
+    }
+    if let window = codexHeaderWindow(codexUsage) {
+        let pct = Int(window.utilization.rounded())
+        segments.append(HeaderSegment(label: "Codex", value: "\(pct)%", level: usageLevel(pct)))
+    }
+    return segments
+}
+
+/// Localized "24 июля · 14:32" — day + full month name (in whatever case
+/// the locale's grammar requires, via ICU template resolution) and 24-hour
+/// time, no year.
+func headerDateTime(_ date: Date, locale: Locale = .current) -> String {
+    let dayMonth = DateFormatter()
+    dayMonth.locale = locale
+    dayMonth.setLocalizedDateFormatFromTemplate("d MMMM")
+    let time = DateFormatter()
+    time.locale = locale
+    time.dateFormat = "HH:mm"
+    return "\(dayMonth.string(from: date)) · \(time.string(from: date))"
 }
 
 /// Top-bar usage bar: Claude and Codex chips side by side. Claude's error
