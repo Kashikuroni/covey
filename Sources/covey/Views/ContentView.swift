@@ -56,6 +56,26 @@ struct ContentView: View {
         .overlay {
             if model.inputMode == .help { HelpOverlay(tk: tokens) }
         }
+        // Click anywhere outside the limits popover closes it — added below
+        // the popover itself in this call chain so the popover's own taps
+        // are not swallowed by this catcher (later `.overlay` calls draw on
+        // top, so this one, added first, sits underneath).
+        .overlay {
+            if model.inputMode == .limits {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { model.apply(.closeOverlay) }
+            }
+        }
+        .overlay(alignment: topOverlayAlignment(model.usagePlacement)) {
+            if model.inputMode == .limits {
+                LimitsOverlay(usage: model.usage, plan: model.plan, error: model.usageError,
+                              codexUsage: model.codexUsage, codexPlan: model.codexPlan, tk: tokens)
+                    .padding(.top, 42)
+                    .transition(.scale(scale: 0.92, anchor: .top).combined(with: .opacity))
+                    .animation(.spring(response: 0.28, dampingFraction: 0.86), value: model.inputMode)
+            }
+        }
         .onAppear {
             keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                 // ⌘W: kill sheet for the selected session (File→Close would
