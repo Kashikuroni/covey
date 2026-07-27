@@ -199,6 +199,29 @@ final class AppModelChromeTests: XCTestCase {
     }
 
     @MainActor
+    func testLimitsSelectionNavigatesAndTogglesViaApply() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        model.apply(.toggleLimitsOverlay)
+        XCTAssertEqual(model.limitsSelectedProvider, .claude, "opens with Claude highlighted")
+        model.apply(.limitsSelectNext)
+        XCTAssertEqual(model.limitsSelectedProvider, .codex)
+        model.apply(.limitsDisableSelected)
+        XCTAssertFalse(model.codexUsageEnabled)
+        XCTAssertTrue(model.claudeUsageEnabled, "only the highlighted provider is affected")
+        model.apply(.limitsSelectPrev)
+        XCTAssertEqual(model.limitsSelectedProvider, .claude)
+        model.apply(.limitsDisableSelected)
+        XCTAssertFalse(model.claudeUsageEnabled)
+        model.apply(.limitsEnableSelected)
+        XCTAssertTrue(model.claudeUsageEnabled)
+        model.apply(.closeOverlay)
+        model.apply(.toggleLimitsOverlay)
+        XCTAssertEqual(model.limitsSelectedProvider, .claude, "reopening resets the highlight")
+    }
+
+    @MainActor
     func testTransientToastAutoDismisses() async throws {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)

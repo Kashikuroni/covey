@@ -26,6 +26,7 @@ struct LimitsOverlay: View {
     let codexUsageEnabled: Bool
     let onSetClaudeUsageEnabled: (Bool) -> Void
     let onSetCodexUsageEnabled: (Bool) -> Void
+    let selectedProvider: AppModel.LimitsProvider
     let tk: Tokens
 
     private let cardWidth: CGFloat = 320
@@ -39,6 +40,7 @@ struct LimitsOverlay: View {
                 if let claude {
                     providerSection(chip: claude, now: ctx.date,
                                     enabled: claudeUsageEnabled, stale: error != nil,
+                                    selected: selectedProvider == .claude,
                                     onSetEnabled: onSetClaudeUsageEnabled)
                 } else if let error {
                     Text("usage: \(error)")
@@ -52,6 +54,7 @@ struct LimitsOverlay: View {
                     // the disabled state gets a marker here, not staleness.
                     providerSection(chip: codex, now: ctx.date,
                                     enabled: codexUsageEnabled, stale: false,
+                                    selected: selectedProvider == .codex,
                                     onSetEnabled: onSetCodexUsageEnabled)
                 }
             }
@@ -80,13 +83,13 @@ struct LimitsOverlay: View {
     }
 
     private func providerSection(chip: AgentUsageChip, now: Date,
-                                  enabled: Bool, stale: Bool,
+                                  enabled: Bool, stale: Bool, selected: Bool,
                                   onSetEnabled: @escaping (Bool) -> Void) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 Text(chip.name)
                     .font(.system(size: 17, weight: .bold, design: .monospaced))
-                    .foregroundStyle(tk.t1)
+                    .foregroundStyle(selected ? tk.accent : tk.t1)
                 if let plan = chip.plan {
                     Text(plan)
                         .font(.system(size: 12, weight: .semibold, design: .monospaced))

@@ -75,6 +75,7 @@ struct ContentView: View {
                               codexUsageEnabled: model.codexUsageEnabled,
                               onSetClaudeUsageEnabled: { model.setClaudeUsageEnabled($0) },
                               onSetCodexUsageEnabled: { model.setCodexUsageEnabled($0) },
+                              selectedProvider: model.limitsSelectedProvider,
                               tk: tokens)
                     .padding(.top, 42)
                     .transition(.scale(scale: 0.92, anchor: .top).combined(with: .opacity))

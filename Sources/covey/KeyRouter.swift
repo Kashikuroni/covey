@@ -130,6 +130,10 @@ enum KeyAction: Equatable {
     case toggleHeaderPanel
     case cycleUsagePlacement
     case toggleLimitsOverlay
+    case limitsSelectNext
+    case limitsSelectPrev
+    case limitsEnableSelected
+    case limitsDisableSelected
     case addProject
     case removeProject
 }
@@ -201,7 +205,16 @@ enum KeyRouter {
         case .help:
             return .closeOverlay
         case .limits:
-            return .closeOverlay
+            // j/k move the highlighted provider, h/l disable/enable it —
+            // vim's "collapse/expand" pairing. Any other key still closes,
+            // matching .help's "any key closes" behavior.
+            switch ch {
+            case "j": return .limitsSelectNext
+            case "k": return .limitsSelectPrev
+            case "h": return .limitsDisableSelected
+            case "l": return .limitsEnableSelected
+            default: return .closeOverlay
+            }
         }
     }
 

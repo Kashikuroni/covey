@@ -88,6 +88,11 @@ public final class AppModel {
     /// snapshot around for the dimmed popover row.
     public private(set) var claudeUsageEnabled = true
     public private(set) var codexUsageEnabled = true
+    /// Which provider `leader l`'s popover highlights — j/k moves it, h/l
+    /// disables/enables it. Resets to `.claude` every time the popover opens;
+    /// not persisted, this is transient keyboard-navigation state.
+    public enum LimitsProvider: Equatable { case claude, codex }
+    public private(set) var limitsSelectedProvider: LimitsProvider = .claude
     // Codex limits are consumed only in-module (TopBar) + @testable tests, so
     // these stay internal — their types (CodexRateLimitsSnapshot/State) are too.
     private(set) var codexUsage: CodexRateLimitsSnapshot?
@@ -945,6 +950,20 @@ public final class AppModel {
             persist()
         case .toggleLimitsOverlay:
             inputMode = .limits
+            limitsSelectedProvider = .claude
+        case .limitsSelectNext, .limitsSelectPrev:
+            // Only two providers exist — next and prev are the same swap.
+            limitsSelectedProvider = limitsSelectedProvider == .claude ? .codex : .claude
+        case .limitsEnableSelected:
+            switch limitsSelectedProvider {
+            case .claude: setClaudeUsageEnabled(true)
+            case .codex: setCodexUsageEnabled(true)
+            }
+        case .limitsDisableSelected:
+            switch limitsSelectedProvider {
+            case .claude: setClaudeUsageEnabled(false)
+            case .codex: setCodexUsageEnabled(false)
+            }
         case .createIssue:
             inputMode = .normal
             guard inspectorRoot != nil else { toast = "no project"; return }
