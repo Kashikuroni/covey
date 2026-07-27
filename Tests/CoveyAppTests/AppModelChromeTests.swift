@@ -187,6 +187,10 @@ final class AppModelChromeTests: XCTestCase {
         model.apply(.showHelp)
         XCTAssertEqual(model.inputMode, .help)
         model.apply(.closeOverlay)
+        model.apply(.toggleLimitsOverlay)
+        XCTAssertEqual(model.inputMode, .limits)
+        model.apply(.closeOverlay)
+        XCTAssertEqual(model.inputMode, .normal)
         model.apply(.newSession(prefillDir: false))
         XCTAssertEqual(model.modal, .newSession)
         model.modal = nil

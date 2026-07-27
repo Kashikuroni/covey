@@ -917,6 +917,8 @@ public final class AppModel {
             inputMode = .normal
             usagePlacement = usagePlacement.next
             persist()
+        case .toggleLimitsOverlay:
+            inputMode = .limits
         case .createIssue:
             inputMode = .normal
             guard inspectorRoot != nil else { toast = "no project"; return }
