@@ -118,76 +118,50 @@ func headerDateTime(_ date: Date, locale: Locale = .current) -> String {
     return "\(dayMonth.string(from: date)) · \(time.string(from: date))"
 }
 
-/// Top-bar usage bar: Claude and Codex chips side by side. Claude's error
-/// string shows in place of its chip; Codex simply hides when it has no data.
+/// Compact top-bar group: Claude %, Codex %, date/time, hairline-divided.
+/// Full per-window detail lives in `LimitsOverlay` (leader l) now.
 struct UsageChip: View {
     let usage: Usage?
-    let plan: String?
-    let error: String?
+    let usageError: String?
     let codexUsage: CodexRateLimitsSnapshot?
-    let codexPlan: String?
     let tk: Tokens
 
     var body: some View {
-        // Ticks every minute so countdowns advance even when the snapshot is
-        // Equatable-equal (no re-render otherwise).
+        // Ticks every minute so the clock and countdown-derived data advance
+        // even when the snapshot is Equatable-equal (no re-render otherwise).
         TimelineView(.everyMinute) { ctx in
-            let claude = claudeChip(usage: usage, plan: plan)
-            let codex = codexChip(snapshot: codexUsage, plan: codexPlan)
-            let leftPresent = claude != nil || error != nil
+            let segments = headerSegments(usage: usage, usageError: usageError, codexUsage: codexUsage)
             HStack(spacing: 12) {
-                if let claude {
-                    AgentChipView(chip: claude, color: tk.claudeBrand, now: ctx.date, tk: tk)
-                } else if let error {
-                    Text("usage: \(error)").foregroundStyle(.orange)
+                if let first = segments.first {
+                    segmentView(first)
                 }
-                // Hairline divider — only when both sides are actually present.
-                if leftPresent, codex != nil {
-                    Rectangle().fill(tk.bd3).frame(width: 1, height: 12)
+                if segments.count > 1 {
+                    divider
+                    segmentView(segments[1])
                 }
-                if let codex {
-                    AgentChipView(chip: codex, color: tk.codexBrand, now: ctx.date, tk: tk)
-                }
-            }
-        }
-    }
-}
-
-/// Renders one AgentUsageChip: colored name, muted plan, threshold-colored
-/// window pills.
-struct AgentChipView: View {
-    let chip: AgentUsageChip
-    let color: Color
-    let now: Date
-    let tk: Tokens
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Text(chip.name).foregroundStyle(color)
-            if let plan = chip.plan { Text(plan).foregroundStyle(tk.t3) }
-            ForEach(Array(chip.windows.enumerated()), id: \.offset) { entry in
-                pill(entry.element.label, entry.element.window)
+                if !segments.isEmpty { divider }
+                Text(headerDateTime(ctx.date)).foregroundStyle(tk.t3)
             }
         }
     }
 
-    private func levelColor(_ pct: Int) -> Color {
-        switch usageLevel(pct) {
-        case .ok: return tk.ok
-        case .warn: return tk.warn
-        case .err: return tk.err
-        }
+    private var divider: some View {
+        Rectangle().fill(tk.bd3).frame(width: 1, height: 12)
     }
 
-    private func pill(_ prefix: String, _ w: UsageWindow) -> some View {
-        let pct = Int(w.utilization.rounded())
-        let pctText = Text("\(pct)%").foregroundStyle(levelColor(pct))
-        let text: Text
-        if let reset = w.resetUnix {
-            text = Text("\(prefix) \(pctText) · \(remainingLabel(resetUnix: reset, now: now))")
+    @ViewBuilder
+    private func segmentView(_ seg: HeaderSegment) -> some View {
+        if let value = seg.value, let level = seg.level {
+            HStack(spacing: 6) {
+                Text(seg.label).foregroundStyle(brandColor(seg.label))
+                Text(value).foregroundStyle(levelColor(level, tk: tk))
+            }
         } else {
-            text = Text("\(prefix) \(pctText)")
+            Text(seg.label).foregroundStyle(.orange)
         }
-        return text.foregroundStyle(tk.t3)
+    }
+
+    private func brandColor(_ label: String) -> Color {
+        label == "Codex" ? tk.codexBrand : tk.claudeBrand
     }
 }

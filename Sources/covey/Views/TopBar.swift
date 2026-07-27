@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 
 let topBarFontSize: CGFloat = 13
 let topBarFontDesign: Font.Design = .monospaced
@@ -14,43 +13,17 @@ func topBarAlignment(_ placement: UsagePlacement) -> Alignment {
 
 struct TopBar: View {
     @Bindable var model: AppModel
-    /// Windowed mode shows the macOS menu-bar clock; ours only earns its
-    /// place when fullscreen hides that one.
-    @State private var isFullscreen = false
 
     private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
 
     var body: some View {
-        HStack(spacing: 12) {
-            UsageChip(usage: model.usage, plan: model.plan,
-                      error: model.usageError,
-                      codexUsage: model.codexUsage, codexPlan: model.codexPlan,
-                      tk: tk)
-            if isFullscreen {
-                TimelineView(.everyMinute) { ctx in
-                    Text(clock(ctx.date))
-                        .foregroundStyle(tk.t3)
-                }
-            }
-        }
-        .font(.system(size: topBarFontSize, design: topBarFontDesign))
-        .frame(maxWidth: .infinity,
-               alignment: topBarAlignment(model.usagePlacement))
-        // Room for the traffic lights overlaid by the hidden title bar.
-        .padding(.leading, 78).padding(.trailing, 14)
-        .frame(height: 38)
-        .background(tk.surface)
-        .onAppear {
-            isFullscreen = NSApp.windows.contains { $0.styleMask.contains(.fullScreen) }
-        }
-        .onReceive(NotificationCenter.default.publisher(
-            for: NSWindow.didEnterFullScreenNotification)) { _ in isFullscreen = true }
-        .onReceive(NotificationCenter.default.publisher(
-            for: NSWindow.didExitFullScreenNotification)) { _ in isFullscreen = false }
-    }
-
-    private func clock(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "HH:mm"
-        return f.string(from: date)
+        UsageChip(usage: model.usage, usageError: model.usageError,
+                  codexUsage: model.codexUsage, tk: tk)
+            .font(.system(size: topBarFontSize, design: topBarFontDesign))
+            .frame(maxWidth: .infinity, alignment: topBarAlignment(model.usagePlacement))
+            // Room for the traffic lights overlaid by the hidden title bar.
+            .padding(.leading, 78).padding(.trailing, 14)
+            .frame(height: 38)
+            .background(tk.surface)
     }
 }
