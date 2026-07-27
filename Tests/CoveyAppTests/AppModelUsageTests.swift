@@ -194,6 +194,78 @@ final class AppModelUsageTests: XCTestCase {
         try? await Task.sleep(nanoseconds: 150_000_000)
         XCTAssertEqual(model2.usage?.fiveHour?.utilization, 61, "still 61 after several more empty polls")
     }
+
+    @MainActor
+    func testDisabledClaudeUsageStopsPolling() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let box = AccountBox()
+        box.value = Account(usage: Usage(fiveHour: UsageWindow(utilization: 10, resetUnix: nil),
+                                         sevenDay: nil, sevenDaySonnet: nil))
+        let model = try makeUsageModel(daemon, fetch: { box.value })
+        await model.start()
+        _ = await eventually { model.usage?.fiveHour?.utilization == 10 }
+        model.setClaudeUsageEnabled(false)
+        box.value = Account(usage: Usage(fiveHour: UsageWindow(utilization: 99, resetUnix: nil),
+                                         sevenDay: nil, sevenDaySonnet: nil))
+        try? await Task.sleep(nanoseconds: 200_000_000)   // several 0.05s ticks
+        XCTAssertEqual(model.usage?.fiveHour?.utilization, 10,
+                       "disabled provider must not pick up new fetch results")
+    }
+
+    @MainActor
+    func testDisabledCodexUsageTearsDownServerAndPreservesCache() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let model = try makeUsageModel(daemon, fetch: { Account() })
+        await model.start()
+        model.setCodexState(.active(CodexAccount(type: "chatgpt", planType: "pro")))
+        model.ingestCodexRateLimits(CodexRateLimitsSnapshot(
+            primary: LabeledWindow(label: "5h", window: UsageWindow(utilization: 30, resetUnix: 1)),
+            secondary: nil))
+        model.setCodexUsageEnabled(false)
+        XCTAssertEqual(model.codexState, .stopped)
+        XCTAssertEqual(model.codexUsage?.primary?.window.utilization, 30,
+                       "disabling keeps the last known snapshot for the dimmed popover row")
+    }
+
+    @MainActor
+    func testEnableCodexUsageAttemptsRespawnWithoutCrashing() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let model = try makeUsageModel(daemon, fetch: { Account() })
+        await model.start()
+        model.setCodexUsageEnabled(false)
+        model.setCodexUsageEnabled(true)
+        XCTAssertTrue(model.codexUsageEnabled)
+    }
+
+    @MainActor
+    func testRestartRestoresDisabledFlagWithoutFetching() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let statePath = "\(NSTemporaryDirectory())covey-usage-disabled-\(UInt32.random(in: 0..<UInt32.max)).json"
+        let client1 = IPCClient(path: daemon.path); try client1.connect()
+        let model1 = AppModel(
+            client: client1,
+            makeClient: { let c = IPCClient(path: daemon.path); try c.connect(); return c },
+            store: StateStore(path: statePath, debounce: 0.05),
+            fetchAccount: { Account(usage: Usage(fiveHour: UsageWindow(utilization: 61, resetUnix: nil),
+                                                 sevenDay: nil, sevenDaySonnet: nil)) },
+            usageInterval: 0.05)
+        await model1.start()
+        _ = await eventually { model1.usage?.fiveHour?.utilization == 61 }
+        model1.setClaudeUsageEnabled(false)
+        try? await Task.sleep(nanoseconds: 150_000_000)
+
+        let client2 = IPCClient(path: daemon.path); try client2.connect()
+        let model2 = AppModel(
+            client: client2,
+            makeClient: { let c = IPCClient(path: daemon.path); try c.connect(); return c },
+            store: StateStore(path: statePath, debounce: 0.05),
+            fetchAccount: { XCTFail("a disabled provider must not be fetched on restart"); return Account() },
+            usageInterval: 0.05)
+        await model2.start()
+        XCTAssertFalse(model2.claudeUsageEnabled)
+        XCTAssertEqual(model2.usage?.fiveHour?.utilization, 61)
+        try? await Task.sleep(nanoseconds: 150_000_000)   // give the poller a chance to (wrongly) fire
+    }
 }
 
 /// Mutable holder so the fetch closure can return changing values across ticks.

@@ -83,6 +83,11 @@ public final class AppModel {
     public private(set) var usage: Usage?
     public private(set) var plan: String?
     public private(set) var usageError: String?
+    /// Per-provider display/polling toggle — off skips the network call (and,
+    /// for Codex, tears down the whole subprocess) but keeps the last known
+    /// snapshot around for the dimmed popover row.
+    public private(set) var claudeUsageEnabled = true
+    public private(set) var codexUsageEnabled = true
     // Codex limits are consumed only in-module (TopBar) + @testable tests, so
     // these stay internal — their types (CodexRateLimitsSnapshot/State) are too.
     private(set) var codexUsage: CodexRateLimitsSnapshot?
@@ -236,6 +241,8 @@ public final class AppModel {
         projectNotes = persisted.projectNotes
         projectNames = persisted.projectNames
         projects = persisted.projects ?? []
+        claudeUsageEnabled = persisted.claudeUsageEnabled ?? true
+        codexUsageEnabled = persisted.codexUsageEnabled ?? true
         if let cached = persisted.claudeUsage { usage = cached.live }
         plan = persisted.claudePlan
         if let cached = persisted.codexUsage { codexUsage = cached.live }
@@ -672,6 +679,21 @@ public final class AppModel {
     public func setShowHeader(_ on: Bool) { showHeader = on; persist() }
     public func setShowInspector(_ on: Bool) { showInspector = on; persist() }
     public func setVimMode(_ on: Bool) { vimMode = on; persist() }
+    public func setClaudeUsageEnabled(_ on: Bool) {
+        claudeUsageEnabled = on
+        persist()
+    }
+    public func setCodexUsageEnabled(_ on: Bool) {
+        codexUsageEnabled = on
+        persist()
+        if on {
+            startCodexServer()
+        } else {
+            codexServer?.stop()
+            codexServer = nil
+            codexState = .stopped
+        }
+    }
 
     public func setSbWidth(_ px: Int) {
         let clamped = min(600, max(240, px))
@@ -1226,6 +1248,8 @@ public final class AppModel {
         persisted.projectNotes = projectNotes
         persisted.projectNames = projectNames
         persisted.projects = projects
+        persisted.claudeUsageEnabled = claudeUsageEnabled
+        persisted.codexUsageEnabled = codexUsageEnabled
         persisted.claudeUsage = usage.map(PersistedUsage.init)
         persisted.claudePlan = plan
         persisted.codexUsage = codexUsage.map(PersistedCodexUsage.init)
@@ -1234,6 +1258,7 @@ public final class AppModel {
     }
 
     private func tickUsage() async {
+        guard claudeUsageEnabled else { return }
         let acc = await fetchAccount()
         // usage and plan come from two independent API calls — each only
         // replaces the cache on its own success, so a transient failure of
@@ -1262,7 +1287,7 @@ public final class AppModel {
     /// Spawn codex app-server if the binary resolves; wire snapshots/state in.
     /// No binary → stays `.stopped`, chip empty. Passive-only.
     private func startCodexServer() {
-        guard codexServer == nil, let path = resolveCodexPath() else { return }
+        guard codexUsageEnabled, codexServer == nil, let path = resolveCodexPath() else { return }
         let server = CodexAppServer()
         server.onState = { [weak self] state in self?.setCodexState(state) }
         server.onRateLimits = { [weak self] snap in self?.ingestCodexRateLimits(snap) }
