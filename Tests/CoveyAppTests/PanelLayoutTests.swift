@@ -35,7 +35,13 @@ final class PanelLayoutTests: XCTestCase {
 
     func testTerminalKeepsItsReserveWhenTheListGrows() {
         let layout = make(total: 1400, splitPct: 80)
-        XCTAssertEqual(layout.sessions, layout.inner - PanelLayout.minTerminal)
+        XCTAssertGreaterThanOrEqual(layout.terminal, PanelLayout.minTerminal,
+                                    "terminal must keep its minimum when session list is at maximum")
+
+        // Worst-case regression guard: inspector at max, split at max
+        let worst = make(total: 1400, splitPct: 80, sbWidth: 600)
+        XCTAssertGreaterThanOrEqual(worst.terminal, PanelLayout.minTerminal,
+                                    "terminal reserve must account for inspector width")
     }
 
     func testNarrowWindowNeverOverflowsTheCards() {
@@ -57,5 +63,24 @@ final class PanelLayoutTests: XCTestCase {
         let total: CGFloat = 1400
         XCTAssertEqual(PanelLayout.inspectorWidth(dragX: total - Tokens.edge - 300,
                                                   total: total), 300)
+    }
+
+    func testHiddenSessionListFreesWidthToTerminal() {
+        let layout = make(total: 1400, sessions: false)
+        XCTAssertEqual(layout.sessions, 0)
+        XCTAssertEqual(layout.inner, 1400 - Tokens.edge * 2 - Tokens.gutter,
+                       "hiding sessions drops its gutter from the count")
+        XCTAssertEqual(layout.terminal + layout.inspector, layout.inner,
+                       "freed width goes to terminal and inspector")
+    }
+
+    func testBothZonesHiddenDropsAllGutters() {
+        let layout = make(total: 1400, sessions: false, inspector: false)
+        XCTAssertEqual(layout.sessions, 0)
+        XCTAssertEqual(layout.inspector, 0)
+        XCTAssertEqual(layout.inner, 1400 - Tokens.edge * 2,
+                       "no gutters when all zones are hidden")
+        XCTAssertEqual(layout.terminal, layout.inner,
+                       "terminal gets the full inner width")
     }
 }

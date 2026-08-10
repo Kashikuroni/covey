@@ -27,11 +27,13 @@ struct PanelLayout: Equatable {
         let inner = max(0, total - Tokens.edge * 2 - Tokens.gutter * CGFloat(gutters))
         let inspector = showInspector ? min(CGFloat(sbWidth), inner) : 0
         // The percentage applies to the whole inner width (as it did to the
-        // whole window before the cards), and the last `min` is the one new
-        // rule: on a window too narrow for both minimums the session list
-        // yields, because a card that overflows would be drawn off-window.
+        // whole window before the cards). Sessions is capped to reserve room for
+        // both minTerminal and inspector, and further capped to not exceed the
+        // space remaining after inspector. On a window too narrow for both
+        // minimums the session list yields, because a card that overflows would
+        // be drawn off-window.
         let sessions = showSessions
-            ? min(max(minSessions, min(inner - minTerminal, inner * CGFloat(splitPct) / 100)),
+            ? min(max(minSessions, min(inner - minTerminal - inspector, inner * CGFloat(splitPct) / 100)),
                   max(0, inner - inspector))
             : 0
         return PanelLayout(inner: inner,
