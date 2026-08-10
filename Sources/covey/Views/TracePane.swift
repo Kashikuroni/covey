@@ -81,7 +81,7 @@ struct TracePane: View {
                 }
             }
         }
-        .background(tk.bg)
+        .background(tk.surface)
     }
 
     /// Thin pinned strip with the newest rate-limit reading; hidden when the
@@ -108,7 +108,7 @@ struct TracePane: View {
                 }
             }
             .padding(.horizontal, 12).padding(.vertical, 5)
-            .background(tk.surface)
+            .background(tk.surf2)
             .overlay(alignment: .bottom) { tk.bd2.frame(height: 1) }
         }
     }
@@ -123,7 +123,7 @@ struct TracePane: View {
                 .font(.system(size: 11, design: .monospaced)).foregroundStyle(tk.t4)
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(tk.surface)
+        .background(tk.surf2)
         .overlay(alignment: .bottom) { tk.bd2.frame(height: 1) }
     }
 
@@ -366,7 +366,7 @@ struct TracePane: View {
                 .onTapGesture { usageOpen.toggle() }
                 if usageOpen { usageHistoryPanel }
             }
-            .background(tk.surface)
+            .background(tk.surf2)
             .overlay(alignment: .bottom) { tk.bd2.frame(height: 1) }
         }
     }

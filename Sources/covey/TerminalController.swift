@@ -52,13 +52,21 @@ struct TerminalRepresentable: NSViewRepresentable {
     func makeNSView(context: Context) -> TerminalView {
         let view = CoveyTerminalView(frame: .zero)
         view.logName = name
-        // The pane is a rounded card. SwiftTerm paints its own background and
+        // The pane is a rounded card, but this view starts below `paneHeader`
+        // — only its bottom two corners coincide with the card's, the top two
+        // are interior geometry. SwiftTerm paints its own background and
         // scroller into this view, and clipping an AppKit-hosted view from
-        // SwiftUI is unreliable — round the layer instead. The card's surface
-        // is `termBg`, the same color the emulator fills, so the corner shows
-        // no seam.
-        view.wantsLayer = true
+        // SwiftUI is unreliable — round the layer instead, masking only the
+        // bottom pair so the top corners stay square. `MacTerminalView`
+        // doesn't override `isFlipped` (default false), so its layer isn't
+        // geometry-flipped either and shares the view's bottom-left-origin
+        // coordinate space — `layerMinXMinYCorner`/`layerMaxXMinYCorner` are
+        // therefore the two BOTTOM corners on screen. The card's surface is
+        // `termBg`, the same color the emulator fills, so the corner shows no
+        // seam. `wantsLayer` isn't set here: `MacTerminalView.setup()` already
+        // sets it in every init.
         view.layer?.cornerRadius = Tokens.rLg
+        view.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
         view.layer?.masksToBounds = true
         PaneLayoutLog.note("mount", [
             ("name", name),

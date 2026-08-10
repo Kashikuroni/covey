@@ -67,7 +67,7 @@ struct TerminalPaneView: View {
                 .panelCard(tk, surface: tk.termBg)
                 .frame(width: vertical ? first : nil,
                        height: vertical ? nil : first)
-                splitDivider(vertical: vertical, total: total)
+                splitDivider(vertical: vertical, usable: usable)
                 VStack(spacing: 0) {
                     paneHeader("Terminal", badge: 5, name: companion)
                     pane(companion)
@@ -98,7 +98,7 @@ struct TerminalPaneView: View {
             .onTapGesture { model.focusPane(name) }
     }
 
-    private func splitDivider(vertical: Bool, total: CGFloat) -> some View {
+    private func splitDivider(vertical: Bool, usable: CGFloat) -> some View {
         Rectangle()
             .fill(Color.clear)
             .frame(width: vertical ? Tokens.gutter : nil,
@@ -110,11 +110,15 @@ struct TerminalPaneView: View {
                 } else { NSCursor.pop() }
             }
             .gesture(
+                // `fraction` is applied against `usable` (total minus the
+                // gutter) by `first` above, so the drag must divide by the
+                // same width — dividing by `total` would leave the edge
+                // trailing the pointer by the gutter's share of the pane.
                 DragGesture(coordinateSpace: .named("termsplit"))
                     .onChanged { value in
-                        guard total > 0 else { return }
+                        guard usable > 0 else { return }
                         let pos = vertical ? value.location.x : value.location.y
-                        fraction = min(0.85, max(0.15, pos / total))
+                        fraction = min(0.85, max(0.15, pos / usable))
                     }
             )
     }

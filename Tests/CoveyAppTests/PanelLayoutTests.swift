@@ -55,8 +55,31 @@ final class PanelLayoutTests: XCTestCase {
         let wanted: CGFloat = 500
         let pct = PanelLayout.splitPercent(dragX: Tokens.edge + wanted, inner: layout.inner)
         let after = make(total: 1400, splitPct: pct)
-        XCTAssertEqual(after.sessions, wanted, accuracy: 8,
+        // `splitPercent` rounds to the nearest whole percent, so it can be off
+        // by at most 0.5 percentage points from the exact value under the
+        // cursor. Converting that back to a width multiplies by `inner`/100,
+        // so the provable worst case is inner * 0.005 = 1368 * 0.005 = 6.84pt
+        // (inner = 1400 - edge*2 - gutter*2 = 1368 with both zones shown).
+        // 7 is the tightest whole-point bound that still covers it.
+        XCTAssertEqual(after.sessions, wanted, accuracy: 7,
                        "the divider must land under the cursor, not a gutter away")
+    }
+
+    /// Regression guard for the case where a wide `sbWidth` combined with a
+    /// wide `splitPct` used to hand the terminal exactly zero width (the
+    /// inspector wasn't capped against it) — `CoveyTerminalView` holds output
+    /// in an uncapped buffer until it gets a real grid, so that's a silent
+    /// dead end rather than a visible squeeze.
+    func testTerminalNeverStarvesAcrossWindowSizes() {
+        for width in stride(from: CGFloat(400), through: 2000, by: 25) {
+            for splitPct in [15, 38, 80] {
+                for sbWidth in [240, 360, 600] {
+                    let layout = make(total: width, splitPct: splitPct, sbWidth: sbWidth)
+                    XCTAssertGreaterThan(layout.terminal, 0,
+                        "terminal starved at width \(width), splitPct \(splitPct), sbWidth \(sbWidth)")
+                }
+            }
+        }
     }
 
     func testInspectorDragMeasuresFromTheRightEdge() {

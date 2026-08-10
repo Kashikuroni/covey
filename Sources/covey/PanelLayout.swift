@@ -20,12 +20,24 @@ struct PanelLayout: Equatable {
     static let minSessions: CGFloat = 220
     /// Width the terminal keeps while the session list grows.
     static let minTerminal: CGFloat = 480
+    /// Floor the terminal keeps against the inspector — the same floor
+    /// `TerminalPaneView`'s split uses. The drawer, not the agent, is the last
+    /// zone to yield: an inspector that ate the whole remaining width would
+    /// hand the terminal a zero-width frame, and `CoveyTerminalView` holds
+    /// output in an uncapped buffer until it gets a real grid.
+    static let minTerminalSliver: CGFloat = 120
 
     static func make(total: CGFloat, showSessions: Bool, showInspector: Bool,
                      splitPct: Int, sbWidth: Int) -> PanelLayout {
         let gutters = (showSessions ? 1 : 0) + (showInspector ? 1 : 0)
         let inner = max(0, total - Tokens.edge * 2 - Tokens.gutter * CGFloat(gutters))
-        let inspector = showInspector ? min(CGFloat(sbWidth), inner) : 0
+        // The inspector is capped to always leave the terminal its sliver —
+        // and, when the session list is showing, to leave it room too — so a
+        // wide `sbWidth` can never squeeze the terminal to zero.
+        let inspectorCap = showSessions
+            ? max(0, inner - minSessions - minTerminalSliver)
+            : max(0, inner - minTerminalSliver)
+        let inspector = showInspector ? min(CGFloat(sbWidth), inspectorCap) : 0
         // The percentage applies to the whole inner width (as it did to the
         // whole window before the cards). Sessions is capped to reserve room for
         // both minTerminal and inspector, and further capped to not exceed the
@@ -47,7 +59,7 @@ struct PanelLayout: Equatable {
     /// `Tokens.edge` before dividing. `AppModel.setSplitPct` clamps the range.
     static func splitPercent(dragX: CGFloat, inner: CGFloat) -> Int {
         guard inner > 0 else { return 0 }
-        return Int((dragX - Tokens.edge) / inner * 100)
+        return Int(((dragX - Tokens.edge) / inner * 100).rounded())
     }
 
     /// Inspector width for a drag measured the same way, against the full
