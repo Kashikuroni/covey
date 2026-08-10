@@ -50,6 +50,10 @@ struct CoveyApp: App {
                 window?.titleVisibility = .hidden
                 window?.titlebarAppearsTransparent = true
                 window?.styleMask.insert(.fullSizeContentView)
+                // The backdrop blurs what is behind the window; an opaque
+                // window would have nothing to blur.
+                window?.isOpaque = false
+                window?.backgroundColor = .clear
             }
             .task {
                 guard model == nil else { return }

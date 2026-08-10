@@ -25,6 +25,5 @@ struct TopBar: View {
             // Room for the traffic lights overlaid by the hidden title bar.
             .padding(.leading, 78).padding(.trailing, 14)
             .frame(height: 38)
-            .background(tk.surface)
     }
 }

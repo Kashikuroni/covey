@@ -10,15 +10,17 @@ struct ContentView: View {
         VStack(spacing: 0) {
             if model.showHeader {
                 TopBar(model: model)
-                tokens.bd.frame(height: 1)
             }
             workspace
             if model.showFooter {
-                tokens.bd.frame(height: 1)
                 StatusBar(model: model)
             }
         }
-        .background(tokens.bg)
+        .background {
+            WindowBackdrop()
+                .overlay(tokens.bg.opacity(Tokens.backdropTint))
+                .ignoresSafeArea()
+        }
         // The window uses fullSizeContentView: pull the topbar up into the
         // (transparent) title-bar zone so it shares the traffic-light row.
         .ignoresSafeArea(.container, edges: .top)

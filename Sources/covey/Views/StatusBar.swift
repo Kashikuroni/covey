@@ -19,7 +19,6 @@ struct StatusBar: View {
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 4)
-        .background(tk.surface)
     }
 
     private var filterRow: some View {
