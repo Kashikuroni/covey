@@ -15,26 +15,35 @@ struct TerminalPaneView: View {
                     splitBody(main: name, companion: comp.name,
                               vertical: model.splitAxis(for: name) == "v")
                 } else {
-                    paneHeader("Agent", badge: 2, name: name)
-                    pane(name)
+                    VStack(spacing: 0) {
+                        paneHeader("Agent", badge: 2, name: name)
+                        pane(name)
+                    }
+                    .panelCard(tk, surface: tk.termBg)
                 }
             } else if let root = model.selectedProjectRoot {
-                paneHeader("Agent", badge: 2, name: "")
-                Spacer()
-                VStack(spacing: 6) {
-                    Text(model.displayName(forDir: root))
-                        .font(.title3).foregroundStyle(.secondary)
-                    Text(collapseHome(root))
-                        .font(.caption.monospaced()).foregroundStyle(.tertiary)
-                    Text("N — new session")
-                        .font(.caption).foregroundStyle(.tertiary)
+                VStack(spacing: 0) {
+                    paneHeader("Agent", badge: 2, name: "")
+                    Spacer()
+                    VStack(spacing: 6) {
+                        Text(model.displayName(forDir: root))
+                            .font(.title3).foregroundStyle(.secondary)
+                        Text(collapseHome(root))
+                            .font(.caption.monospaced()).foregroundStyle(.tertiary)
+                        Text("N — new session")
+                            .font(.caption).foregroundStyle(.tertiary)
+                    }
+                    Spacer()
                 }
-                Spacer()
+                .panelCard(tk, surface: tk.termBg)
             } else {
-                paneHeader("Agent", badge: 2, name: "")
-                Spacer()
-                Text("no session selected").foregroundStyle(.secondary)
-                Spacer()
+                VStack(spacing: 0) {
+                    paneHeader("Agent", badge: 2, name: "")
+                    Spacer()
+                    Text("no session selected").foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .panelCard(tk, surface: tk.termBg)
             }
         }
     }
@@ -43,7 +52,10 @@ struct TerminalPaneView: View {
     private func splitBody(main: String, companion: String, vertical: Bool) -> some View {
         GeometryReader { geo in
             let total = vertical ? geo.size.width : geo.size.height
-            let first = max(120, min(total - 120, total * fraction))
+            // The gutter eats into the first pane's share, so both panes keep
+            // their 120pt floor with the gap in place.
+            let usable = max(0, total - Tokens.gutter)
+            let first = max(120, min(usable - 120, usable * fraction))
             let layout = vertical
                 ? AnyLayout(HStackLayout(spacing: 0))
                 : AnyLayout(VStackLayout(spacing: 0))
@@ -52,6 +64,7 @@ struct TerminalPaneView: View {
                     paneHeader("Agent", badge: 2, name: main)
                     pane(main)
                 }
+                .panelCard(tk, surface: tk.termBg)
                 .frame(width: vertical ? first : nil,
                        height: vertical ? nil : first)
                 splitDivider(vertical: vertical, total: total)
@@ -59,6 +72,7 @@ struct TerminalPaneView: View {
                     paneHeader("Terminal", badge: 5, name: companion)
                     pane(companion)
                 }
+                .panelCard(tk, surface: tk.termBg)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
@@ -74,7 +88,6 @@ struct TerminalPaneView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
-        .background(tk.surface)
         .contentShape(Rectangle())
         .onTapGesture { if !name.isEmpty { model.focusPane(name) } }
     }
@@ -88,9 +101,8 @@ struct TerminalPaneView: View {
     private func splitDivider(vertical: Bool, total: CGFloat) -> some View {
         Rectangle()
             .fill(Color.clear)
-            .frame(width: vertical ? 5 : nil, height: vertical ? nil : 5)
-            .overlay(Rectangle().fill(Color.gray.opacity(0.25))
-                .frame(width: vertical ? 1 : nil, height: vertical ? nil : 1))
+            .frame(width: vertical ? Tokens.gutter : nil,
+                   height: vertical ? nil : Tokens.gutter)
             .contentShape(Rectangle())
             .onHover { inside in
                 if inside {

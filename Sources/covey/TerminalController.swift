@@ -52,6 +52,14 @@ struct TerminalRepresentable: NSViewRepresentable {
     func makeNSView(context: Context) -> TerminalView {
         let view = CoveyTerminalView(frame: .zero)
         view.logName = name
+        // The pane is a rounded card. SwiftTerm paints its own background and
+        // scroller into this view, and clipping an AppKit-hosted view from
+        // SwiftUI is unreliable — round the layer instead. The card's surface
+        // is `termBg`, the same color the emulator fills, so the corner shows
+        // no seam.
+        view.wantsLayer = true
+        view.layer?.cornerRadius = Tokens.rLg
+        view.layer?.masksToBounds = true
         PaneLayoutLog.note("mount", [
             ("name", name),
             ("split", model.companion(of: model.selected ?? "") != nil),
