@@ -51,6 +51,15 @@ struct TerminalRepresentable: NSViewRepresentable {
 
     func makeNSView(context: Context) -> TerminalView {
         let view = CoveyTerminalView(frame: .zero)
+        view.logName = name
+        PaneLayoutLog.note("mount", [
+            ("name", name),
+            ("split", model.companion(of: model.selected ?? "") != nil),
+            ("sessions", model.showSessions),
+            ("inspector", model.showInspector),
+            ("sbWidth", model.sbWidth),
+            ("splitPct", model.splitPct),
+        ])
         view.terminalDelegate = context.coordinator
         // Claude panes are keyboard-first: never forward mouse to the agent, so
         // a click/drag focuses and selects text locally instead of hijacking
@@ -92,8 +101,11 @@ struct TerminalRepresentable: NSViewRepresentable {
             }
         }
         applyTheme(to: view)
+        // Not `feed(byteArray:)`: the pane has no real grid until SwiftUI lays
+        // it out, and this closure fires immediately with whatever the model
+        // buffered for the session (see CoveyTerminalView.feed(sessionBytes:)).
         model.setTerminalSink(for: name) { [weak view] bytes in
-            view?.feed(byteArray: bytes[...])
+            view?.feed(sessionBytes: bytes[...])
         }
         // A structural remount (split toggle) built a fresh emulator: ask the
         // daemon to replay the session state (preamble + backfill) into it.
@@ -122,6 +134,7 @@ struct TerminalRepresentable: NSViewRepresentable {
         _ nsView: TerminalView,
         coordinator: Coordinator
     ) {
+        PaneLayoutLog.note("unmount", [("name", coordinator.name)])
         coordinator.model.unmountTerminalView(coordinator.lease)
     }
 
@@ -176,13 +189,38 @@ struct TerminalRepresentable: NSViewRepresentable {
                 cols: newCols,
                 rows: newRows
             ) else {
+                PaneLayoutLog.note("sizeChanged", [
+                    ("name", name), ("cols", newCols), ("rows", newRows),
+                    ("verdict", "rejected-by-gate"),
+                ])
                 return
             }
+            PaneLayoutLog.note("sizeChanged", [
+                ("name", name), ("cols", newCols), ("rows", newRows),
+                ("verdict", "queued"),
+            ])
             let gate = resizeGate
             let model = model
             let lease = lease
             Task { @MainActor in
-                guard gate.isLatest(request) else { return }
+                guard gate.isLatest(request) else {
+                    PaneLayoutLog.note("resize", [
+                        ("name", lease.session), ("cols", request.cols),
+                        ("rows", request.rows), ("verdict", "superseded"),
+                    ])
+                    return
+                }
+                guard model.isTerminalViewLeaseCurrent(lease) else {
+                    PaneLayoutLog.note("resize", [
+                        ("name", lease.session), ("cols", request.cols),
+                        ("rows", request.rows), ("verdict", "stale-lease"),
+                    ])
+                    return
+                }
+                PaneLayoutLog.note("resize", [
+                    ("name", lease.session), ("cols", request.cols),
+                    ("rows", request.rows), ("verdict", "sent"),
+                ])
                 await model.resize(
                     cols: request.cols,
                     rows: request.rows,

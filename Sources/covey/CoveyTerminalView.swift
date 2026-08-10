@@ -32,6 +32,12 @@ final class CoveyTerminalView: TerminalView {
     /// the host can kick the child into a full repaint.
     var onWheelScroll: (() -> Void)?
 
+    /// Session name, for the issue #2 layout diagnostic only.
+    var logName: String = "?"
+    private var lastLogged: (w: CGFloat, cols: Int)?
+    private var stateTimer: Timer?
+    private var lastState: String?
+
     private(set) var isFileDropTarget = false
     private var registeredForFileDrops = false
     private lazy var fileDropBorderView: NSView = {
@@ -116,7 +122,9 @@ final class CoveyTerminalView: TerminalView {
         }
         if window == nil {
             removeWheelMonitor()
+            stopStateSampler()
         } else if wheelMonitor == nil {
+            startStateSampler()
             installMouseMonitor()
             wheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
                 guard let self, event.window === self.window,
@@ -134,6 +142,7 @@ final class CoveyTerminalView: TerminalView {
 
     deinit {
         removeWheelMonitor()
+        stateTimer?.invalidate()
     }
 
     private func removeWheelMonitor() {
@@ -178,11 +187,103 @@ final class CoveyTerminalView: TerminalView {
         onBufferSwitch?()
     }
 
+    /// False until `init` returns: SwiftTerm sizes the view while it is still
+    /// building the emulator, and the guard below reads it.
+    private var isSetUp = false
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isSetUp = true
+        // A view built at a usable size already has its grid; one built at
+        // `.zero` (how panes mount) waits for the first layout pass.
+        hasPaneGrid = !collapsesGrid(frame.size)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is unused") }
+
+    // SwiftTerm recomputes its grid for every frame that is not exactly 0x0 and
+    // floors the result at 2 columns / 1 row. A layout pass that hands the pane
+    // a zero width but a real height therefore collapses the emulator to a
+    // 2-column grid — while the resize gate refuses to forward the matching
+    // non-positive size to the session, so the agent keeps painting full-width
+    // frames into a 2-column emulator and every line hard-wraps to a
+    // 2-character strip. The normal buffer reflows when the pane widens again;
+    // the alternate buffer, where claude and codex live, does not, so the strip
+    // survives until the agent repaints by itself (issue #2: "switch sessions a
+    // few times and it fixes itself"). Swallowing the degenerate frame — 0x0 is
+    // the one size SwiftTerm itself ignores — keeps the emulator on the last
+    // grid the session was actually told about.
+    override func setFrameSize(_ newSize: NSSize) {
+        guard isSetUp else {
+            super.setFrameSize(newSize)
+            return
+        }
+        guard !collapsesGrid(newSize) else {
+            PaneLayoutLog.note("degenerate", [
+                ("name", logName),
+                ("w", newSize.width), ("h", newSize.height),
+                ("cols", getTerminal().cols), ("rows", getTerminal().rows),
+            ])
+            super.setFrameSize(.zero)
+            return
+        }
+        super.setFrameSize(newSize)
+        adoptPaneGrid()
+    }
+
+    /// Session output waiting for the pane's real grid, oldest first.
+    private var pendingSessionBytes: [UInt8] = []
+    private var hasPaneGrid = false
+
+    /// Feeds session output, or holds it until the pane has been laid out.
+    ///
+    /// A view mounts as `frame: .zero`, and SwiftTerm sizes the emulator to its
+    /// floor — 2 columns by 1 row — for that frame too: `getEffectiveWidth`
+    /// subtracts the scroller, so the width it measures is negative and the
+    /// "no size yet" short-circuit (an exactly 0x0 frame) never fires. Bytes
+    /// fed in that window — the attach backfill flushes the moment the sink is
+    /// registered, inside `makeNSView` — hard-wrap to a 2-character strip, and
+    /// the alternate buffer does not reflow when the first layout pass widens
+    /// the grid. That is issue #2, and it is why it comes and goes: it depends
+    /// on whether the replay beats the layout pass.
+    func feed(sessionBytes bytes: ArraySlice<UInt8>) {
+        guard hasPaneGrid else {
+            pendingSessionBytes.append(contentsOf: bytes)
+            return
+        }
+        feed(byteArray: bytes)
+    }
+
+    /// The pane has a real grid now: release anything held back.
+    private func adoptPaneGrid() {
+        hasPaneGrid = true
+        guard !pendingSessionBytes.isEmpty else { return }
+        let held = pendingSessionBytes
+        pendingSessionBytes = []
+        feed(byteArray: held[...])
+    }
+
+    /// Mirrors SwiftTerm's own grid arithmetic: would this frame produce fewer
+    /// columns or rows than the emulator's floor, i.e. a grid the session can
+    /// never be resized to?
+    private func collapsesGrid(_ size: NSSize) -> Bool {
+        let terminal = getTerminal()
+        let optimal = getOptimalFrameSize()
+        let scroller = NSScroller.scrollerWidth(for: .regular,
+                                                scrollerStyle: NSScroller.preferredScrollerStyle)
+        let cellWidth = (optimal.width - scroller) / CGFloat(max(terminal.cols, 1))
+        let cellHeight = optimal.height / CGFloat(max(terminal.rows, 1))
+        guard cellWidth > 0, cellHeight > 0 else { return false }
+        return size.width - scroller < cellWidth * 2 || size.height < cellHeight
+    }
+
     // SwiftTerm lays its legacy scroller out at the .regular width (~15pt)
     // and the property is private — re-shape it after every layout pass to
     // a .mini strip hugging the right edge.
     override func layout() {
         super.layout()
+        logLayout()
         for case let scroller as NSScroller in subviews {
             scroller.controlSize = .mini
             let w = NSScroller.scrollerWidth(for: .mini, scrollerStyle: .legacy)
@@ -193,6 +294,68 @@ final class CoveyTerminalView: TerminalView {
             fileDropBorderView.frame = bounds
             addSubview(fileDropBorderView, positioned: .above, relativeTo: nil)
         }
+    }
+
+    /// Issue #2 diagnostic: samples the emulator's own state every 2s, to
+    /// confirm the `setFrameSize` guard holds in a real run. `maxLen` — the
+    /// widest non-empty row — is the wrap width the content really has, so a
+    /// `maxLen` of 2 against a wide `cols` is the strip coming back.
+    private func logState() {
+        let terminal = getTerminal()
+        let buffer = terminal.buffer
+        var maxLen = 0
+        var sample = ""
+        for row in 0..<terminal.rows {
+            let s = terminal.getScrollInvariantLine(row: row)?
+                .translateToString(trimRight: true) ?? ""
+            maxLen = max(maxLen, s.count)
+            if sample.isEmpty, !s.isEmpty { sample = String(s.prefix(48)) }
+        }
+        let key = "\(terminal.cols)/\(terminal.rows)/\(buffer.marginLeft)/"
+            + "\(buffer.marginRight)/\(buffer.scrollTop)/\(buffer.scrollBottom)/"
+            + "\(terminal.isCurrentBufferAlternate)/\(maxLen)"
+        guard key != lastState else { return }
+        lastState = key
+        PaneLayoutLog.note("state", [
+            ("name", logName),
+            ("cols", terminal.cols), ("rows", terminal.rows),
+            ("marginL", buffer.marginLeft), ("marginR", buffer.marginRight),
+            ("scrollTop", buffer.scrollTop), ("scrollBot", buffer.scrollBottom),
+            ("cx", buffer.x), ("cy", buffer.y),
+            ("alt", terminal.isCurrentBufferAlternate),
+            ("maxLen", maxLen),
+            ("row", PaneLayoutLog.sanitize(sample)),
+        ])
+    }
+
+    private func startStateSampler() {
+        guard stateTimer == nil else { return }
+        stateTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.logState() }
+        }
+    }
+
+    private func stopStateSampler() {
+        stateTimer?.invalidate()
+        stateTimer = nil
+    }
+
+    /// Issue #2 diagnostic: one line per layout pass whose width or grid moved.
+    private func logLayout() {
+        let terminal = getTerminal()
+        let width = bounds.width
+        if let last = lastLogged, last.w == width, last.cols == terminal.cols { return }
+        lastLogged = (width, terminal.cols)
+        PaneLayoutLog.note("layout", [
+            ("name", logName),
+            ("w", width),
+            ("h", bounds.height),
+            ("cols", terminal.cols),
+            ("rows", terminal.rows),
+            ("win", window?.frame.width ?? -1),
+            ("up", PaneLayoutLog.ancestry(self)),
+            ("live", window?.inLiveResize == true),
+        ])
     }
 
     func localFileURLs(in pasteboard: NSPasteboard) -> [URL] {
