@@ -66,6 +66,11 @@ final class KeyRouterTests: XCTestCase {
         XCTAssertEqual(KeyRouter.route(.init(char: nil, isShift: true, special: .tab),
                                        context: terminal), .sendShiftTab,
                        "shift-tab must reach the agent, not AppKit focus traversal")
+        XCTAssertEqual(KeyRouter.route(.init(char: nil, isShift: true, special: .enter),
+                                       context: terminal), .sendShiftEnter,
+                       "shift-enter must break the line, not submit like a bare CR")
+        XCTAssertNil(KeyRouter.route(special(.enter), context: terminal),
+                     "plain enter stays the agent's own key")
         XCTAssertNil(KeyRouter.route(key("j"), context: terminal))
         XCTAssertNil(KeyRouter.route(key(" "), context: terminal))
         // ⌃Q from the list side does nothing.

@@ -52,6 +52,19 @@ public final class IPCServer {
         registry.onSessionRemoved = { [weak self] name in
             self?.broadcast(.event(.sessionRemoved(name: name)))
         }
+        registry.onRenamed = { [weak self] old, new in
+            guard let self else { return }
+            // The output fanout captured the create-time name in its handler,
+            // so after a rename live output would keep going out as the old
+            // name — the client, attached to the new one, drops it and the pane
+            // freezes on the attach backfill. Re-bind it (as a restart does)
+            // and carry the subscribers over so nothing is missed in between.
+            self.attachOutputFanout(for: new)
+            self.server.async {
+                guard let subs = self.subscribers.removeValue(forKey: old) else { return }
+                self.subscribers[new, default: []].formUnion(subs)
+            }
+        }
         registry.onRestarted = { [weak self, weak gitMonitor, weak modelMonitor] s in
             guard let self else { return }
             // The respawn created a new PTYSessionRuntime — re-bind the output fanout

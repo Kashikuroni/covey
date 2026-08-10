@@ -106,6 +106,7 @@ enum KeyAction: Equatable {
     case openProjectNote
     case renameProject
     case sendShiftTab
+    case sendShiftEnter
     case promoteSelected
     case deleteBranchSelected
     case cleanupBranches
@@ -172,6 +173,11 @@ enum KeyRouter {
             // AppKit's focus traversal (insertBacktab:). Forward it to the
             // agent instead — the TUI's mode-cycle key.
             if input.special == .tab, input.isShift { return .sendShiftTab }
+            // Same story for ⇧Enter: SwiftTerm sends a bare CR for it (the
+            // shift only shows up under the kitty keyboard protocol, which the
+            // agents do not turn on), so an agent reads it as plain Enter and
+            // submits instead of breaking the line.
+            if input.special == .enter, input.isShift { return .sendShiftEnter }
             return nil
         }
         guard context.vimMode else { return nil }

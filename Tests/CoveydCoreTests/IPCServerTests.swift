@@ -452,4 +452,45 @@ final class IPCServerTests: XCTestCase {
         waitUntil({ !FileManager.default.fileExists(atPath: wtPath) }, "worktree removed")
         waitUntil({ !GitOps.branchExists(repo, "feat") }, "branch deleted after worktree removal")
     }
+
+    // Issue #5 regression: the output fanout captured the create-time name, so
+    // after a rename live output kept being published under the old one — the
+    // client, attached to the new name, dropped it and the pane froze on the
+    // attach backfill ("input to the agent panel is broken").
+    func testOutputIsPublishedUnderTheNewNameAfterRename() {
+        let registry = SessionRegistry(clock: { 1 })
+        let server = IPCServer(registry: registry,
+                               monitor: StatusMonitor(snapshot: { registry.snapshotScreens() }))
+        let sink = FakeSink(id: 1)
+        server.register(sink)
+        server.handle(Request(id: 1, op: .create(dir: "/tmp", agent: "sh", argv: ["/bin/cat"],
+                                                 name: "s1", terminal: nil, worktree: nil,
+                                                 model: nil, effort: nil, resume: nil,
+                                                 companionOf: nil)), from: sink)
+        waitUntil({ sink.captured.contains {
+            if case .response(1, .session) = $0 { return true }; return false
+        } }, "created")
+        server.handle(Request(id: 2, op: .attach(name: "s1", sinceSeq: 0)), from: sink)
+        server.handle(Request(id: 3, op: .rename(name: "s1", newName: "s2")), from: sink)
+        waitUntil({ sink.captured.contains {
+            if case .response(3, .ok) = $0 { return true }; return false
+        } }, "renamed")
+
+        let before = sink.captured.count
+        server.handle(Request(id: 4, op: .input(name: "s2",
+                                                bytesB64: Data("hello\n".utf8).base64EncodedString())),
+                      from: sink)
+        waitUntil({
+            sink.captured.dropFirst(before).contains {
+                if case .event(.output(let name, _, _)) = $0 { return name == "s2" }
+                return false
+            }
+        }, "live output carries the new name")
+        XCTAssertFalse(sink.captured.dropFirst(before).contains {
+            if case .event(.output(let name, _, _)) = $0 { return name == "s1" }
+            return false
+        }, "nothing is published under the old name any more")
+        server.handle(Request(id: 5, op: .kill(name: "s2", removeWorktree: nil,
+                                               deleteBranch: nil)), from: sink)
+    }
 }

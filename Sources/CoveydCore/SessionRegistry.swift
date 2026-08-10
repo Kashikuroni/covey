@@ -17,6 +17,11 @@ public final class SessionRegistry {
     /// Fired when a pending restart respawned the session in place (the entry,
     /// name and screen survive; no exited/sessionRemoved accompany it).
     public var onRestarted: ((Session) -> Void)?
+    /// Fired for every session a rename moved: (old name, new name). The
+    /// process outlives the rename, so anything that captured the old name —
+    /// notably the output fanout — has to re-bind. A companion rename reports
+    /// its own pair after the parent's.
+    public var onRenamed: ((String, String) -> Void)?
     private var entries: [String: (session: Session, process: any SessionRuntime,
                                    screen: ScreenModel, argv: [String],
                                    size: (cols: UInt16, rows: UInt16))] = [:]
@@ -260,6 +265,12 @@ public final class SessionRegistry {
         }
         lock.unlock()
         persistNow()
+        // Before the add/remove pair: subscribers must be re-pointed at the new
+        // name while the client still believes it is attached to the old one.
+        onRenamed?(name, newName)
+        if let pair = companionPair {
+            onRenamed?(pair.old, pair.session.name)
+        }
         onSessionRemoved?(name)
         onSessionAdded?(entry.session)
         if let pair = companionPair {

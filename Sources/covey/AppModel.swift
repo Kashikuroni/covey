@@ -868,6 +868,13 @@ public final class AppModel {
         case .sendShiftTab:
             guard let selected else { return }
             Task { try? await client.input(name: selected, bytes: [0x1b, 0x5b, 0x5a]) }
+        case .sendShiftEnter:
+            // ESC CR — the newline-in-composer sequence Claude Code's own
+            // /terminal-setup binds in iTerm2, and the bytes ⌥Enter already
+            // sends here. Goes to the focused pane, not just the selected one,
+            // so a split's shell companion gets its own ⇧Enter.
+            guard let target = focusedPane ?? selected else { return }
+            Task { try? await client.input(name: target, bytes: [0x1b, 0x0d]) }
         case .restartSelected:
             inputMode = .normal
             if let selected { modal = .restart(selected) }
