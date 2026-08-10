@@ -28,6 +28,13 @@ struct Tokens {
     static let rLg: CGFloat = 10
     static let shadowRadius: CGFloat = 8
     static let shadowY: CGFloat = 2
+    /// Gap between panel cards; doubles as the resize handle's hit area.
+    static let gutter: CGFloat = 8
+    /// Inset of the panel cards from the window edges.
+    static let edge: CGFloat = 8
+    /// How opaque the `bg` tint over the window backdrop is. Lower shows more
+    /// of the desktop through the gutters, at the cost of contrast.
+    static let backdropTint: Double = 0.9
 
     init(_ theme: Theme) {
         self = theme == .dark ? .dark : .light
