@@ -16,11 +16,11 @@ struct SessionListView: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .background(tk.surface)
             .contentShape(Rectangle())
             .onTapGesture { model.setFocus(.sessions) }
             activeList
         }
+        .panelCard(tk, surface: tk.surface)
     }
 
     private var activeList: some View {

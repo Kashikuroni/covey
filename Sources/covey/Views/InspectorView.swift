@@ -20,26 +20,33 @@ struct InspectorView: View {
                 // The trace takes over the whole drawer — Note/Issue and the
                 // trace never share the width. ⌘3/⌘4 switch back.
                 TracePane(model: model)
-            } else {
-                VStack(spacing: 0) {
-                    if model.inspectorSplit {
-                        // Split shows both panes — a shared tab row would lie
-                        // about what a click does. Each pane carries its own
-                        // zone header.
+                    .panelCard(tk, surface: tk.surface)
+            } else if model.inspectorSplit {
+                // Split shows both panes — a shared tab row would lie about
+                // what a click does. Each pane carries its own zone header,
+                // and therefore its own card.
+                VStack(spacing: Tokens.gutter) {
+                    VStack(spacing: 0) {
                         paneHeader("Note", badge: 3, tab: .note)
                         NotePane(model: model).id(root)
-                        Divider()
+                    }
+                    .panelCard(tk, surface: tk.surface)
+                    VStack(spacing: 0) {
                         paneHeader("Issue", badge: 4, tab: .issue)
                         IssueBrowserPane(model: model)
+                    }
+                    .panelCard(tk, surface: tk.surface)
+                }
+            } else {
+                VStack(spacing: 0) {
+                    tabsHeader
+                    if model.inspectorTab == .note {
+                        NotePane(model: model).id(root)
                     } else {
-                        tabsHeader
-                        if model.inspectorTab == .note {
-                            NotePane(model: model).id(root)
-                        } else {
-                            IssueBrowserPane(model: model)
-                        }
+                        IssueBrowserPane(model: model)
                     }
                 }
+                .panelCard(tk, surface: tk.surface)
             }
         }
     }
@@ -52,7 +59,6 @@ struct InspectorView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
-        .background(tk.surface)
     }
 
     private func tab(_ label: String, badge: Int,
@@ -79,7 +85,6 @@ struct InspectorView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
-        .background(tk.surface)
         .contentShape(Rectangle())
         .onTapGesture {
             model.setFocus(.inspector)

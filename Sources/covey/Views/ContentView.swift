@@ -145,16 +145,23 @@ struct ContentView: View {
         }
     }
 
+    /// Coordinate space the resize handles measure in: its origin is the
+    /// window's content edge, which is what `PanelLayout` expects.
+    static let workspaceSpace = "workspace"
+
     private var workspace: some View {
         GeometryReader { geo in
-            let leftWidth = max(220, min(geo.size.width - 480,
-                                         geo.size.width * CGFloat(model.splitPct) / 100))
+            let layout = PanelLayout.make(total: geo.size.width,
+                                          showSessions: model.showSessions,
+                                          showInspector: model.showInspector,
+                                          splitPct: model.splitPct,
+                                          sbWidth: model.sbWidth)
             HStack(spacing: 0) {
                 if model.showSessions {
                     SessionListView(model: model)
-                        .frame(width: leftWidth)
+                        .frame(width: layout.sessions)
                         .onTapGesture { model.setFocus(.sessions) }
-                    divider(total: geo.size.width)
+                    divider(inner: layout.inner)
                 }
                 TerminalPaneView(model: model)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -162,46 +169,48 @@ struct ContentView: View {
                 if model.showInspector {
                     rightDivider(total: geo.size.width)
                     InspectorView(model: model)
-                        .frame(width: CGFloat(model.sbWidth))
+                        .frame(width: layout.inspector)
                         .contentShape(Rectangle())
                         .onTapGesture { model.setFocus(.inspector) }
                 }
             }
+            .padding(Tokens.edge)
+            .coordinateSpace(name: ContentView.workspaceSpace)
         }
     }
 
     private func rightDivider(total: CGFloat) -> some View {
         Rectangle()
             .fill(Color.clear)
-            .frame(width: 6)
-            .overlay(Rectangle().fill(Color.gray.opacity(0.25)).frame(width: 1))
+            .frame(width: Tokens.gutter)
             .contentShape(Rectangle())
             .onHover { inside in
                 if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
             }
             .gesture(
-                DragGesture(coordinateSpace: .global)
+                DragGesture(coordinateSpace: .named(ContentView.workspaceSpace))
                     .onChanged { value in
                         guard total > 0 else { return }
-                        model.setSbWidth(Int(total - value.location.x))
+                        model.setSbWidth(PanelLayout.inspectorWidth(dragX: value.location.x,
+                                                                    total: total))
                     }
             )
     }
 
-    private func divider(total: CGFloat) -> some View {
+    private func divider(inner: CGFloat) -> some View {
         Rectangle()
             .fill(Color.clear)
-            .frame(width: 6)
-            .overlay(Rectangle().fill(Color.gray.opacity(0.25)).frame(width: 1))
+            .frame(width: Tokens.gutter)
             .contentShape(Rectangle())
             .onHover { inside in
                 if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
             }
             .gesture(
-                DragGesture(coordinateSpace: .global)
+                DragGesture(coordinateSpace: .named(ContentView.workspaceSpace))
                     .onChanged { value in
-                        guard total > 0 else { return }
-                        model.setSplitPct(Int(value.location.x / total * 100))
+                        guard inner > 0 else { return }
+                        model.setSplitPct(PanelLayout.splitPercent(dragX: value.location.x,
+                                                                   inner: inner))
                     }
             )
     }
