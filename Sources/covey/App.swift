@@ -77,6 +77,11 @@ struct CoveyApp: App {
         // level (TopBar pads left for the buttons), and the toolbar is gone.
         .windowStyle(.hiddenTitleBar)
         .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") { model?.openSettings() }
+                    .keyboardShortcut(",", modifiers: .command)
+                    .disabled(model?.modal != nil)
+            }
             CommandGroup(replacing: .newItem) {
                 Button("New Session") { model?.modal = .newSession }
                     .keyboardShortcut("n", modifiers: .command)

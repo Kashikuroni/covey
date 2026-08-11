@@ -15,6 +15,7 @@ public enum FocusZone: Equatable {
 @Observable @MainActor
 public final class AppModel {
     public enum Modal: Equatable {
+        case settings
         case newSession
         case recent
         case kill(String)
@@ -56,6 +57,7 @@ public final class AppModel {
             }
         }
     }
+    @ObservationIgnored private var offerThemeRestartAfterModalDismiss = false
     @ObservationIgnored private var toastDismiss: Task<Void, Never>?
     /// How long a transient toast stays before auto-dismissing (test-tunable).
     @ObservationIgnored var toastDismissDelay: Duration = .seconds(4)
@@ -684,6 +686,48 @@ public final class AppModel {
     public func setShowHeader(_ on: Bool) { showHeader = on; persist() }
     public func setShowInspector(_ on: Bool) { showInspector = on; persist() }
     public func setVimMode(_ on: Bool) { vimMode = on; persist() }
+
+    var settingsValues: SettingsValues {
+        SettingsValues(theme: Theme(raw: themeRaw), vimMode: vimMode,
+                       showSessions: showSessions, showHeader: showHeader,
+                       showFooter: showFooter, usagePlacement: usagePlacement,
+                       claudeUsageEnabled: claudeUsageEnabled,
+                       codexUsageEnabled: codexUsageEnabled)
+    }
+
+    func openSettings() {
+        guard modal == nil else { return }
+        modal = .settings
+    }
+
+    func applySettings(_ values: SettingsValues) {
+        let old = settingsValues
+        guard values != old else {
+            modal = nil
+            return
+        }
+        let themeChanged = values.theme != old.theme
+        let codexChanged = values.codexUsageEnabled != old.codexUsageEnabled
+        themeRaw = values.theme.rawValue
+        vimMode = values.vimMode
+        showSessions = values.showSessions
+        showHeader = values.showHeader
+        showFooter = values.showFooter
+        usagePlacement = values.usagePlacement
+        claudeUsageEnabled = values.claudeUsageEnabled
+        codexUsageEnabled = values.codexUsageEnabled
+        persist()
+        if codexChanged { synchronizeCodexUsageServer() }
+        offerThemeRestartAfterModalDismiss = themeChanged
+        modal = nil
+    }
+
+    func modalDidDismiss() {
+        guard modal == nil, offerThemeRestartAfterModalDismiss else { return }
+        offerThemeRestartAfterModalDismiss = false
+        offerThemeRestart()
+    }
+
     public func setClaudeUsageEnabled(_ on: Bool) {
         claudeUsageEnabled = on
         persist()
@@ -691,7 +735,11 @@ public final class AppModel {
     public func setCodexUsageEnabled(_ on: Bool) {
         codexUsageEnabled = on
         persist()
-        if on {
+        synchronizeCodexUsageServer()
+    }
+
+    private func synchronizeCodexUsageServer() {
+        if codexUsageEnabled {
             startCodexServer()
         } else {
             codexServer?.stop()

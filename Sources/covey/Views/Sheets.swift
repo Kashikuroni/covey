@@ -5,6 +5,7 @@ import CoveyKit
 extension AppModel.Modal: Identifiable {
     public var id: String {
         switch self {
+        case .settings: return "settings"
         case .newSession: return "new"
         case .recent: return "recent"
         case .kill(let name): return "kill-\(name)"

@@ -1,0 +1,201 @@
+import SwiftUI
+
+struct SettingsSheet: View {
+    let model: AppModel
+    @State private var draft: SettingsDraft
+    @FocusState private var keyboardFocused: Bool
+
+    private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
+
+    init(model: AppModel) {
+        self.model = model
+        _draft = State(initialValue: SettingsDraft(values: model.settingsValues))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Settings").font(.headline)
+            section("Appearance") {
+                choiceRow(.theme, label: "Theme",
+                          choices: [("Dark", Theme.dark), ("Light", Theme.light)],
+                          selection: $draft.values.theme)
+                checkboxRow(.vimMode, label: "Vim mode", value: $draft.values.vimMode)
+            }
+            section("Layout") {
+                checkboxRow(.showSessions, label: "Show sessions",
+                            value: $draft.values.showSessions)
+                checkboxRow(.showHeader, label: "Show top bar",
+                            value: $draft.values.showHeader)
+                checkboxRow(.showFooter, label: "Show status bar",
+                            value: $draft.values.showFooter)
+            }
+            section("Usage") {
+                choiceRow(.usagePlacement, label: "Usage position",
+                          choices: [("Left", UsagePlacement.left),
+                                    ("Center", UsagePlacement.center),
+                                    ("Right", UsagePlacement.right)],
+                          selection: $draft.values.usagePlacement)
+                checkboxRow(.claudeUsage, label: "Claude usage limits",
+                            value: $draft.values.claudeUsageEnabled)
+                checkboxRow(.codexUsage, label: "Codex usage limits",
+                            value: $draft.values.codexUsageEnabled)
+            }
+            actionRow
+        }
+        .padding(20)
+        .frame(width: 480)
+        .focusEffectDisabled()
+        .focusable()
+        .focused($keyboardFocused)
+        .onAppear { keyboardFocused = true }
+        .onKeyPress(phases: .down) { press in handle(press) }
+    }
+
+    @ViewBuilder
+    private func section<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(tk.t4)
+            content()
+        }
+    }
+
+    private func checkboxRow(
+        _ row: SettingsRow,
+        label: String,
+        value: Binding<Bool>
+    ) -> some View {
+        Button {
+            draft.selectedRow = row
+            value.wrappedValue.toggle()
+            keyboardFocused = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: value.wrappedValue ? "checkmark.square.fill" : "square")
+                    .foregroundStyle(value.wrappedValue ? tk.accent : tk.t3)
+                Text(label).font(.callout).foregroundStyle(tk.t1)
+                Spacer()
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+        .settingsRow(selected: draft.selectedRow == row, tk: tk)
+    }
+
+    private func choiceRow<T: Equatable>(
+        _ row: SettingsRow,
+        label: String,
+        choices: [(String, T)],
+        selection: Binding<T>
+    ) -> some View {
+        HStack(spacing: 8) {
+            Text(label).font(.callout).foregroundStyle(tk.t1)
+            Spacer()
+            ForEach(Array(choices.enumerated()), id: \.offset) { _, choice in
+                Button {
+                    draft.selectedRow = row
+                    selection.wrappedValue = choice.1
+                    keyboardFocused = true
+                } label: {
+                    Text(choice.0)
+                        .font(.callout)
+                        .foregroundStyle(selection.wrappedValue == choice.1 ? tk.t1 : tk.t3)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(selection.wrappedValue == choice.1
+                                    ? tk.accent.opacity(0.22) : tk.surf2,
+                                    in: RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+                .focusable(false)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            draft.selectedRow = row
+            keyboardFocused = true
+        }
+        .settingsRow(selected: draft.selectedRow == row, tk: tk)
+    }
+
+    private var actionRow: some View {
+        HStack(spacing: 8) {
+            Spacer()
+            actionButton("Cancel", action: .cancel, prominent: false)
+            actionButton("Save", action: .save, prominent: true)
+        }
+        .settingsRow(selected: draft.selectedRow == .actions, tk: tk)
+    }
+
+    private func actionButton(
+        _ title: String,
+        action: SettingsAction,
+        prominent: Bool
+    ) -> some View {
+        Button(title) {
+            draft.selectedRow = .actions
+            draft.selectedAction = action
+            perform(action)
+        }
+        .buttonStyle(AyuButton(tk: tk, prominent: prominent))
+        .focusable(false)
+        .overlay(
+            RoundedRectangle(cornerRadius: 5)
+                .strokeBorder(draft.selectedRow == .actions && draft.selectedAction == action
+                              ? tk.t1 : .clear)
+        )
+    }
+
+    private func handle(_ press: KeyPress) -> KeyPress.Result {
+        if press.key == .escape {
+            perform(.cancel)
+            return .handled
+        }
+        if press.key == .return {
+            if let action = draft.handle(.activate) { perform(action) }
+            return .handled
+        }
+        if press.modifiers.contains(.command) { return .ignored }
+        if let character = press.characters.first,
+           let key = settingsKey(for: character) {
+            if let action = draft.handle(key) { perform(action) }
+            return .handled
+        }
+        return press.characters.isEmpty ? .ignored : .handled
+    }
+
+    private func perform(_ action: SettingsAction) {
+        switch action {
+        case .cancel: model.modal = nil
+        case .save: model.applySettings(draft.values)
+        }
+    }
+}
+
+private struct SettingsRowStyle: ViewModifier {
+    let selected: Bool
+    let tk: Tokens
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(selected ? tk.accent.opacity(0.10) : .clear,
+                        in: RoundedRectangle(cornerRadius: 5))
+            .overlay(
+                RoundedRectangle(cornerRadius: 5)
+                    .strokeBorder(selected ? tk.accent.opacity(0.55) : tk.bd2)
+            )
+    }
+}
+
+private extension View {
+    func settingsRow(selected: Bool, tk: Tokens) -> some View {
+        modifier(SettingsRowStyle(selected: selected, tk: tk))
+    }
+}

@@ -30,9 +30,10 @@ struct ContentView: View {
         .installSubduedScrollbars()
         .preferredColorScheme(model.themeRaw == "light" ? .light : .dark)
         .tint(Tokens(Theme(raw: model.themeRaw)).accent)
-        .sheet(item: $model.modal) { modal in
+        .sheet(item: $model.modal, onDismiss: { model.modalDidDismiss() }) { modal in
             Group {
                 switch modal {
+                case .settings: SettingsSheet(model: model)
                 case .newSession: NewSessionSheet(model: model)
                 case .recent: RecentSheet(model: model)
                 case .kill(let name): KillSheet(model: model, name: name)
