@@ -44,8 +44,8 @@ struct SettingsSheet: View {
         }
         .padding(20)
         .frame(width: 480)
-        .focusEffectDisabled()
         .focusable()
+        .focusEffectDisabled()
         .focused($keyboardFocused)
         .onAppear { keyboardFocused = true }
         .onKeyPress(phases: .down) { press in handle(press) }
@@ -58,8 +58,8 @@ struct SettingsSheet: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(tk.t4)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(tk.t1)
             content()
         }
     }
@@ -77,14 +77,16 @@ struct SettingsSheet: View {
             HStack(spacing: 8) {
                 Image(systemName: value.wrappedValue ? "checkmark.square.fill" : "square")
                     .foregroundStyle(value.wrappedValue ? tk.accent : tk.t3)
-                Text(label).font(.callout).foregroundStyle(tk.t1)
+                Text(label)
+                    .font(.callout)
+                    .foregroundStyle(draft.selectedRow == row ? tk.accent : tk.t1)
                 Spacer()
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .focusable(false)
-        .settingsRow(selected: draft.selectedRow == row, tk: tk)
+        .settingsRow()
     }
 
     private func choiceRow<T: Equatable>(
@@ -94,7 +96,9 @@ struct SettingsSheet: View {
         selection: Binding<T>
     ) -> some View {
         HStack(spacing: 8) {
-            Text(label).font(.callout).foregroundStyle(tk.t1)
+            Text(label)
+                .font(.callout)
+                .foregroundStyle(draft.selectedRow == row ? tk.accent : tk.t1)
             Spacer()
             ForEach(Array(choices.enumerated()), id: \.offset) { _, choice in
                 Button {
@@ -120,7 +124,7 @@ struct SettingsSheet: View {
             draft.selectedRow = row
             keyboardFocused = true
         }
-        .settingsRow(selected: draft.selectedRow == row, tk: tk)
+        .settingsRow()
     }
 
     private var actionRow: some View {
@@ -129,7 +133,7 @@ struct SettingsSheet: View {
             actionButton("Cancel", action: .cancel, prominent: false)
             actionButton("Save", action: .save, prominent: true)
         }
-        .settingsRow(selected: draft.selectedRow == .actions, tk: tk)
+        .settingsRow()
     }
 
     private func actionButton(
@@ -138,17 +142,10 @@ struct SettingsSheet: View {
         prominent: Bool
     ) -> some View {
         Button(title) {
-            draft.selectedRow = .actions
-            draft.selectedAction = action
             perform(action)
         }
         .buttonStyle(AyuButton(tk: tk, prominent: prominent))
         .focusable(false)
-        .overlay(
-            RoundedRectangle(cornerRadius: 5)
-                .strokeBorder(draft.selectedRow == .actions && draft.selectedAction == action
-                              ? tk.t1 : .clear)
-        )
     }
 
     private func handle(_ press: KeyPress) -> KeyPress.Result {
@@ -178,24 +175,15 @@ struct SettingsSheet: View {
 }
 
 private struct SettingsRowStyle: ViewModifier {
-    let selected: Bool
-    let tk: Tokens
-
     func body(content: Content) -> some View {
         content
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
-            .background(selected ? tk.accent.opacity(0.10) : .clear,
-                        in: RoundedRectangle(cornerRadius: 5))
-            .overlay(
-                RoundedRectangle(cornerRadius: 5)
-                    .strokeBorder(selected ? tk.accent.opacity(0.55) : tk.bd2)
-            )
     }
 }
 
 private extension View {
-    func settingsRow(selected: Bool, tk: Tokens) -> some View {
-        modifier(SettingsRowStyle(selected: selected, tk: tk))
+    func settingsRow() -> some View {
+        modifier(SettingsRowStyle())
     }
 }

@@ -13,24 +13,23 @@ final class SettingsStateTests: XCTestCase {
         let draft = SettingsDraft(values: values())
         XCTAssertEqual(draft.values, values())
         XCTAssertEqual(draft.selectedRow, .theme)
-        XCTAssertEqual(draft.selectedAction, .cancel)
     }
 
     func testJKWalkEveryRowAndClamp() {
         var draft = SettingsDraft(values: values())
         let down: [SettingsRow] = [
             .vimMode, .showSessions, .showHeader, .showFooter,
-            .usagePlacement, .claudeUsage, .codexUsage, .actions,
+            .usagePlacement, .claudeUsage, .codexUsage,
         ]
         for expected in down {
             XCTAssertNil(draft.handle(.moveDown))
             XCTAssertEqual(draft.selectedRow, expected)
         }
         XCTAssertNil(draft.handle(.moveDown))
-        XCTAssertEqual(draft.selectedRow, .actions)
+        XCTAssertEqual(draft.selectedRow, .codexUsage)
 
         let up: [SettingsRow] = [
-            .codexUsage, .claudeUsage, .usagePlacement, .showFooter,
+            .claudeUsage, .usagePlacement, .showFooter,
             .showHeader, .showSessions, .vimMode, .theme,
         ]
         for expected in up {
@@ -89,17 +88,12 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertEqual(draft.values.usagePlacement, .right)
     }
 
-    func testActionRowAndEscapeEmitOnlyExplicitActions() {
+    func testEnterSavesAndEscapeCancelsFromAnySettingRow() {
         var draft = SettingsDraft(values: values())
-        XCTAssertNil(draft.handle(.activate), "Enter on a setting row is inert")
-        draft.selectedRow = .actions
-        _ = draft.handle(.increase)
-        XCTAssertEqual(draft.selectedAction, .save)
-        XCTAssertEqual(draft.handle(.activate), .save)
-        _ = draft.handle(.decrease)
-        XCTAssertEqual(draft.selectedAction, .cancel)
-        XCTAssertEqual(draft.handle(.activate), .cancel)
-        draft.selectedRow = .usagePlacement
+        for row in SettingsRow.allCases {
+            draft.selectedRow = row
+            XCTAssertEqual(draft.handle(.activate), .save)
+        }
         XCTAssertEqual(draft.handle(.cancel), .cancel)
     }
 

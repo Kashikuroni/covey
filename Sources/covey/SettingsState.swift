@@ -20,7 +20,6 @@ enum SettingsRow: Int, CaseIterable, Equatable {
     case usagePlacement
     case claudeUsage
     case codexUsage
-    case actions
 }
 
 enum SettingsAction: Equatable { case cancel, save }
@@ -42,7 +41,6 @@ func settingsKey(for character: Character) -> SettingsKey? {
 struct SettingsDraft: Equatable {
     var values: SettingsValues
     var selectedRow: SettingsRow = .theme
-    var selectedAction: SettingsAction = .cancel
 
     mutating func handle(_ key: SettingsKey) -> SettingsAction? {
         switch key {
@@ -55,7 +53,7 @@ struct SettingsDraft: Equatable {
         case .increase:
             adjust(increasing: true)
         case .activate:
-            return selectedRow == .actions ? selectedAction : nil
+            return .save
         case .cancel:
             return .cancel
         }
@@ -93,8 +91,6 @@ struct SettingsDraft: Equatable {
             values.claudeUsageEnabled = increasing
         case .codexUsage:
             values.codexUsageEnabled = increasing
-        case .actions:
-            selectedAction = increasing ? .save : .cancel
         }
     }
 }
