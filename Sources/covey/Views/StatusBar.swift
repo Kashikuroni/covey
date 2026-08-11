@@ -18,7 +18,10 @@ struct StatusBar: View {
                 Text("HISTORY").foregroundStyle(.yellow).font(.caption).fontWeight(.semibold)
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 4)
+        // The workspace no longer pads this side, so the footer's own inset is
+        // the whole gap under the cards — symmetric, which centres the hints in
+        // the strip between the last card and the window's bottom edge.
+        .padding(.horizontal, 12).padding(.vertical, 8)
     }
 
     private var filterRow: some View {

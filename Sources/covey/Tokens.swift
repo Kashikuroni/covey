@@ -35,6 +35,12 @@ struct Tokens {
     /// How opaque the `bg` tint over the window backdrop is. Lower shows more
     /// of the desktop through the gutters, at the cost of contrast.
     static let backdropTint: Double = 0.9
+    /// Space above a zone header's label. More than below it: the card's
+    /// rounded top corners crowd the text optically, so an even inset reads
+    /// as if the label were riding too high.
+    static let paneHeaderTop: CGFloat = 7
+    /// Space below it — unchanged from the flat chrome.
+    static let paneHeaderBottom: CGFloat = 3
 
     init(_ theme: Theme) {
         self = theme == .dark ? .dark : .light

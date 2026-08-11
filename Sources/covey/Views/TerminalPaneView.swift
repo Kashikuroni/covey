@@ -87,7 +87,8 @@ struct TerminalPaneView: View {
             Spacer()
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 3)
+        .padding(.top, Tokens.paneHeaderTop)
+        .padding(.bottom, Tokens.paneHeaderBottom)
         .contentShape(Rectangle())
         .onTapGesture { if !name.isEmpty { model.focusPane(name) } }
     }

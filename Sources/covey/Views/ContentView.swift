@@ -178,7 +178,14 @@ struct ContentView: View {
                         .onTapGesture { model.setFocus(.inspector) }
                 }
             }
-            .padding(Tokens.edge)
+            // Vertically the top bar and the footer are the inset on their own
+            // side, so the cards sit straight under them; a hidden bar hands
+            // that side back to the edge token so a card never touches the
+            // window frame. Horizontally the inset is unconditional —
+            // `PanelLayout` subtracts exactly that much when it sizes the cards.
+            .padding(.horizontal, Tokens.edge)
+            .padding(.top, model.showHeader ? 0 : Tokens.edge)
+            .padding(.bottom, model.showFooter ? 0 : Tokens.edge)
             .coordinateSpace(name: ContentView.workspaceSpace)
         }
     }

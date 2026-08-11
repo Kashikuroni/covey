@@ -15,7 +15,8 @@ struct SessionListView: View {
                 Spacer()
             }
             .padding(.horizontal, 8)
-            .padding(.vertical, 3)
+            .padding(.top, Tokens.paneHeaderTop)
+            .padding(.bottom, Tokens.paneHeaderBottom)
             .contentShape(Rectangle())
             .onTapGesture { model.setFocus(.sessions) }
             activeList
