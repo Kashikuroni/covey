@@ -189,6 +189,7 @@ private struct VimTextRepresentable: NSViewRepresentable {
         let scroll = NSScrollView()
         scroll.documentView = view
         scroll.hasVerticalScroller = true
+        AppScrollerStyle.apply(to: scroll)
         scroll.drawsBackground = false
         view.autoresizingMask = [.width]
         view.textContainer?.widthTracksTextView = true
@@ -506,7 +507,7 @@ private struct VimPreview: View {
     var body: some View {
         let lines = parseNote(text)
         ScrollViewReader { proxy in
-            ScrollView {
+            SubduedScrollView {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(Array(lines.enumerated()), id: \.offset) { idx, line in
                         HStack(alignment: .top, spacing: 8) {

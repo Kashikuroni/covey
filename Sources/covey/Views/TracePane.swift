@@ -71,7 +71,7 @@ struct TracePane: View {
                     .font(.caption).foregroundStyle(tk.t4)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollView {
+                SubduedScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
                         ForEach(TraceRow.displayOrder(stream), id: \.seq) { e in
                             row(for: e)
@@ -130,7 +130,7 @@ struct TracePane: View {
     @ViewBuilder private var agentFilter: some View {
         let agents = TraceRow.agents(model.traceEvents)
         if agents.count > 1 {
-            ScrollView(.horizontal, showsIndicators: false) {
+            SubduedScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(agents, id: \.self) { a in
                         let selected = model.traceAgentFilter == a
@@ -315,7 +315,7 @@ struct TracePane: View {
 
     private func splitDiffView(_ d: (left: [TracePresenter.DiffLine], right: [TracePresenter.DiffLine],
                                     added: Int, removed: Int)) -> some View {
-        ScrollView(.horizontal, showsIndicators: true) {
+        SubduedScrollView(.horizontal, showsIndicators: true) {
             HStack(alignment: .top, spacing: 0) {
                 diffColumn(d.left).frame(minWidth: 170, alignment: .leading)
                 tk.bd2.frame(width: 1)
@@ -374,7 +374,7 @@ struct TracePane: View {
     /// Scrollable history of every usage reading in the session (newest first).
     private var usageHistoryPanel: some View {
         let history = TracePresenter.usageHistory(model.traceEvents, upToSeq: .max, limit: .max)
-        return ScrollView {
+        return SubduedScrollView {
             VStack(alignment: .leading, spacing: 3) {
                 ForEach(Array(history.enumerated()), id: \.offset) { _, h in
                     HStack(spacing: 10) {
@@ -482,7 +482,7 @@ struct TracePane: View {
     // MARK: - Shared bits
 
     private func codeBlock(_ text: String, wrap: Bool) -> some View {
-        ScrollView(.horizontal, showsIndicators: true) {
+        SubduedScrollView(.horizontal, showsIndicators: true) {
             Text(text)
                 .font(.system(size: 11, design: .monospaced)).foregroundStyle(tk.t2)
                 .textSelection(.enabled)

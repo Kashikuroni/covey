@@ -236,7 +236,7 @@ struct IssueBrowserPane: View {
 
     private var rows: some View {
         ScrollViewReader { proxy in
-            ScrollView {
+            SubduedScrollView {
                 VStack(spacing: 9) {
                     ForEach(browser.visible(), id: \.number) { issue in
                         row(issue)

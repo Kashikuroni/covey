@@ -285,10 +285,10 @@ final class CoveyTerminalView: TerminalView {
         super.layout()
         logLayout()
         for case let scroller as NSScroller in subviews {
-            scroller.controlSize = .mini
-            let w = NSScroller.scrollerWidth(for: .mini, scrollerStyle: .legacy)
-            scroller.frame = NSRect(x: bounds.width - w, y: scroller.frame.minY,
-                                    width: w, height: scroller.frame.height)
+            AppScrollerStyle.apply(to: scroller)
+            let width = NSScroller.scrollerWidth(for: .mini, scrollerStyle: .legacy)
+            scroller.frame = NSRect(x: bounds.width - width, y: scroller.frame.minY,
+                                    width: width, height: scroller.frame.height)
         }
         if fileDropBorderView.superview != nil {
             fileDropBorderView.frame = bounds

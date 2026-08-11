@@ -44,7 +44,7 @@ struct IssueDetailView: View {
                 Text("no description")
                     .font(.system(size: IssueFont.body)).foregroundStyle(tk.t4)
             } else {
-                ScrollView {
+                SubduedScrollView {
                     VStack(alignment: .leading, spacing: 2) {
                         ForEach(Array(parseNote(issue.body).enumerated()),
                                 id: \.offset) { _, line in

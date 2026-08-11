@@ -27,6 +27,7 @@ struct ContentView: View {
         // No system (blue) focus rings anywhere; the caret and our own field
         // styling carry focus. Inherited by every input in the hierarchy.
         .focusEffectDisabled()
+        .installSubduedScrollbars()
         .preferredColorScheme(model.themeRaw == "light" ? .light : .dark)
         .tint(Tokens(Theme(raw: model.themeRaw)).accent)
         .sheet(item: $model.modal) { modal in
@@ -46,6 +47,7 @@ struct ContentView: View {
                 case .addProject: AddProjectSheet(model: model)
                 }
             }
+            .installSubduedScrollbars()
             // Sheets default to the system gray material — paint them ayu.
             .presentationBackground(tokens.surface)
         }

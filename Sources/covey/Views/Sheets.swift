@@ -89,7 +89,7 @@ struct RecentSheet: View {
 
     private var resultsList: some View {
         ScrollViewReader { proxy in
-            ScrollView {
+            SubduedScrollView {
                 if rows.isEmpty {
                     Text("no recently-stopped sessions")
                         .font(.caption).foregroundStyle(tk.t4)

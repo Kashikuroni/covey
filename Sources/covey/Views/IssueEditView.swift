@@ -162,7 +162,7 @@ struct LabelSelector: View {
             Text(loading ? "loading…" : "no labels")
                 .font(.system(size: IssueFont.meta)).foregroundStyle(tk.t4)
         } else {
-            ScrollView {
+            SubduedScrollView {
                 VStack(alignment: .leading, spacing: 1) {
                     ForEach(filtered, id: \.name) { label in row(label.name) }
                 }

@@ -151,6 +151,17 @@ final class TerminalGridCollapseTests: XCTestCase {
         XCTAssertGreaterThan(view.getTerminal().cols, 2)
         XCTAssertEqual(probe.sizes.last?.cols, view.getTerminal().cols)
     }
+
+    func testLayoutAppliesSharedMiniSubduedScrollerStyle() {
+        let (view, _) = makeView()
+
+        view.layoutSubtreeIfNeeded()
+
+        let scroller = view.subviews.compactMap { $0 as? NSScroller }.first
+        XCTAssertNotNil(scroller)
+        XCTAssertEqual(scroller?.controlSize, .mini)
+        XCTAssertEqual(scroller?.alphaValue ?? 1, 0.45, accuracy: 0.001)
+    }
 }
 
 /// Terminal requires a delegate; none of it matters here.

@@ -138,6 +138,7 @@ private struct SessionCardView: View {
 
     var body: some View {
         let selected = model.selected == session.name
+        let cardBackground = selected ? tk.cardHover : tk.card
         let status = model.statusByName[session.name] ?? .idle
         let modelName = model.modelByName[session.name].map(modelDisplayName)
         return VStack(alignment: .leading, spacing: 3) {
@@ -193,21 +194,16 @@ private struct SessionCardView: View {
         }
         .padding(EdgeInsets(top: 7, leading: 11, bottom: 8, trailing: 11))
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(selected ? tk.cardHover : tk.card,
+        .background(cardBackground,
                     in: RoundedRectangle(cornerRadius: Tokens.r))
         .overlay(
-            // Active session: the same hairline border, just recolored accent
-            // (a fill would hurt legibility).
             RoundedRectangle(cornerRadius: Tokens.r)
-                .strokeBorder(selected ? tk.accent : tk.bd))
-        .overlay(alignment: .leading) {
-            // The amux status stripe: selection (accent) wins, then waiting.
-            RoundedRectangle(cornerRadius: 1)
-                .fill(selected ? tk.accent : (status == .waiting ? tk.wait : .clear))
-                .frame(width: 2)
-                .padding(.vertical, 8)
-                .padding(.leading, 3)   // gap from the border, don't merge into it
+                .strokeBorder(cardBackground, lineWidth: 1)
+        )
+        .overlay {
+            if selected {
+                SessionFocusBorder(color: tk.accent)
+            }
         }
-        .shadow(color: tk.shadowColor, radius: Tokens.shadowRadius, y: Tokens.shadowY)
     }
 }
