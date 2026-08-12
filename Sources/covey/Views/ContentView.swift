@@ -99,12 +99,12 @@ struct ContentView: View {
                 }
                 // ⌘-anything else belongs to the menu system.
                 guard !event.modifierFlags.contains(.command) else { return event }
-                // Inspector zone chords must escape its text fields: ⌃h/l/j/k
-                // never type text (the zone's emacs bindings are sacrificed).
+                // Inspector focus chords must escape its text fields: ⌃h/l
+                // never type text (those emacs bindings are sacrificed).
                 if model.focus == .inspector,
                    event.modifierFlags.intersection([.command, .shift, .option, .control]) == .control,
                    let raw = event.charactersIgnoringModifiers?.first,
-                   ["h", "l", "j", "k"].contains(latinize(raw)) {
+                   ["h", "l"].contains(latinize(raw)) {
                     let context = KeyRouter.Context(mode: model.inputMode,
                                                     focus: model.focus,
                                                     vimMode: model.vimMode,

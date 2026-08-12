@@ -1,7 +1,7 @@
 import CoveyKit
 
 /// Project-identity helpers (port of app.rs session_root/project_root):
-/// sessions sharing a root are one project in the list, notes and renames.
+/// sessions sharing a root are one project in the list and renames.
 
 /// The project root for a session directory: the path with any trailing
 /// `/.worktrees/<branch>...` segment stripped.

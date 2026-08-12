@@ -342,7 +342,7 @@ struct IssueBrowserPane: View {
             return .handled
         case "n":
             model.setIssueScreen(.composer)
-            model.selectInspectorTab(.issue)   // bumps issueFocusTick -> title focus
+            model.activateIssues()   // bumps issueFocusTick -> title focus
             return .handled
         default:
             return handleActionKey(latinize(raw))   // s/e/c/x/b — Tasks 12-14

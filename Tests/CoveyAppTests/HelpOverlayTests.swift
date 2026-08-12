@@ -8,4 +8,10 @@ final class HelpOverlayTests: XCTestCase {
         XCTAssertTrue(pairs.contains { $0.0 == "h" && $0.1.contains("restore") })
         XCTAssertTrue(pairs.contains { $0.0 == "enter" && $0.1.contains("Agent") })
     }
+
+    func testHelpDoesNotAdvertiseRemovedNotesControls() {
+        let pairs = helpGroups.flatMap { $0.1 }
+        XCTAssertFalse(pairs.contains { $0.1.localizedCaseInsensitiveContains("note") })
+        XCTAssertTrue(pairs.contains { $0.0 == "⌘1-5" && $0.1.contains("issues") })
+    }
 }

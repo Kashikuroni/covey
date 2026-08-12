@@ -120,14 +120,12 @@ struct CoveyApp: App {
                     .keyboardShortcut("1", modifiers: .command)
                 Button("Focus Agent") { model?.focusZone(.agent) }
                     .keyboardShortcut("2", modifiers: .command)
-                Button("Focus Note") { model?.focusZone(.note) }
-                    .keyboardShortcut("3", modifiers: .command)
                 Button("Focus Issues") { model?.focusZone(.issues) }
-                    .keyboardShortcut("4", modifiers: .command)
+                    .keyboardShortcut("3", modifiers: .command)
                 Button("Focus Terminal") { model?.focusZone(.terminalSplit) }
-                    .keyboardShortcut("5", modifiers: .command)
+                    .keyboardShortcut("4", modifiers: .command)
                 Button("Focus Trace") { model?.focusZone(.trace) }
-                    .keyboardShortcut("6", modifiers: .command)
+                    .keyboardShortcut("5", modifiers: .command)
                 Divider()
                 Toggle("Vim Mode", isOn: Binding(
                     get: { model?.vimMode ?? false },

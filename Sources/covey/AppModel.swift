@@ -5,7 +5,7 @@ import CoveyKit
 
 /// ⌘1-5 zone targets (menu key equivalents — reachable from any focus).
 public enum FocusZone: Equatable {
-    case session, agent, note, issues, terminalSplit, trace
+    case session, agent, issues, terminalSplit, trace
 }
 
 /// UI state machine. The daemon is the single source of truth about sessions:
@@ -109,13 +109,9 @@ public final class AppModel {
     public private(set) var showFooter = true
     public private(set) var showHeader = true
     public private(set) var showInspector = false
-    public enum InspectorTab: Equatable { case note, issue }
-    public private(set) var inspectorTab: InspectorTab = .note
-    public private(set) var inspectorSplit = false
-    /// The right drawer shows EITHER the Note/Issue inspector OR the agent
-    /// trace — never both (there is no room for two drawers).
-    public enum InspectorMode: Equatable { case notes, trace }
-    public private(set) var inspectorMode: InspectorMode = .notes
+    /// The right drawer shows either GitHub Issues or the selected agent's trace.
+    public enum InspectorMode: Equatable { case issues, trace }
+    public private(set) var inspectorMode: InspectorMode = .issues
     /// Agent trace for the selected session (streamed from the daemon).
     public private(set) var traceEvents: [TraceEvent] = []
     public private(set) var traceStoreBytes: Int = 0
@@ -142,8 +138,6 @@ public final class AppModel {
     public let issueBrowser: IssueBrowserModel
     /// Bumped by space g i; IssuePane focuses the title field on change.
     public private(set) var issueFocusTick = 0
-    /// Bumped on entering the note zone; the note editor grabs the keys.
-    public private(set) var noteFocusTick = 0
     public private(set) var sbWidth = 360
     public private(set) var vimMode = false
     /// The footer filter is showing (activated by `/` or ⌘F).
@@ -156,8 +150,6 @@ public final class AppModel {
     public private(set) var newSessionPrefillIssue: Int?
     /// Branch to prefill (create-session-in-branch from an issue).
     public private(set) var newSessionPrefillBranch: String?
-    public private(set) var notes: [String: String] = [:]
-    public private(set) var projectNotes: [String: String] = [:]
     public private(set) var projectNames: [String: String] = [:]
     public private(set) var projects: [String] = []
     /// Selected empty-project ghost row; mutually exclusive with `selected`.
@@ -240,12 +232,9 @@ public final class AppModel {
         showFooter = persisted.showFooter ?? true
         showHeader = persisted.showHeader ?? true
         showInspector = persisted.showInspector ?? false
-        inspectorSplit = persisted.inspectorSplit ?? false
-        inspectorMode = persisted.inspectorMode == "trace" ? .trace : .notes
+        inspectorMode = persisted.inspectorMode == "trace" ? .trace : .issues
         sbWidth = persisted.sbWidth ?? 360
         vimMode = persisted.vimMode ?? true
-        notes = persisted.notes
-        projectNotes = persisted.projectNotes
         projectNames = persisted.projectNames
         projects = persisted.projects ?? []
         claudeUsageEnabled = persisted.claudeUsageEnabled ?? true
@@ -480,7 +469,6 @@ public final class AppModel {
             map[newName] = issue
             persisted.issueBySession = map
         }
-        if let note = notes.removeValue(forKey: name) { notes[newName] = note }
         persist()
         if name == selected {
             selected = nil            // select() guard: force the re-attach chain
@@ -836,16 +824,6 @@ public final class AppModel {
         modal = .newSession
     }
 
-    public func setNote(session: String, text: String) {
-        if text.isEmpty { notes[session] = nil } else { notes[session] = text }
-        persist()
-    }
-
-    public func setProjectNote(dir: String, text: String) {
-        if text.isEmpty { projectNotes[dir] = nil } else { projectNotes[dir] = text }
-        persist()
-    }
-
     public func setProjectName(dir: String, name: String) {
         if name.isEmpty { projectNames[dir] = nil } else { projectNames[dir] = name }
         persist()
@@ -904,12 +882,6 @@ public final class AppModel {
             sendTerminalCommand(.scrollToBottom)
         case .showHelp:
             inputMode = .help
-        case .openProjectNote:
-            inputMode = .normal
-            guard inspectorRoot != nil else { toast = "no project"; return }
-            if !showInspector { setShowInspector(true) }
-            setFocus(.inspector)
-            selectInspectorTab(.note)
         case .renameProject:
             inputMode = .normal
             if let root = inspectorRoot { modal = .renameProject(root) }
@@ -967,11 +939,6 @@ public final class AppModel {
             guard let s = selectedSession() else { return }
             if s.git == nil { toast = "not a git repo"; return }
             modal = .cleanup(s.dir)
-        case .inspectorPaneSwap:
-            selectInspectorTab(inspectorTab == .note ? .issue : .note)
-        case .inspectorSplitToggle:
-            inspectorSplit.toggle()
-            persist()
         case .toggleSessionsPanel:
             inputMode = .normal
             setShowSessions(!showSessions)
@@ -982,10 +949,10 @@ public final class AppModel {
         case .toggleTracePanel:
             inputMode = .normal
             if showInspector, inspectorMode == .trace {
-                // Trace is showing → close the drawer and return it to notes so
-                // `space u i` opens the note/issue inspector as usual.
+                // Trace is showing: close the drawer and restore Issues as the
+                // default content for the next normal inspector opening.
                 if focus == .inspector { setFocus(.sessions) }
-                setInspectorMode(.notes)
+                setInspectorMode(.issues)
                 setShowInspector(false)
             } else {
                 if !showInspector { setShowInspector(true) }
@@ -1024,10 +991,9 @@ public final class AppModel {
             guard inspectorRoot != nil else { toast = "no project"; return }
             if let s = selectedSession(), s.git == nil { toast = "not a git repo"; return }
             if !showInspector { setShowInspector(true) }
-            inspectorTab = .issue
             issueScreen = .composer
             setFocus(.inspector)
-            Task { @MainActor in self.issueFocusTick += 1 }
+            activateIssues()
         case .openIssueList:
             inputMode = .normal
             guard let s = selectedSession() else { toast = "no session"; return }
@@ -1036,7 +1002,7 @@ public final class AppModel {
             issueScreen = .browser
             issueBrowser.screen = .list
             setFocus(.inspector)
-            selectInspectorTab(.issue)
+            activateIssues()
             // The pane self-opens via its root/tick .onChange handlers —
             // opening here too would double the gh fetch.
         case .splitVertical: openSplit(axis: "v")
@@ -1062,9 +1028,8 @@ public final class AppModel {
         }
     }
 
-    /// ⌃h/⌃l: walk the focus zones in order — session list, agent pane,
-    /// companion shell pane (when split), inspector note, inspector issue
-    /// (when the drawer is shown) — wrapping.
+    /// ⌃h/⌃l: walk the session list, agent pane, companion shell pane (when
+    /// split), and inspector (when shown), wrapping at the ends.
     /// Direct zone jump for the View-menu ⌘1-5 items. Guards toast instead
     /// of mutating anything (spec: no auto-show inspector, no auto-split).
     public func focusZone(_ zone: FocusZone) {
@@ -1075,16 +1040,11 @@ public final class AppModel {
         case .agent:
             guard let selected else { toast = "no session"; return }
             focusPane(selected)
-        case .note:
-            guard showInspector else { toast = "inspector hidden — space u i"; return }
-            sendTerminalCommand(.blur)
-            setFocus(.inspector)
-            selectInspectorTab(.note)
         case .issues:
             guard showInspector else { toast = "inspector hidden — space u i"; return }
             sendTerminalCommand(.blur)
             setFocus(.inspector)
-            selectInspectorTab(.issue)
+            activateIssues()
         case .terminalSplit:
             guard let selected, let comp = companion(of: selected) else {
                 toast = "no split — space t v / h"; return
@@ -1109,22 +1069,16 @@ public final class AppModel {
             }
         }
         if showInspector {
-            zones.append(("inspector:note", {
+            zones.append(("inspector", {
                 self.sendTerminalCommand(.blur)
                 self.setFocus(.inspector)
-                self.selectInspectorTab(.note)
-            }))
-            zones.append(("inspector:issue", {
-                self.sendTerminalCommand(.blur)
-                self.setFocus(.inspector)
-                self.selectInspectorTab(.issue)
+                if self.inspectorMode == .issues { self.activateIssues() }
             }))
         }
         let currentID: String
         switch focus {
         case .sessions: currentID = "sessions"
-        case .inspector:
-            currentID = inspectorTab == .note ? "inspector:note" : "inspector:issue"
+        case .inspector: currentID = "inspector"
         case .terminal: currentID = "pane:\(focusedPane ?? selected ?? "")"
         }
         let idx = zones.firstIndex { $0.id == currentID } ?? 0
@@ -1155,8 +1109,8 @@ public final class AppModel {
         sessions.first { $0.name == selected }
     }
 
-    /// The root the inspector panes (note/issue) operate on: an explicitly
-    /// selected project wins, else the selected session's project root.
+    /// The root the inspector operates on: an explicitly selected project wins,
+    /// otherwise use the selected session's project root.
     public var inspectorRoot: String? {
         selectedProjectRoot ?? selectedSession().map(sessionRoot)
     }
@@ -1198,21 +1152,14 @@ public final class AppModel {
         toast = "project removed"
     }
 
-    public func selectInspectorTab(_ tab: InspectorTab) {
-        inspectorTab = tab
-        // Choosing a Note/Issue tab returns the drawer from the trace back to
-        // the notes view (they never share the width).
-        if inspectorMode != .notes { inspectorMode = .notes; persist() }
-        // Both zones are always "in the editor": hand the keyboard over at
-        // once (the zone chords escape the fields via the key monitor).
-        // The bump is deferred by one runloop turn: a freshly mounted view
-        // (e.g. IssuePane inserted this same transaction) never sees an
-        // .onChange fire for a tick bump that lands in the same SwiftUI
-        // transaction as its own insertion — it wasn't subscribed yet.
-        // Deferring via Task guarantees the view is mounted first.
-        Task { @MainActor in
-            if tab == .issue { self.issueFocusTick += 1 } else { self.noteFocusTick += 1 }
+    public func activateIssues() {
+        if inspectorMode != .issues {
+            inspectorMode = .issues
+            persist()
         }
+        // A freshly mounted pane can miss a same-transaction tick change, so
+        // defer until SwiftUI has installed its onChange observer.
+        Task { @MainActor in self.issueFocusTick += 1 }
     }
 
     // MARK: - issue drafts (persisted per project root)
@@ -1314,12 +1261,9 @@ public final class AppModel {
         persisted.showFooter = showFooter
         persisted.showHeader = showHeader
         persisted.showInspector = showInspector
-        persisted.inspectorSplit = inspectorSplit
-        persisted.inspectorMode = inspectorMode == .trace ? "trace" : "notes"
+        persisted.inspectorMode = inspectorMode == .trace ? "trace" : "issues"
         persisted.sbWidth = sbWidth
         persisted.vimMode = vimMode
-        persisted.notes = notes
-        persisted.projectNotes = projectNotes
         persisted.projectNames = projectNames
         persisted.projects = projects
         persisted.claudeUsageEnabled = claudeUsageEnabled

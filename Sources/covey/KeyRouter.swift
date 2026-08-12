@@ -27,7 +27,7 @@ extension LeaderMenu {
             LeaderRow(key: "g", label: "git — issue · list · promote · delete branch · cleanup · return", implemented: true),
             LeaderRow(key: "s", label: "session — rename · restart · verify · nvim", implemented: true),
             LeaderRow(key: "t", label: "terminal — split v · split h · close", implemented: true),
-            LeaderRow(key: "u", label: "ui — session list · inspector · footer · header · theme · split", implemented: true),
+            LeaderRow(key: "u", label: "ui — session list · inspector · footer · header · theme", implemented: true),
             LeaderRow(key: "p", label: "project — add · remove", implemented: true),
             LeaderRow(key: "l", label: "limits detail", implemented: true),
         ]
@@ -60,12 +60,11 @@ extension LeaderMenu {
             LeaderRow(key: "f", label: "toggle footer", implemented: true),
             LeaderRow(key: "h", label: "toggle header", implemented: true),
             LeaderRow(key: "t", label: "toggle dark / light theme", implemented: true),
-            LeaderRow(key: "v", label: "inspector tabs / split", implemented: true),
             LeaderRow(key: "l", label: "cycle limits / clock position", implemented: true),
         ]
         case .project: return [
             LeaderRow(key: "a", label: "add project — folder picker", implemented: true),
-            LeaderRow(key: "d", label: "remove project — notes survive", implemented: true),
+            LeaderRow(key: "d", label: "remove project", implemented: true),
         ]
         }
     }
@@ -103,7 +102,6 @@ enum KeyAction: Equatable {
     case scrollTerminalPage(up: Bool)
     case scrollTerminalToBottom
     case showHelp
-    case openProjectNote
     case renameProject
     case sendShiftTab
     case sendShiftEnter
@@ -122,8 +120,6 @@ enum KeyAction: Equatable {
     case openRecent
     case createIssue
     case openIssueList
-    case inspectorPaneSwap
-    case inspectorSplitToggle
     case toggleSessionsPanel
     case toggleInspectorPanel
     case toggleTracePanel
@@ -182,16 +178,14 @@ enum KeyRouter {
         }
         guard context.vimMode else { return nil }
 
-        // Inspector zone extras: ⌃j/⌃k swap the split panes. (The old plain
-        // `s` split toggle was dead code — the ContentView monitor hands
-        // plain inspector keys to the views before routing; the toggle
-        // lives on `space u v` now.)
+        // Inspector j/k belongs to the issue browser. Control-j/k has no
+        // inspector action and must not fall through to the session-side
+        // terminal scroll commands.
         if context.focus == .inspector, input.isControl, ch == "j" || ch == "k" {
-            return .inspectorPaneSwap
+            return nil
         }
 
-        // ⌃h/⌃l walk the focus zones from every zone and mode — the
-        // note/issue tabs are zones of the same cycle.
+        // ⌃h/⌃l walk the focus zones from every zone and mode.
         if input.isControl {
             if ch == "l" { return .cycleFocus(forward: true) }
             if ch == "h" { return .cycleFocus(forward: false) }
@@ -260,7 +254,6 @@ enum KeyRouter {
         case "d": return .killSelected
         case "/": return .startFilter
         case "s": return .enterSelectMode
-        case "t", "T": return .openProjectNote
         case " ": return .openLeader
         case "K": return .moveSelected(up: true)
         case "J": return .moveSelected(up: false)
@@ -290,7 +283,6 @@ enum KeyRouter {
         case (.ui, "f"): return .toggleFooterPanel
         case (.ui, "h"): return .toggleHeaderPanel
         case (.ui, "t"): return .toggleTheme
-        case (.ui, "v"): return .inspectorSplitToggle
         case (.ui, "l"): return .cycleUsagePlacement
         case (.terminal, "v"): return .splitVertical
         case (.terminal, "h"): return .splitHorizontal

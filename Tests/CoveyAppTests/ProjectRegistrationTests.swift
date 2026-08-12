@@ -43,19 +43,16 @@ final class ProjectRegistrationTests: XCTestCase {
     }
 
     @MainActor
-    func testRemoveProjectKeepsNotesAndClearsSelection() async throws {
+    func testRemoveProjectClearsSelection() async throws {
         let daemon = try TestDaemon()
         defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
         await model.start()
         model.addProject("/repo/x")
         _ = await eventually { model.selectedProjectRoot == "/repo/x" }
-        model.setProjectNote(dir: "/repo/x", text: "- [ ] keep me")
         model.removeProject("/repo/x")
         XCTAssertEqual(model.projects, [])
         XCTAssertNil(model.selectedProjectRoot)
-        XCTAssertEqual(model.projectNotes["/repo/x"], "- [ ] keep me",
-                       "unregistering must not delete the note")
         XCTAssertEqual(model.toast, "project removed")
     }
 
@@ -181,14 +178,11 @@ final class ProjectRegistrationTests: XCTestCase {
         model.addProject("/repo/x")
         _ = await eventually { model.selectedProjectRoot == "/repo/x" }
 
-        model.apply(.openProjectNote)
+        model.apply(.createIssue)
         XCTAssertTrue(model.showInspector)
         XCTAssertEqual(model.focus, .inspector)
-        XCTAssertEqual(model.inspectorTab, .note)
-
-        model.apply(.createIssue)
-        XCTAssertEqual(model.inspectorTab, .issue,
-                       "no git check for a project ghost — gh reports itself")
+        XCTAssertEqual(model.inspectorMode, .issues,
+                       "a project ghost can still open the issue composer")
 
         model.apply(.newSession(prefillDir: true))
         XCTAssertEqual(model.newSessionPrefillDir, "/repo/x")

@@ -1,7 +1,7 @@
 import Foundation
 
-/// A single parsed line of a note. Pure port of amux-core note.rs — only the
-/// subset rendered specially is distinguished; everything else is `.text`.
+/// A single parsed markdown line. Only the subset rendered specially is
+/// distinguished; everything else is `.text`.
 enum NoteLine: Equatable {
     case task(done: Bool, text: String)
     case heading(level: Int, text: String)
@@ -32,9 +32,9 @@ func parseTask(_ line: String) -> (done: Bool, text: String)? {
     return (done, String(body))
 }
 
-/// Parse a whole note buffer into typed lines (split on "\n").
-/// INVARIANT: exactly one NoteLine per input line — the note preview maps
-/// buffer lines to the vim cursor 1:1, fences included.
+/// Parse a markdown buffer into typed lines (split on "\n").
+/// INVARIANT: exactly one NoteLine per input line so editor preview maps
+/// buffer lines to the Vim cursor 1:1, fences included.
 func parseNote(_ buf: String) -> [NoteLine] {
     var inFence = false
     return buf.components(separatedBy: "\n").map { line in
@@ -71,18 +71,6 @@ private func parseLine(_ line: String) -> NoteLine {
     if trimmed.hasPrefix("- ") { return .bullet(String(trimmed.dropFirst(2))) }
     if trimmed.hasPrefix("* ") { return .bullet(String(trimmed.dropFirst(2))) }
     return .text(line)
-}
-
-/// `(done, total)` task counts for the card progress indicator.
-func taskCounts(_ buf: String) -> (done: Int, total: Int) {
-    var done = 0, total = 0
-    for line in buf.components(separatedBy: "\n") {
-        if let t = parseTask(line) {
-            total += 1
-            if t.done { done += 1 }
-        }
-    }
-    return (done, total)
 }
 
 /// Buffer line indices (0-based) that are tasks, in order; the position in

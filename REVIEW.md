@@ -72,7 +72,7 @@ privilege-escalation баг, а нарушение defense-in-depth и внут�
 
 Секретов там нет — OAuth-токен подтверждённо живёт только в памяти
 (`Sources/covey/UsageService.swift:29-32`, `Sources/covey/Credentials.swift`),
-но в `state.json` лежат заметки и черновики issue, которые не хочется отдавать
+но в `state.json` лежат черновики issue, которые не хочется отдавать
 другим локальным пользователям при широком umask.
 
 **Что делать:** `chmod 0600` на `state.json` после записи, аналогично сокету.
@@ -89,10 +89,10 @@ privilege-escalation баг, а нарушение defense-in-depth и внут�
 ### 🔴 God object — `Sources/covey/AppModel.swift` (1199 строк, degree 159 в графе — самый связанный узел во всём проекте)
 
 Владеет одновременно: сессиями, терминалом, git-статусом, issue-браузером,
-заметками, usage-лимитами, vim-режимом и key-routing — явное нарушение single
+usage-лимитами, vim-режимом и key-routing — явное нарушение single
 responsibility.
 
-Видно, что фичи «поздних фаз» (git/issues/notes/worktrees — HANDOFF.md §1
+Видно, что фичи «поздних фаз» (git/issues/worktrees — HANDOFF.md §1
 явно помечал их out-of-scope на фазу 1) просто дописывались в исходный
 `AppModel` вместо вынесения в под-модели.
 
@@ -103,7 +103,7 @@ respawn-логика + status inference + git-monitoring интеграция �
 
 ### 🟡 `Sources/covey/KeyRouter.swift` — `KeyAction` enum (degree 52)
 
-Один enum веером покрывает vim-режим, issues, заметки и сессии сразу —
+Один enum веером покрывает vim-режим, issues и сессии сразу —
 клавиатурный слой не разбит по фичам/зонам.
 
 ### ⚪ Минорное — дублирующееся имя файла

@@ -70,7 +70,7 @@ struct StatusBar: View {
             if model.inspectorVimBadge == "INSERT" || model.inspectorEditing {
                 return [("esc", "leave insert")]
             }
-            if model.inspectorTab == .issue {
+            if model.inspectorMode == .issues {
                 if model.issueScreen == .composer {
                     return [("⌘ M", "assign"), ("⌘ O", "browser"), ("enter", "create"),
                             ("esc", "issues"), ("⌃h/⌃l", "zones")]
@@ -87,8 +87,7 @@ struct StatusBar: View {
                     return [("enter", "save"), ("esc", "cancel")]
                 }
             }
-            return [("space", "menu"),
-                    ("⌃h/⌃l", "zones"), ("⌃j/⌃k", "panes")]
+            return [("space", "menu"), ("⌃h/⌃l", "zones")]
         }
         switch model.inputMode {
         case .leader: return [("esc", "close"), ("⌫", "back")]

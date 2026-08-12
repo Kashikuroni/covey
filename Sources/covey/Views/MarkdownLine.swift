@@ -9,10 +9,9 @@ func inlineMD(_ s: String) -> AttributedString {
         ?? AttributedString(s)
 }
 
-/// Obsidian-style line renderer shared by the note preview and the issue
-/// body: headings, checkboxes, bullets, rules, quotes, code fences, plain
-/// text — with inline bold/italic/mono. One place — identical markdown
-/// look everywhere.
+/// Obsidian-style line renderer shared by editor previews and issue bodies:
+/// headings, checkboxes, bullets, rules, quotes, code fences, plain text —
+/// with inline bold/italic/mono.
 struct MarkdownLineView: View {
     let line: NoteLine
     let tk: Tokens

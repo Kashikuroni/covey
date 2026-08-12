@@ -71,19 +71,36 @@ final class AppModelTraceTests: XCTestCase {
 
         model.apply(.toggleTracePanel)   // close
         XCTAssertFalse(model.showInspector)
-        XCTAssertEqual(model.inspectorMode, .notes)
+        XCTAssertEqual(model.inspectorMode, .issues)
     }
 
-    func testToggleTracePanelSwitchesNotesInspectorToTrace() async throws {
+    func testToggleTracePanelSwitchesIssuesInspectorToTrace() async throws {
         let daemon = try TestDaemon()
         defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
         await model.start()
-        model.setShowInspector(true)     // inspector open in notes mode
-        XCTAssertEqual(model.inspectorMode, .notes)
+        model.setShowInspector(true)
+        XCTAssertEqual(model.inspectorMode, .issues)
 
         model.apply(.toggleTracePanel)   // swaps the open drawer to trace
         XCTAssertTrue(model.showInspector)
         XCTAssertEqual(model.inspectorMode, .trace)
+    }
+
+    func testLegacyNotesInspectorModeLoadsAsIssues() throws {
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        let path = "\(NSTemporaryDirectory())covey-legacy-inspector-\(UUID().uuidString).json"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let seed = StateStore(path: path, debounce: 0)
+        seed.save(PersistedState(inspectorMode: "notes"))
+        seed.flush()
+        let client = IPCClient(path: daemon.path)
+        try client.connect()
+        let model = AppModel(
+            client: client,
+            makeClient: { let c = IPCClient(path: daemon.path); try c.connect(); return c },
+            store: StateStore(path: path, debounce: 0))
+        XCTAssertEqual(model.inspectorMode, .issues)
     }
 }

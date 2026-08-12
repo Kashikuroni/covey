@@ -268,53 +268,6 @@ final class AppModelChromeTests: XCTestCase {
     }
 
     @MainActor
-    func testNotesPersistAndCounters() async throws {
-        let daemon = try TestDaemon(); defer { daemon.stop() }
-        let path = "\(NSTemporaryDirectory())covey-notes-\(UInt32.random(in: 0..<UInt32.max)).json"
-        defer { try? FileManager.default.removeItem(atPath: path) }
-        let store = StateStore(path: path, debounce: 0.05)
-        let client = IPCClient(path: daemon.path); try client.connect()
-        let model = AppModel(client: client,
-                             makeClient: { let c = IPCClient(path: daemon.path); try c.connect(); return c },
-                             store: store)
-        await model.start()
-        model.setNote(session: "s1", text: "- [ ] a\n- [x] b")
-        model.setProjectNote(dir: "/w", text: "- [ ] p")
-        model.setProjectName(dir: "/w", name: "Web")
-        store.flush()
-        let back = store.load()
-        XCTAssertEqual(back.notes["s1"], "- [ ] a\n- [x] b")
-        XCTAssertEqual(back.projectNotes["/w"], "- [ ] p")
-        XCTAssertEqual(back.projectNames["/w"], "Web")
-        XCTAssertEqual(model.displayName(forDir: "/w"), "Web")
-        model.setNote(session: "s1", text: "")
-        model.setProjectName(dir: "/w", name: "")
-        store.flush()
-        XCTAssertNil(store.load().notes["s1"], "empty note drops the key")
-        XCTAssertNil(store.load().projectNames["/w"], "empty name drops the override")
-    }
-
-    @MainActor
-    func testOpenProjectNoteEntersInspectorNoteZone() async throws {
-        let daemon = try TestDaemon(); defer { daemon.stop() }
-        let (model, _) = try makeModel(daemon)
-        await model.start()
-
-        model.apply(.openProjectNote)
-        XCTAssertEqual(model.toast, "no project")
-
-        await model.create(dir: "/a", agent: "/bin/cat")
-        _ = await eventually { model.sessions.count == 1 }
-        let name = model.sessions[0].name
-        await model.select(name)
-        model.apply(.openProjectNote)
-        XCTAssertTrue(model.showInspector, "opening the note reveals the inspector")
-        XCTAssertEqual(model.inspectorTab, .note)
-        XCTAssertEqual(model.focus, .inspector)
-        await model.kill(name)
-    }
-
-    @MainActor
     func testExitedSessionCarriesResumeIntoRecentsAndRelaunch() async throws {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
@@ -385,7 +338,7 @@ final class AppModelChromeTests: XCTestCase {
     }
 
     @MainActor
-    func testCreateIssueOpensInspectorIssueTab() async throws {
+    func testCreateIssueOpensIssuesInspector() async throws {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
         await model.start()
@@ -406,7 +359,7 @@ final class AppModelChromeTests: XCTestCase {
         model.apply(.createIssue)
         XCTAssertNil(model.modal)
         XCTAssertTrue(model.showInspector)
-        XCTAssertEqual(model.inspectorTab, .issue)
+        XCTAssertEqual(model.inspectorMode, .issues)
         XCTAssertEqual(model.focus, .inspector)
         // The tick bump is deferred by one runloop turn (see AppModel's
         // .createIssue case) so a fresh IssuePane mount still observes an
@@ -438,22 +391,10 @@ final class AppModelChromeTests: XCTestCase {
     }
 
     @MainActor
-    func testInspectorTabsSplitAndWindowToggles() async throws {
+    func testInspectorAndWindowToggles() async throws {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
         await model.start()
-
-        XCTAssertEqual(model.inspectorTab, .note)
-        model.apply(.inspectorPaneSwap)
-        XCTAssertEqual(model.inspectorTab, .issue, "pane swap flips the active pane")
-        model.apply(.inspectorPaneSwap)
-        XCTAssertEqual(model.inspectorTab, .note)
-        model.selectInspectorTab(.issue)
-        XCTAssertEqual(model.inspectorTab, .issue)
-
-        XCTAssertFalse(model.inspectorSplit)
-        model.apply(.inspectorSplitToggle)
-        XCTAssertTrue(model.inspectorSplit)
 
         let sessionsShown = model.showSessions
         model.apply(.toggleSessionsPanel)
@@ -474,7 +415,7 @@ final class AppModelChromeTests: XCTestCase {
     }
 
     @MainActor
-    func testCycleFocusWalksInspectorTabsAsZones() async throws {
+    func testCycleFocusTreatsInspectorAsOneZone() async throws {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
         await model.start()
@@ -487,21 +428,12 @@ final class AppModelChromeTests: XCTestCase {
         model.setFocus(.sessions)
         model.apply(.cycleFocus(forward: true))   // -> agent pane
         XCTAssertEqual(model.focus, .terminal)
-        model.apply(.cycleFocus(forward: true))   // -> inspector, note zone
+        model.apply(.cycleFocus(forward: true))   // -> inspector
         XCTAssertEqual(model.focus, .inspector)
-        XCTAssertEqual(model.inspectorTab, .note)
-        let tickBefore = model.issueFocusTick
-        model.apply(.cycleFocus(forward: true))   // -> inspector, issue zone
-        XCTAssertEqual(model.focus, .inspector)
-        XCTAssertEqual(model.inspectorTab, .issue)
-        // Deferred one runloop turn (selectInspectorTab) — await it.
-        let bumped = await eventually { model.issueFocusTick == tickBefore + 1 }
-        XCTAssertTrue(bumped, "issue zone always lands in the form")
         model.apply(.cycleFocus(forward: true))   // wrap -> sessions
         XCTAssertEqual(model.focus, .sessions)
-        model.apply(.cycleFocus(forward: false))  // back -> issue zone
+        model.apply(.cycleFocus(forward: false))  // back -> inspector
         XCTAssertEqual(model.focus, .inspector)
-        XCTAssertEqual(model.inspectorTab, .issue)
 
         daemon.registry.kill(name: "agent")
     }
@@ -669,8 +601,6 @@ final class AppModelChromeTests: XCTestCase {
         let (model, _) = try makeModel(daemon)
         model.focusZone(.agent)
         XCTAssertEqual(model.toast, "no session")
-        model.focusZone(.note)
-        XCTAssertEqual(model.toast, "inspector hidden — space u i")
         model.focusZone(.issues)
         XCTAssertEqual(model.toast, "inspector hidden — space u i")
         model.focusZone(.terminalSplit)

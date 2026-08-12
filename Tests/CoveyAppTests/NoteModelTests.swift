@@ -35,10 +35,7 @@ final class NoteModelTests: XCTestCase {
         XCTAssertEqual(parseNote("####### seven"), [.heading(level: 6, text: "seven")])
     }
 
-    func testCountsAndIndices() {
-        let c = taskCounts(sample)
-        XCTAssertEqual(c.done, 2)
-        XCTAssertEqual(c.total, 3)
+    func testTaskLineIndices() {
         XCTAssertEqual(taskLineIndices(sample), [1, 2, 7])
     }
 

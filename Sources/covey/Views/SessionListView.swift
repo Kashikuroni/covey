@@ -89,10 +89,6 @@ struct SessionListView: View {
                 .font(.system(size: 11, weight: .semibold))
                 .kerning(0.8)
                 .foregroundStyle(tk.t4)
-            let pc = taskCounts(model.projectNotes[group.dir] ?? "")
-            if pc.total > 0 {
-                Text("\(pc.done)/\(pc.total)").font(mono(10)).foregroundStyle(tk.t4)
-            }
             Spacer()
             Text("\(running)/\(rows.count)").font(mono(11)).foregroundStyle(tk.t4)
         }
@@ -148,11 +144,6 @@ private struct SessionCardView: View {
                     .font(mono(13, .medium))
                     .foregroundStyle(selected ? tk.t1 : (status == .waiting ? tk.wait : tk.t2))
                     .lineLimit(1)
-                let counts = taskCounts(model.notes[session.name] ?? "")
-                if counts.total > 0 {
-                    Text("\(counts.done)/\(counts.total)")
-                        .font(mono(10)).foregroundStyle(tk.t4)
-                }
                 Spacer()
                 Text(sessionStatusLabel(status))
                     .font(mono(11)).foregroundStyle(sessionStatusTint(status, tk: tk))

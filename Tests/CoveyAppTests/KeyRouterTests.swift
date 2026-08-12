@@ -133,11 +133,10 @@ final class KeyRouterTests: XCTestCase {
         XCTAssertEqual(KeyRouter.route(special(.enter), context: help), .closeOverlay)
     }
 
-    func testProjectNoteKeysInNormalMode() {
-        // Session notes are gone: both t and T open the project note.
-        XCTAssertEqual(KeyRouter.route(key("t"), context: ctx()), .openProjectNote)
-        XCTAssertEqual(KeyRouter.route(key("T"), context: ctx()), .openProjectNote)
-        XCTAssertEqual(KeyRouter.route(key("е"), context: ctx()), .openProjectNote, "ЙЦУКЕН t")
+    func testRemovedNoteKeysAreUnbound() {
+        XCTAssertNil(KeyRouter.route(key("t"), context: ctx()))
+        XCTAssertNil(KeyRouter.route(key("T"), context: ctx()))
+        XCTAssertNil(KeyRouter.route(key("е"), context: ctx()), "ЙЦУКЕН t")
     }
 
     func testLeaderSessionRenameProject() {
@@ -172,27 +171,18 @@ final class KeyRouterTests: XCTestCase {
                        .cycleFocus(forward: true))
         XCTAssertEqual(KeyRouter.route(key("h", ctrl: true), context: ctx(focus: .terminal)),
                        .cycleFocus(forward: false))
-        // (inside the inspector zone ⌃h/⌃l switch tabs — see
-        // testInspectorZoneChords)
+        // The inspector uses the same global focus cycle.
     }
 
     func testInspectorZoneChords() {
         let insp = ctx(focus: .inspector)
-        // ⌃h/⌃l cycle the focus zones EVERYWHERE — the inspector included,
-        // and from note mode too (note/issue are zones of the global cycle).
+        // ⌃h/⌃l cycle the focus zones everywhere, including the inspector.
         XCTAssertEqual(KeyRouter.route(key("l", ctrl: true), context: insp),
                        .cycleFocus(forward: true))
         XCTAssertEqual(KeyRouter.route(key("h", ctrl: true), context: insp),
                        .cycleFocus(forward: false))
-        XCTAssertEqual(KeyRouter.route(key("j", ctrl: true), context: insp),
-                       .inspectorPaneSwap)
-        XCTAssertEqual(KeyRouter.route(key("k", ctrl: true), context: insp),
-                       .inspectorPaneSwap)
-        // The old plain-`s` split toggle is gone (it was dead code — the
-        // ContentView monitor hands plain inspector keys to the views);
-        // the toggle lives on `space u v` now.
-        XCTAssertNotEqual(KeyRouter.route(key("s"), context: insp),
-                          .inspectorSplitToggle)
+        XCTAssertNil(KeyRouter.route(key("j", ctrl: true), context: insp))
+        XCTAssertNil(KeyRouter.route(key("k", ctrl: true), context: insp))
         // Outside the zone the old meanings stay.
         XCTAssertEqual(KeyRouter.route(key("l", ctrl: true), context: ctx()),
                        .cycleFocus(forward: true))
@@ -208,8 +198,9 @@ final class KeyRouterTests: XCTestCase {
         XCTAssertEqual(KeyRouter.route(key("f"), context: u), .toggleFooterPanel)
         XCTAssertEqual(KeyRouter.route(key("h"), context: u), .toggleHeaderPanel)
         XCTAssertEqual(KeyRouter.route(key("t"), context: u), .toggleTheme)
-        XCTAssertEqual(KeyRouter.route(key("v"), context: u), .inspectorSplitToggle)
+        XCTAssertEqual(KeyRouter.route(key("v"), context: u), .closeOverlay)
         XCTAssertEqual(KeyRouter.route(key("l"), context: u), .cycleUsagePlacement)
+        XCTAssertFalse(LeaderMenu.ui.rows.contains { $0.key == "v" })
         XCTAssertTrue(LeaderMenu.ui.rows.contains {
             $0.key == "l" && $0.label == "cycle limits / clock position" && $0.implemented
         })

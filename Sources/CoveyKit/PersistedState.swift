@@ -124,8 +124,6 @@ public struct PersistedState: Codable, Equatable {
     public var order: [String]
     public var projectOrder: [String]
     public var projectNames: [String: String]
-    public var projectNotes: [String: String]
-    public var notes: [String: String]
     public var drafts: [String: String]
     public var sessions: [String: PersistedSession]
     public var fontScale: Int?
@@ -139,12 +137,9 @@ public struct PersistedState: Codable, Equatable {
     public var splitAxes: [String: String]?
     /// Issue composer drafts keyed by project root.
     public var issueDrafts: [String: IssueDraft]?
-    /// The inspector's note/issue vertical split mode.
-    public var inspectorSplit: Bool?
-    /// Which drawer the inspector shows: "notes" (Note/Issue) or "trace".
+    /// Which drawer the inspector shows: "issues" or "trace".
     public var inspectorMode: String?
-    /// Registered project roots: projects the sidebar shows even with
-    /// zero live sessions (the note -> issue -> session pipeline entry).
+    /// Registered project roots shown in the sidebar even with zero live sessions.
     public var projects: [String]?
     /// Usage-limit alert markers: window key ("5h"/"7d") -> resetUnix of the
     /// window cycle already alerted (0 when resets_at was absent).
@@ -170,15 +165,13 @@ public struct PersistedState: Codable, Equatable {
     public init(
         theme: String? = nil, splitPct: Int? = nil, recents: [RecentSession] = [],
         order: [String] = [], projectOrder: [String] = [],
-        projectNames: [String: String] = [:], projectNotes: [String: String] = [:],
-        notes: [String: String] = [:], drafts: [String: String] = [:],
+        projectNames: [String: String] = [:], drafts: [String: String] = [:],
         sessions: [String: PersistedSession] = [:],
         fontScale: Int? = nil, sbWidth: Int? = nil,
         showSessions: Bool? = nil, showFooter: Bool? = nil, showHeader: Bool? = nil,
         showInspector: Bool? = nil, vimMode: Bool? = nil,
         splitAxes: [String: String]? = nil,
         issueDrafts: [String: IssueDraft]? = nil,
-        inspectorSplit: Bool? = nil,
         inspectorMode: String? = nil,
         projects: [String]? = nil,
         usageNotified: [String: Int64]? = nil,
@@ -194,15 +187,14 @@ public struct PersistedState: Codable, Equatable {
     ) {
         self.theme = theme; self.splitPct = splitPct; self.recents = recents
         self.order = order; self.projectOrder = projectOrder
-        self.projectNames = projectNames; self.projectNotes = projectNotes
-        self.notes = notes; self.drafts = drafts; self.sessions = sessions
+        self.projectNames = projectNames
+        self.drafts = drafts; self.sessions = sessions
         self.fontScale = fontScale; self.sbWidth = sbWidth
         self.showSessions = showSessions; self.showFooter = showFooter
         self.showHeader = showHeader
         self.showInspector = showInspector; self.vimMode = vimMode
         self.splitAxes = splitAxes
         self.issueDrafts = issueDrafts
-        self.inspectorSplit = inspectorSplit
         self.inspectorMode = inspectorMode
         self.projects = projects
         self.usageNotified = usageNotified

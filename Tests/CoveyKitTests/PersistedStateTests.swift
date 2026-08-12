@@ -7,7 +7,6 @@ final class PersistedStateTests: XCTestCase {
         s.recents = [RecentSession(name: "a", dir: "/w", agent: "claude", resumeCmd: "claude --resume x")]
         s.order = ["a", "b"]
         s.projectNames = ["/w": "Work"]
-        s.notes = ["a": "- [ ] task"]
         s.sessions = ["a": PersistedSession(dir: "/w", agent: "claude")]
         s.showSessions = true
         let data = try JSONEncoder().encode(s)
@@ -31,15 +30,27 @@ final class PersistedStateTests: XCTestCase {
         XCTAssertEqual(back.splitAxes, ["agent": "h"])
     }
 
-    func testIssueDraftsAndInspectorSplitRoundTrip() throws {
+    func testIssueDraftsRoundTrip() throws {
         var st = PersistedState()
         st.issueDrafts = ["/repo": IssueDraft(title: "t", body: "b", assignMe: true)]
-        st.inspectorSplit = true
         let back = try JSONDecoder().decode(PersistedState.self,
                                             from: JSONEncoder().encode(st))
         XCTAssertEqual(back.issueDrafts?["/repo"],
                        IssueDraft(title: "t", body: "b", assignMe: true))
-        XCTAssertEqual(back.inspectorSplit, true)
+    }
+
+    func testRemovedNoteFieldsAreIgnoredWhenDecodingLegacyState() throws {
+        let old = #"{"recents":[],"order":[],"projectOrder":[],"projectNames":{},"projectNotes":{"/repo":"old"},"notes":{"s":"old"},"drafts":{},"sessions":{},"inspectorSplit":true,"inspectorMode":"notes"}"#
+        let decoded = try JSONDecoder().decode(PersistedState.self,
+                                               from: old.data(using: .utf8)!)
+        XCTAssertEqual(decoded.inspectorMode, "notes")
+
+        let encoded = try JSONEncoder().encode(decoded)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded)
+            as? [String: Any])
+        XCTAssertFalse(object.keys.contains("projectNotes"))
+        XCTAssertFalse(object.keys.contains("notes"))
+        XCTAssertFalse(object.keys.contains("inspectorSplit"))
     }
 
     func testPushRecentDedupesNewestFirst() {

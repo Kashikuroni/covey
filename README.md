@@ -12,8 +12,8 @@ When several agent sessions are running in parallel (each is a long-lived proces
 in its own PTY, often bound to its own git-worktree), you need a single center from which
 you can see them all: what is happening in each session, who is waiting for a response, who is still working, what
 changes appeared in the code. Covey is such a center of observation and management: the user
-switches between sessions, reads their output and git-diffs, keeps notes and monitors Claude's
-usage limits.
+switches between sessions, reads their output and git-diffs, works with issues and monitors
+Claude's usage limits.
 
 ## Architecture
 
@@ -24,7 +24,7 @@ The application consists of two parts in a client/server model:
   of the session by the screen content, and survives a GUI restart.
 - **`covey`** is a SwiftUI application (a thin client). It connects to the daemon via a Unix socket,
   subscribes to session events, renders the terminal via SwiftTerm, and stores
-user settings/notes.
+  user settings and unfinished issue drafts.
 
 ## Functions
 
@@ -39,9 +39,7 @@ user settings/notes.
 - **Worktree sessions** — creating a session in a separate git worktree, with the subsequent
   option to delete the branch when the session is completed.
 - **Issue-browser** - view, create and edit issue right inside the app
-  (list, detail view, composer).
-- **Notes** - markdown-notes to sessions and projects with counting checkboxes of tasks.
-  drafts of unfinished messages are saved between sessions.
+  (list, detail view, composer); unfinished drafts are saved between sessions.
 - **Claude usage limits** - read OAuth token from Keychain, poll
   `GET /api/oauth/usage` and display usage windows (5h / 7d) as a chip
   in the terminal bar header.
@@ -52,5 +50,5 @@ user settings/notes.
 - **Keyboard control** - native ⌘-combinations and menu bar as a basis,
  plus an optional vim mode with leader-sequences and a vim-like
  text editor (normal/insert/visual modes).
-- **State persistence** - UI settings, session order, themes, notes,
- and drafts are saved in `~/.covey/state.toml`.
+- **State persistence** - UI settings, session order, themes and issue drafts
+  are saved in `~/.covey/state.json`.
