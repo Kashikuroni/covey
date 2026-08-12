@@ -83,6 +83,7 @@ struct ContentView: View {
                               selectedProvider: model.limitsSelectedProvider,
                               tk: tokens)
                     .padding(.top, 42)
+                    .offset(x: limitsOverlayHorizontalOffset(model.usagePlacement))
                     .transition(.scale(scale: 0.92, anchor: .top).combined(with: .opacity))
                     .animation(.spring(response: 0.28, dampingFraction: 0.86), value: model.inputMode)
             }

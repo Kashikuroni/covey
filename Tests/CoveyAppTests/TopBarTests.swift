@@ -19,4 +19,10 @@ final class TopBarTests: XCTestCase {
         XCTAssertEqual(topOverlayAlignment(.center), .top)
         XCTAssertEqual(topOverlayAlignment(.right), .topTrailing)
     }
+
+    func testLimitsOverlayAlignsInsideTopBarContentRegion() {
+        XCTAssertEqual(limitsOverlayHorizontalOffset(.left), 78)
+        XCTAssertEqual(limitsOverlayHorizontalOffset(.center), 32)
+        XCTAssertEqual(limitsOverlayHorizontalOffset(.right), -14)
+    }
 }
