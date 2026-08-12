@@ -8,6 +8,7 @@ let helpGroups: [(String, [(String, String)])] = [
         ("/", "filter / search sessions"),
     ]),
     ("act", [
+        ("⌘P", "command palette"),
         ("enter", "open session in Agent"),
         ("h", "restore Recent and keep browsing"),
         ("⌃q", "leave terminal back to the list"),

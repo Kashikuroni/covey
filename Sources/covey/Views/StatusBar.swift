@@ -1,5 +1,11 @@
 import SwiftUI
 
+private let commandPaletteHint = ("⌘P", "commands")
+
+private func withPalette(_ hints: [(String, String)]) -> [(String, String)] {
+    hints + [commandPaletteHint]
+}
+
 struct StatusBar: View {
     let model: AppModel
     @FocusState private var filterFocused: Bool
@@ -62,32 +68,40 @@ struct StatusBar: View {
     }
 
     private var hintPairs: [(String, String)] {
-        if model.focus == .terminal { return [("⌃q", "back to list")] }
+        if model.focus == .terminal {
+            return withPalette([("⌃q", "back to list")])
+        }
         if model.focus == .inspector {
             // App-level hints only; the editor's own footer carries the
             // per-mode vim hints. While typing, most app keys are dead —
             // do not lie about them.
             if model.inspectorVimBadge == "INSERT" || model.inspectorEditing {
-                return [("esc", "leave insert")]
+                return withPalette([("esc", "leave insert")])
             }
             if model.inspectorMode == .issues {
                 if model.issueScreen == .composer {
-                    return [("⌘ M", "assign"), ("⌘ O", "browser"), ("enter", "create"),
-                            ("esc", "issues"), ("⌃h/⌃l", "zones")]
+                    return withPalette([
+                        ("⌘ M", "assign"), ("⌘ O", "browser"), ("enter", "create"),
+                        ("esc", "issues"), ("⌃h/⌃l", "zones"),
+                    ])
                 }
                 switch model.issueBrowser.screen {
                 case .list:
-                    return [("enter", "view"), ("s", "session"), ("n", "new"),
-                            ("o", "state"), ("/", "search"), ("e/c/x", "edit/close/del")]
+                    return withPalette([
+                        ("enter", "view"), ("s", "session"), ("n", "new"),
+                        ("o", "state"), ("/", "search"), ("e/c/x", "edit/close/del"),
+                    ])
                 case .detail:
-                    return [("e", "edit"), ("s", "session"), ("g", "session ↗"),
-                            ("c", "close/reopen"), ("x", "delete"), ("b", "browser"),
-                            ("esc", "list")]
+                    return withPalette([
+                        ("e", "edit"), ("s", "session"), ("g", "session ↗"),
+                        ("c", "close/reopen"), ("x", "delete"), ("b", "browser"),
+                        ("esc", "list"),
+                    ])
                 case .edit:
-                    return [("enter", "save"), ("esc", "cancel")]
+                    return withPalette([("enter", "save"), ("esc", "cancel")])
                 }
             }
-            return [("space", "menu"), ("⌃h/⌃l", "zones")]
+            return withPalette([("space", "menu"), ("⌃h/⌃l", "zones")])
         }
         switch model.inputMode {
         case .leader: return [("esc", "close"), ("⌫", "back")]
@@ -95,11 +109,13 @@ struct StatusBar: View {
         case .help: return [("any key", "closes")]
         case .limits: return [("any key", "closes")]
         case .normal:
-            guard model.vimMode else { return [("⌘N", "new"), ("⌘F", "filter")] }
-            return [
+            guard model.vimMode else {
+                return withPalette([("⌘N", "new"), ("⌘F", "filter")])
+            }
+            return withPalette([
                 ("n", "new"), ("r", "recent"), ("enter", "attach"), ("d", "kill"),
                 ("space", "menu"), ("/", "filter"), ("?", "help"),
-            ]
+            ])
         }
     }
 
