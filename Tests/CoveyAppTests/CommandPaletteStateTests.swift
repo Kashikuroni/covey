@@ -23,4 +23,22 @@ final class CommandPaletteStateTests: XCTestCase {
         state.move(by: 1, visible: visible)
         XCTAssertEqual(state.selection, .newSession)
     }
+
+    func testReplacingQuerySelectsFirstEnabledVisibleResult() {
+        var state = CommandPaletteState(selection: .settings)
+        state.replaceQuery(
+            "split",
+            visible: [.closeTerminalSplit, .splitTerminalVertically]
+        ) { $0 == .splitTerminalVertically }
+
+        XCTAssertEqual(state.query, "split")
+        XCTAssertEqual(state.selection, .splitTerminalVertically)
+    }
+
+    func testReplacingQueryWithNoResultsClearsSelection() {
+        var state = CommandPaletteState(selection: .settings)
+        state.replaceQuery("nothing", visible: []) { _ in true }
+
+        XCTAssertNil(state.selection)
+    }
 }
