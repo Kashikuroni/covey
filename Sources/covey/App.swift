@@ -78,54 +78,37 @@ struct CoveyApp: App {
         .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(replacing: .appSettings) {
-                Button("Settings…") { model?.openSettings() }
-                    .keyboardShortcut(",", modifiers: .command)
-                    .disabled(model?.modal != nil)
+                CatalogCommandButton(.settings, model: model)
             }
             CommandGroup(replacing: .newItem) {
-                Button("New Session") { model?.modal = .newSession }
-                    .keyboardShortcut("n", modifiers: .command)
+                CatalogCommandButton(.newSession, model: model)
             }
             CommandGroup(after: .textEditing) {
-                Button("Filter Sessions") { model?.perform(.filterSessions) }
-                    .keyboardShortcut("f", modifiers: .command)
+                Button("Command Palette…") { model?.toggleCommandPalette() }
+                    .keyboardShortcut("p", modifiers: .command)
+                    .disabled(model == nil || model?.modal != nil)
+                Divider()
+                CatalogCommandButton(.filterSessions, model: model)
             }
             CommandMenu("Session") {
-                Button("Kill Session…") {
-                    if let selected = model?.selected { model?.modal = .kill(selected) }
-                }
-                .keyboardShortcut("w", modifiers: .command)
-                .disabled(model?.selected == nil)
-                Button("Rename Session…") {
-                    if let selected = model?.selected { model?.modal = .rename(selected) }
-                }
-                .keyboardShortcut("r", modifiers: [.command, .shift])
-                .disabled(model?.selected == nil)
+                CatalogCommandButton(.killSession, model: model)
+                CatalogCommandButton(.renameSession, model: model)
             }
             CommandMenu("View") {
-                Toggle("Show Sessions", isOn: Binding(
-                    get: { model?.showSessions ?? true },
-                    set: { model?.setShowSessions($0) }))
-                Toggle("Show Top Bar", isOn: Binding(
-                    get: { model?.showHeader ?? true },
-                    set: { model?.setShowHeader($0) }))
-                Toggle("Show Status Bar", isOn: Binding(
-                    get: { model?.showFooter ?? true },
-                    set: { model?.setShowFooter($0) }))
-                Toggle("Show Inspector", isOn: Binding(
-                    get: { model?.showInspector ?? false },
-                    set: { model?.setShowInspector($0) }))
+                CatalogCommandToggle(.toggleSessionsPanel, model: model,
+                                     isOn: model?.showSessions ?? true)
+                CatalogCommandToggle(.toggleTopBar, model: model,
+                                     isOn: model?.showHeader ?? true)
+                CatalogCommandToggle(.toggleStatusBar, model: model,
+                                     isOn: model?.showFooter ?? true)
+                CatalogCommandToggle(.toggleInspector, model: model,
+                                     isOn: model?.showInspector ?? false)
                 Divider()
-                Button("Focus Session") { model?.focusZone(.session) }
-                    .keyboardShortcut("1", modifiers: .command)
-                Button("Focus Agent") { model?.focusZone(.agent) }
-                    .keyboardShortcut("2", modifiers: .command)
-                Button("Focus Issues") { model?.focusZone(.issues) }
-                    .keyboardShortcut("3", modifiers: .command)
-                Button("Focus Terminal") { model?.focusZone(.terminalSplit) }
-                    .keyboardShortcut("4", modifiers: .command)
-                Button("Focus Trace") { model?.focusZone(.trace) }
-                    .keyboardShortcut("5", modifiers: .command)
+                CatalogCommandButton(.focusSessionList, model: model)
+                CatalogCommandButton(.focusAgent, model: model)
+                CatalogCommandButton(.focusIssues, model: model)
+                CatalogCommandButton(.focusTerminalSplit, model: model)
+                CatalogCommandButton(.focusTrace, model: model)
                 Divider()
                 Toggle("Vim Mode", isOn: Binding(
                     get: { model?.vimMode ?? false },
@@ -147,4 +130,65 @@ struct CoveyApp: App {
         try client.connect()
         return client
     }
+}
+
+private struct CatalogCommandButton: View {
+    let command: AppCommand
+    let model: AppModel?
+
+    init(_ command: AppCommand, model: AppModel?) {
+        self.command = command
+        self.model = model
+    }
+
+    var body: some View {
+        let descriptor = CommandCatalog.descriptor(for: command)
+        Button(descriptor.title) { model?.perform(command) }
+            .modifier(CatalogShortcutModifier(shortcut: descriptor.shortcut))
+            .disabled(catalogCommandDisabled(command, model: model))
+    }
+}
+
+private struct CatalogCommandToggle: View {
+    let command: AppCommand
+    let model: AppModel?
+    let isOn: Bool
+
+    init(_ command: AppCommand, model: AppModel?, isOn: Bool) {
+        self.command = command
+        self.model = model
+        self.isOn = isOn
+    }
+
+    var body: some View {
+        let descriptor = CommandCatalog.descriptor(for: command)
+        Toggle(descriptor.title, isOn: Binding(
+            get: { isOn },
+            set: { _ in model?.perform(command) }
+        ))
+        .modifier(CatalogShortcutModifier(shortcut: descriptor.shortcut))
+        .disabled(catalogCommandDisabled(command, model: model))
+    }
+}
+
+private struct CatalogShortcutModifier: ViewModifier {
+    let shortcut: CommandShortcut?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let shortcut {
+            content.keyboardShortcut(
+                KeyEquivalent(shortcut.key),
+                modifiers: shortcut.modifiers
+            )
+        } else {
+            content
+        }
+    }
+}
+
+@MainActor
+private func catalogCommandDisabled(_ command: AppCommand, model: AppModel?) -> Bool {
+    guard let model, model.modal == nil, !model.commandPalettePresented else { return true }
+    return !model.commandAvailability(command).isEnabled
 }

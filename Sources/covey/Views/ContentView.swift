@@ -3,6 +3,8 @@ import SwiftUI
 struct ContentView: View {
     @Bindable var model: AppModel
     @State private var keyMonitor: Any?
+    @State private var paletteState = CommandPaletteState()
+    @State private var palettePreviousResponder: NSResponder?
 
     private var tokens: Tokens { Tokens(Theme(raw: model.themeRaw)) }
 
@@ -88,18 +90,46 @@ struct ContentView: View {
                     .animation(.spring(response: 0.28, dampingFraction: 0.86), value: model.inputMode)
             }
         }
+        .overlay {
+            if model.commandPalettePresented {
+                ZStack {
+                    Color.black.opacity(0.36).ignoresSafeArea()
+                    CommandPaletteView(model: model, state: $paletteState)
+                }
+            }
+        }
+        .onChange(of: model.commandPalettePresented) { _, presented in
+            if presented {
+                palettePreviousResponder = NSApp.keyWindow?.firstResponder
+            } else {
+                let responder = palettePreviousResponder
+                palettePreviousResponder = nil
+                DispatchQueue.main.async {
+                    if model.modal == nil,
+                       let window = NSApp.keyWindow,
+                       let responder {
+                        _ = window.makeFirstResponder(responder)
+                    }
+                    model.restoreCommandPaletteTerminalFocus()
+                }
+            }
+        }
         .onAppear {
             keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                 // ⌘W: kill sheet for the selected session (File→Close would
                 // shadow a menu ⌘W — AppKit picks the first key equivalent).
                 if event.modifierFlags.intersection([.command, .shift, .option, .control]) == .command,
                    event.charactersIgnoringModifiers == "w" {
-                    guard model.modal == nil, let selected = model.selected else { return event }
-                    model.modal = .kill(selected)
+                    if model.commandPalettePresented { return nil }
+                    guard model.modal == nil else { return event }
+                    model.perform(.killSession)
                     return nil
                 }
                 // ⌘-anything else belongs to the menu system.
                 guard !event.modifierFlags.contains(.command) else { return event }
+                // The search field owns every non-Command key while the
+                // palette is open; none may reach the workspace router.
+                if model.commandPalettePresented { return event }
                 // Inspector focus chords must escape its text fields: ⌃h/l
                 // never type text (those emacs bindings are sacrificed).
                 if model.focus == .inspector,
