@@ -64,12 +64,12 @@ final class AppModelTraceTests: XCTestCase {
         await model.start()
         XCTAssertFalse(model.showInspector)
 
-        model.apply(.toggleTracePanel)   // open
+        model.perform(.toggleAgentTrace)   // open
         XCTAssertTrue(model.showInspector)
         XCTAssertEqual(model.inspectorMode, .trace)
         XCTAssertEqual(model.focus, .inspector)
 
-        model.apply(.toggleTracePanel)   // close
+        model.perform(.toggleAgentTrace)   // close
         XCTAssertFalse(model.showInspector)
         XCTAssertEqual(model.inspectorMode, .issues)
     }
@@ -82,7 +82,7 @@ final class AppModelTraceTests: XCTestCase {
         model.setShowInspector(true)
         XCTAssertEqual(model.inspectorMode, .issues)
 
-        model.apply(.toggleTracePanel)   // swaps the open drawer to trace
+        model.perform(.toggleAgentTrace)   // swaps the open drawer to trace
         XCTAssertTrue(model.showInspector)
         XCTAssertEqual(model.inspectorMode, .trace)
     }

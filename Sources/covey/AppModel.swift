@@ -143,6 +143,7 @@ public final class AppModel {
     /// The footer filter is showing (activated by `/` or ⌘F).
     public private(set) var filterActive = false
     private(set) var inputMode: InputMode = .normal
+    public private(set) var commandPalettePresented = false
     /// Dir to prefill in the New Session sheet (set by `N`).
     public private(set) var newSessionPrefillDir: String?
     /// Issue number the pending New Session is being created for (issue's `s`);
@@ -688,6 +689,190 @@ public final class AppModel {
         modal = .settings
     }
 
+    func openCommandPalette() {
+        guard modal == nil else { return }
+        inputMode = .normal
+        commandPalettePresented = true
+    }
+
+    func closeCommandPalette() {
+        commandPalettePresented = false
+    }
+
+    func toggleCommandPalette() {
+        commandPalettePresented ? closeCommandPalette() : openCommandPalette()
+    }
+
+    func restoreCommandPaletteTerminalFocus() {
+        guard modal == nil, focus == .terminal else { return }
+        sendTerminalCommand(.focus)
+    }
+
+    func commandAvailability(_ command: AppCommand) -> CommandAvailability {
+        CommandRules.availability(for: command, context: commandContext)
+    }
+
+    private var commandContext: CommandContext {
+        let session = selectedSession()
+        let group = session.flatMap { selected in
+            orderedSessions().first { group in
+                group.sessions.contains { $0.name == selected.name }
+            }
+        }
+        let index = group.flatMap { group in
+            session.flatMap { selected in
+                group.sessions.firstIndex { $0.name == selected.name }
+            }
+        }
+        let canMoveDown: Bool
+        if let index, let count = group?.sessions.count {
+            canMoveDown = index < count - 1
+        } else {
+            canMoveDown = false
+        }
+
+        return CommandContext(
+            hasSelectedSession: session != nil,
+            hasProject: inspectorRoot != nil,
+            selectedHasGit: session?.git != nil,
+            selectedIsWorktree: session?.worktreeRepo != nil,
+            selectedBranch: session?.git?.branch,
+            selectedBranchProtected: session?.git.map {
+                protectedBranches.contains($0.branch)
+            } ?? false,
+            selectedCanReturnToRoot: session.map { isReturnable($0) } ?? false,
+            hasTerminalSplit: selected.flatMap(companion(of:)) != nil,
+            inspectorShown: showInspector,
+            hasClaudeSessions: visibleSessions.contains {
+                $0.agent.split(separator: " ").first == "claude"
+            },
+            canMoveSessionUp: index.map { $0 > 0 } ?? false,
+            canMoveSessionDown: canMoveDown)
+    }
+
+    func perform(_ command: AppCommand) {
+        guard commandAvailability(command).isEnabled else { return }
+        closeCommandPalette()
+        inputMode = .normal
+
+        switch command {
+        case .newSession:
+            newSessionPrefillDir = nil
+            modal = .newSession
+        case .newSessionInCurrentProject:
+            newSessionPrefillDir = inspectorRoot
+            modal = .newSession
+        case .recentSessions:
+            modal = .recent
+        case .filterSessions:
+            filterActive = true
+        case .killSession:
+            modal = selected.map(Modal.kill)
+        case .renameSession:
+            modal = selected.map(Modal.rename)
+        case .restartSession:
+            modal = selected.map(Modal.restart)
+        case .restartAllClaudeSessions:
+            modal = .restartAll
+        case .moveSessionUp:
+            moveSelectedSession(up: true)
+        case .moveSessionDown:
+            moveSelectedSession(up: false)
+
+        case .createGitHubIssue:
+            if !showInspector { setShowInspector(true) }
+            issueScreen = .composer
+            setFocus(.inspector)
+            activateIssues()
+        case .openIssueList:
+            if !showInspector { setShowInspector(true) }
+            issueScreen = .browser
+            issueBrowser.screen = .list
+            setFocus(.inspector)
+            activateIssues()
+        case .promoteWorktree:
+            modal = selected.map(Modal.promote)
+        case .deleteSessionBranch:
+            guard let session = selectedSession(), session.worktreeRepo == nil,
+                  let branch = session.git?.branch,
+                  !protectedBranches.contains(branch) else { return }
+            modal = .deleteBranch(session.name)
+        case .cleanupMergedBranches:
+            if let session = selectedSession() { modal = .cleanup(session.dir) }
+        case .returnToRepositoryRoot:
+            guard let session = selectedSession(), isReturnable(session),
+                  let root = session.worktreeRepo else { return }
+            if session.agent.split(separator: " ").first == "claude" {
+                Task { await restart(session.name, dir: root) }
+            } else {
+                let command = "cd \(shellSingleQuote(root))\n"
+                Task {
+                    try? await client.input(name: session.name, bytes: Array(command.utf8))
+                }
+            }
+
+        case .splitTerminalVertically:
+            openSplit(axis: "v")
+        case .splitTerminalHorizontally:
+            openSplit(axis: "h")
+        case .closeTerminalSplit:
+            if let companion = selected.flatMap(companion(of:)) {
+                Task { await kill(companion.name) }
+            }
+
+        case .toggleSessionsPanel:
+            setShowSessions(!showSessions)
+        case .toggleInspector:
+            if showInspector, focus == .inspector { setFocus(.sessions) }
+            setShowInspector(!showInspector)
+        case .toggleAgentTrace:
+            if showInspector, inspectorMode == .trace {
+                if focus == .inspector { setFocus(.sessions) }
+                setInspectorMode(.issues)
+                setShowInspector(false)
+            } else {
+                if !showInspector { setShowInspector(true) }
+                sendTerminalCommand(.blur)
+                setFocus(.inspector)
+                setInspectorMode(.trace)
+            }
+        case .toggleStatusBar:
+            setShowFooter(!showFooter)
+        case .toggleTopBar:
+            setShowHeader(!showHeader)
+        case .toggleTheme:
+            setTheme(themeRaw == "dark" ? "light" : "dark")
+            offerThemeRestart()
+        case .cycleUsagePlacement:
+            usagePlacement = usagePlacement.next
+            persist()
+        case .showLimitsDetail:
+            inputMode = .limits
+            limitsSelectedProvider = .claude
+        case .focusSessionList:
+            focusZone(.session)
+        case .focusAgent:
+            focusZone(.agent)
+        case .focusIssues:
+            focusZone(.issues)
+        case .focusTerminalSplit:
+            focusZone(.terminalSplit)
+        case .focusTrace:
+            focusZone(.trace)
+        case .showKeyboardHelp:
+            inputMode = .help
+
+        case .addProject:
+            modal = .addProject
+        case .removeProject:
+            if let root = inspectorRoot { removeProject(root) }
+        case .renameProject:
+            if let root = inspectorRoot { modal = .renameProject(root) }
+        case .settings:
+            openSettings()
+        }
+    }
+
     func applySettings(_ values: SettingsValues) {
         let old = settingsValues
         guard values != old else {
@@ -835,33 +1020,17 @@ public final class AppModel {
 
     func apply(_ action: KeyAction) {
         switch action {
+        case .command(let command):
+            perform(command)
         case .selectNext: step(by: 1)
         case .selectPrev: step(by: -1)
         case .selectFirst: jump(to: 0)
         case .selectByNumber(let n):
             jump(to: n - 1)
             inputMode = .normal
-        case .enterTerminal:
-            if selected != nil {
-                setFocus(.terminal)
-                sendTerminalCommand(.focus)
-            }
         case .exitTerminal:
             setFocus(.sessions)
             sendTerminalCommand(.blur)
-        case .newSession(let prefill):
-            newSessionPrefillDir = prefill ? inspectorRoot : nil
-            modal = .newSession
-        case .openRecent:
-            inputMode = .normal
-            modal = .recent
-        case .killSelected:
-            if let selected { modal = .kill(selected) }
-        case .renameSelected:
-            inputMode = .normal
-            if let selected { modal = .rename(selected) }
-        case .startFilter:
-            filterActive = true
         case .openLeader:
             inputMode = .leader(.root)
         case .leaderDescend(let menu):
@@ -874,17 +1043,10 @@ public final class AppModel {
             inputMode = .selectSession
         case .resizeSplit(let delta):
             setSplitPct(splitPct + delta)
-        case .moveSelected(let up):
-            moveSelectedSession(up: up)
         case .scrollTerminalPage(let up):
             sendTerminalCommand(.scrollPage(up: up))
         case .scrollTerminalToBottom:
             sendTerminalCommand(.scrollToBottom)
-        case .showHelp:
-            inputMode = .help
-        case .renameProject:
-            inputMode = .normal
-            if let root = inspectorRoot { modal = .renameProject(root) }
         case .sendShiftTab:
             guard let selected else { return }
             Task { try? await client.input(name: selected, bytes: [0x1b, 0x5b, 0x5a]) }
@@ -895,84 +1057,6 @@ public final class AppModel {
             // so a split's shell companion gets its own ⇧Enter.
             guard let target = focusedPane ?? selected else { return }
             Task { try? await client.input(name: target, bytes: [0x1b, 0x0d]) }
-        case .restartSelected:
-            inputMode = .normal
-            if let selected { modal = .restart(selected) }
-        case .restartAllPrompt:
-            inputMode = .normal
-            modal = .restartAll
-        case .toggleTheme:
-            inputMode = .normal
-            setTheme(themeRaw == "dark" ? "light" : "dark")
-            offerThemeRestart()
-        case .returnToRoot:
-            inputMode = .normal
-            guard let s = selectedSession() else { return }
-            guard isReturnable(s), let root = s.worktreeRepo else {
-                toast = "worktree still alive"; return
-            }
-            if s.agent.split(separator: " ").first == "claude" {
-                // Same pipeline as a plain restart, but respawned in the root.
-                Task { await restart(s.name, dir: root) }
-            } else {
-                // A live shell just cd's back (port of the TUI behavior).
-                let cmd = "cd \(shellSingleQuote(root))\n"
-                Task { try? await client.input(name: s.name, bytes: Array(cmd.utf8)) }
-            }
-        case .promoteSelected:
-            inputMode = .normal
-            guard let s = selectedSession() else { return }
-            if s.worktreeRepo == nil { toast = "not a worktree session"; return }
-            modal = .promote(s.name)
-        case .deleteBranchSelected:
-            inputMode = .normal
-            guard let s = selectedSession() else { return }
-            if s.worktreeRepo != nil { toast = "cannot delete: worktree session"; return }
-            guard let branch = s.git?.branch else { toast = "no git info"; return }
-            if protectedBranches.contains(branch) {
-                toast = "branch '\(branch)' is protected"
-                return
-            }
-            modal = .deleteBranch(s.name)
-        case .cleanupBranches:
-            inputMode = .normal
-            guard let s = selectedSession() else { return }
-            if s.git == nil { toast = "not a git repo"; return }
-            modal = .cleanup(s.dir)
-        case .toggleSessionsPanel:
-            inputMode = .normal
-            setShowSessions(!showSessions)
-        case .toggleInspectorPanel:
-            inputMode = .normal
-            if showInspector, focus == .inspector { setFocus(.sessions) }
-            setShowInspector(!showInspector)
-        case .toggleTracePanel:
-            inputMode = .normal
-            if showInspector, inspectorMode == .trace {
-                // Trace is showing: close the drawer and restore Issues as the
-                // default content for the next normal inspector opening.
-                if focus == .inspector { setFocus(.sessions) }
-                setInspectorMode(.issues)
-                setShowInspector(false)
-            } else {
-                if !showInspector { setShowInspector(true) }
-                sendTerminalCommand(.blur)
-                setFocus(.inspector)
-                setInspectorMode(.trace)
-            }
-        case .toggleFooterPanel:
-            inputMode = .normal
-            setShowFooter(!showFooter)
-        case .toggleHeaderPanel:
-            inputMode = .normal
-            setShowHeader(!showHeader)
-        case .cycleUsagePlacement:
-            inputMode = .normal
-            usagePlacement = usagePlacement.next
-            persist()
-        case .toggleLimitsOverlay:
-            inputMode = .limits
-            limitsSelectedProvider = .claude
         case .limitsSelectNext, .limitsSelectPrev:
             // Only two providers exist — next and prev are the same swap.
             limitsSelectedProvider = limitsSelectedProvider == .claude ? .codex : .claude
@@ -986,45 +1070,11 @@ public final class AppModel {
             case .claude: setClaudeUsageEnabled(false)
             case .codex: setCodexUsageEnabled(false)
             }
-        case .createIssue:
-            inputMode = .normal
-            guard inspectorRoot != nil else { toast = "no project"; return }
-            if let s = selectedSession(), s.git == nil { toast = "not a git repo"; return }
-            if !showInspector { setShowInspector(true) }
-            issueScreen = .composer
-            setFocus(.inspector)
-            activateIssues()
-        case .openIssueList:
-            inputMode = .normal
-            guard let s = selectedSession() else { toast = "no session"; return }
-            if s.git == nil { toast = "not a git repo"; return }
-            if !showInspector { setShowInspector(true) }
-            issueScreen = .browser
-            issueBrowser.screen = .list
-            setFocus(.inspector)
-            activateIssues()
-            // The pane self-opens via its root/tick .onChange handlers —
-            // opening here too would double the gh fetch.
-        case .splitVertical: openSplit(axis: "v")
-        case .splitHorizontal: openSplit(axis: "h")
-        case .splitClose:
-            inputMode = .normal
-            guard let comp = selected.flatMap({ companion(of: $0) }) else {
-                toast = "no split"; return
-            }
-            Task { await kill(comp.name) }
         case .splitFocusToggle:
             guard let selected, let comp = companion(of: selected) else { return }
             focusPane(focusedPane == comp.name ? selected : comp.name)
         case .cycleFocus(let forward):
             cycleFocus(forward: forward)
-        case .addProject:
-            inputMode = .normal
-            modal = .addProject
-        case .removeProject:
-            inputMode = .normal
-            guard let root = inspectorRoot else { toast = "no project"; return }
-            removeProject(root)
         }
     }
 

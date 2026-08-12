@@ -9,9 +9,11 @@ final class SplitTests: XCTestCase {
         let (model, _) = try makeModel(daemon)
         await model.start()
 
-        // Guard: no selection -> toast, nothing created.
-        model.apply(.splitVertical)
-        XCTAssertEqual(model.toast, "no session")
+        // Guard: no selection -> disabled, nothing created.
+        model.perform(.splitTerminalVertically)
+        XCTAssertEqual(model.commandAvailability(.splitTerminalVertically),
+                       .disabled(reason: "No session selected"))
+        XCTAssertNil(model.toast)
         XCTAssertTrue(daemon.registry.list().isEmpty)
 
         _ = try daemon.registry.create(dir: "/tmp", agent: "claude",
@@ -20,7 +22,7 @@ final class SplitTests: XCTestCase {
         await model.select("agent")
         XCTAssertEqual(model.focusedPane, "agent")
 
-        model.apply(.splitVertical)
+        model.perform(.splitTerminalVertically)
         let created = await eventually { model.companion(of: "agent") != nil }
         XCTAssertTrue(created)
         XCTAssertEqual(model.companion(of: "agent")?.name, "agent+sh")
@@ -36,7 +38,7 @@ final class SplitTests: XCTestCase {
         XCTAssertTrue(focused)
 
         // A second split request must not create a second companion.
-        model.apply(.splitVertical)
+        model.perform(.splitTerminalVertically)
         let grew = await eventually(timeout: 0.6) { daemon.registry.list().count > 2 }
         XCTAssertFalse(grew, "split with a live companion only refocuses")
 
@@ -47,7 +49,7 @@ final class SplitTests: XCTestCase {
         XCTAssertEqual(model.focusedPane, "agent+sh")
 
         // Close: the companion dies, the split collapses, focus returns.
-        model.apply(.splitClose)
+        model.perform(.closeTerminalSplit)
         let closed = await eventually { model.companion(of: "agent") == nil }
         XCTAssertTrue(closed)
         XCTAssertEqual(model.focusedPane, "agent")
@@ -75,7 +77,7 @@ final class SplitTests: XCTestCase {
                                        argv: ["/bin/cat"], name: "agent")
         _ = await eventually { model.sessions.contains { $0.name == "agent" } }
         await model.select("agent")
-        model.apply(.splitHorizontal)
+        model.perform(.splitTerminalHorizontally)
         XCTAssertEqual(model.splitAxis(for: "agent"), "h")
         XCTAssertEqual(model.splitAxis(for: "other"), "v", "default axis is vertical")
 

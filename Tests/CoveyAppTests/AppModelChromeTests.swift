@@ -184,14 +184,14 @@ final class AppModelChromeTests: XCTestCase {
         model.apply(.enterSelectMode)
         XCTAssertEqual(model.inputMode, .selectSession)
         model.apply(.closeOverlay)
-        model.apply(.showHelp)
+        model.perform(.showKeyboardHelp)
         XCTAssertEqual(model.inputMode, .help)
         model.apply(.closeOverlay)
-        model.apply(.toggleLimitsOverlay)
+        model.perform(.showLimitsDetail)
         XCTAssertEqual(model.inputMode, .limits)
         model.apply(.closeOverlay)
         XCTAssertEqual(model.inputMode, .normal)
-        model.apply(.newSession(prefillDir: false))
+        model.perform(.newSession)
         XCTAssertEqual(model.modal, .newSession)
         model.modal = nil
         model.apply(.resizeSplit(3))
@@ -203,7 +203,7 @@ final class AppModelChromeTests: XCTestCase {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
         await model.start()
-        model.apply(.toggleLimitsOverlay)
+        model.perform(.showLimitsDetail)
         XCTAssertEqual(model.limitsSelectedProvider, .claude, "opens with Claude highlighted")
         model.apply(.limitsSelectNext)
         XCTAssertEqual(model.limitsSelectedProvider, .codex)
@@ -217,7 +217,7 @@ final class AppModelChromeTests: XCTestCase {
         model.apply(.limitsEnableSelected)
         XCTAssertTrue(model.claudeUsageEnabled)
         model.apply(.closeOverlay)
-        model.apply(.toggleLimitsOverlay)
+        model.perform(.showLimitsDetail)
         XCTAssertEqual(model.limitsSelectedProvider, .claude, "reopening resets the highlight")
     }
 
@@ -239,7 +239,7 @@ final class AppModelChromeTests: XCTestCase {
         let (model, _) = try makeModel(daemon)
         await model.start()
         XCTAssertFalse(model.filterActive)
-        model.apply(.startFilter)
+        model.perform(.filterSessions)
         XCTAssertTrue(model.filterActive)
         model.setFilter("abc")
         model.filterEscape()
@@ -252,16 +252,16 @@ final class AppModelChromeTests: XCTestCase {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
         await model.start()
-        model.apply(.killSelected)
+        model.perform(.killSession)
         XCTAssertNil(model.modal, "no selection — no kill sheet")
         await model.create(dir: "/a", agent: "/bin/cat")
         _ = await eventually { model.sessions.count == 1 }
         let name = model.sessions[0].name
         await model.select(name)
-        model.apply(.killSelected)
+        model.perform(.killSession)
         XCTAssertEqual(model.modal, .kill(name))
         model.modal = nil
-        model.apply(.renameSelected)
+        model.perform(.renameSession)
         XCTAssertEqual(model.modal, .rename(name))
         model.modal = nil
         await model.kill(name)
@@ -302,22 +302,26 @@ final class AppModelChromeTests: XCTestCase {
         _ = await eventually { model.sessions.count == 1 }
         let name = model.sessions[0].name
         await model.select(name)
-        model.apply(.promoteSelected)
+        model.perform(.promoteWorktree)
         XCTAssertNil(model.modal)
-        XCTAssertEqual(model.toast, "not a worktree session")
-        model.apply(.deleteBranchSelected)
+        XCTAssertEqual(model.commandAvailability(.promoteWorktree),
+                       .disabled(reason: "Not a worktree session"))
+        model.perform(.deleteSessionBranch)
         XCTAssertNil(model.modal)
-        XCTAssertEqual(model.toast, "no git info")
-        model.apply(.cleanupBranches)
+        XCTAssertEqual(model.commandAvailability(.deleteSessionBranch),
+                       .disabled(reason: "No Git branch"))
+        model.perform(.cleanupMergedBranches)
         XCTAssertNil(model.modal)
-        XCTAssertEqual(model.toast, "not a git repo")
+        XCTAssertEqual(model.commandAvailability(.cleanupMergedBranches),
+                       .disabled(reason: "Not a Git repository"))
         // gitChanged fills the card info; a protected branch blocks delete.
         daemon.gitMonitor.onGitChanged?(name, GitInfo(branch: "main", added: 1, removed: 0))
         _ = await eventually { model.sessions.first?.git?.branch == "main" }
-        model.apply(.deleteBranchSelected)
+        model.perform(.deleteSessionBranch)
         XCTAssertNil(model.modal)
-        XCTAssertEqual(model.toast, "branch 'main' is protected")
-        model.apply(.cleanupBranches)
+        XCTAssertEqual(model.commandAvailability(.deleteSessionBranch),
+                       .disabled(reason: "Branch is protected"))
+        model.perform(.cleanupMergedBranches)
         XCTAssertEqual(model.modal, .cleanup("/tmp"))
         model.modal = nil
         await model.kill(name)
@@ -331,7 +335,7 @@ final class AppModelChromeTests: XCTestCase {
         await model.create(dir: "/a", agent: "/bin/cat")
         _ = await eventually { model.sessions.count == 1 }
         await model.select(model.sessions[0].name)
-        model.apply(.renameProject)
+        model.perform(.renameProject)
         XCTAssertEqual(model.modal, .renameProject("/a"))
         model.modal = nil
         await model.kill(model.sessions[0].name)
@@ -343,20 +347,22 @@ final class AppModelChromeTests: XCTestCase {
         let (model, _) = try makeModel(daemon)
         await model.start()
 
-        model.apply(.createIssue)
-        XCTAssertEqual(model.toast, "no project")
+        model.perform(.createGitHubIssue)
+        XCTAssertEqual(model.commandAvailability(.createGitHubIssue),
+                       .disabled(reason: "No project selected"))
 
         _ = try daemon.registry.create(dir: "/tmp", agent: "claude",
                                        argv: ["/bin/cat"], name: "agent")
         _ = await eventually { model.sessions.count == 1 }
         await model.select("agent")
-        model.apply(.createIssue)
-        XCTAssertEqual(model.toast, "not a git repo")
+        model.perform(.createGitHubIssue)
+        XCTAssertEqual(model.commandAvailability(.createGitHubIssue),
+                       .disabled(reason: "Not a Git repository"))
 
         daemon.gitMonitor.onGitChanged?("agent", GitInfo(branch: "main", added: 0, removed: 0))
         _ = await eventually { model.sessions.first?.git != nil }
         let tickBefore = model.issueFocusTick
-        model.apply(.createIssue)
+        model.perform(.createGitHubIssue)
         XCTAssertNil(model.modal)
         XCTAssertTrue(model.showInspector)
         XCTAssertEqual(model.inspectorMode, .issues)
@@ -375,8 +381,9 @@ final class AppModelChromeTests: XCTestCase {
         let daemon = try TestDaemon()
         defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
-        model.apply(.openIssueList)
-        XCTAssertEqual(model.toast, "no session")   // guard fires, nothing opens
+        model.perform(.openIssueList)
+        XCTAssertEqual(model.commandAvailability(.openIssueList),
+                       .disabled(reason: "No session selected"))
         XCTAssertNotEqual(model.focus, .inspector)
     }
 
@@ -397,19 +404,19 @@ final class AppModelChromeTests: XCTestCase {
         await model.start()
 
         let sessionsShown = model.showSessions
-        model.apply(.toggleSessionsPanel)
+        model.perform(.toggleSessionsPanel)
         XCTAssertEqual(model.showSessions, !sessionsShown)
         let footerShown = model.showFooter
-        model.apply(.toggleFooterPanel)
+        model.perform(.toggleStatusBar)
         XCTAssertEqual(model.showFooter, !footerShown)
         let headerShown = model.showHeader
-        model.apply(.toggleHeaderPanel)
+        model.perform(.toggleTopBar)
         XCTAssertEqual(model.showHeader, !headerShown)
 
         // Hiding the inspector while focused inside returns to sessions.
         model.setShowInspector(true)
         model.setFocus(.inspector)
-        model.apply(.toggleInspectorPanel)
+        model.perform(.toggleInspector)
         XCTAssertFalse(model.showInspector)
         XCTAssertEqual(model.focus, .sessions)
     }
@@ -456,7 +463,7 @@ final class AppModelChromeTests: XCTestCase {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
         await model.start()
-        model.apply(.openRecent)
+        model.perform(.recentSessions)
         XCTAssertEqual(model.modal, .recent)
     }
 
@@ -499,7 +506,7 @@ final class AppModelChromeTests: XCTestCase {
         let (model, _) = try makeModel(daemon)
         await model.start()
         let before = model.themeRaw
-        model.apply(.toggleTheme)
+        model.perform(.toggleTheme)
         XCTAssertNotEqual(model.themeRaw, before)
         XCTAssertNil(model.modal)
         XCTAssertNil(model.toast)
@@ -514,7 +521,7 @@ final class AppModelChromeTests: XCTestCase {
         _ = try daemon.registry.create(dir: "/tmp", agent: "claude",
                                        argv: ["/bin/cat"], name: "agent")
         _ = await eventually { model.sessions.count == 1 }
-        model.apply(.toggleTheme)
+        model.perform(.toggleTheme)
         XCTAssertNil(model.modal)
         XCTAssertEqual(model.toast,
                        "1 agent(s) keep old theme — restart when idle (space s u)")
@@ -533,7 +540,7 @@ final class AppModelChromeTests: XCTestCase {
             daemon.monitor.tick()
             return model.statusByName["agent"] == .idle
         }
-        model.apply(.toggleTheme)
+        model.perform(.toggleTheme)
         XCTAssertEqual(model.modal, .themeRestart)
         XCTAssertNil(model.toast)
         daemon.registry.kill(name: "agent")
@@ -551,7 +558,7 @@ final class AppModelChromeTests: XCTestCase {
             daemon.monitor.tick()
             return model.statusByName["shell"] == .idle
         }
-        model.apply(.toggleTheme)
+        model.perform(.toggleTheme)
         XCTAssertNil(model.modal, "shells recolor live via installColors")
         XCTAssertNil(model.toast)
         daemon.registry.kill(name: "shell")
@@ -626,13 +633,13 @@ final class AppModelChromeTests: XCTestCase {
 
         model.apply(.openLeader)
         model.apply(.leaderDescend(.ui))
-        model.apply(.cycleUsagePlacement)
+        model.perform(.cycleUsagePlacement)
         XCTAssertEqual(model.usagePlacement, .left)
         XCTAssertEqual(model.inputMode, .normal)
 
-        model.apply(.cycleUsagePlacement)
+        model.perform(.cycleUsagePlacement)
         XCTAssertEqual(model.usagePlacement, .center)
-        model.apply(.cycleUsagePlacement)
+        model.perform(.cycleUsagePlacement)
         XCTAssertEqual(model.usagePlacement, .right)
     }
 
@@ -649,7 +656,7 @@ final class AppModelChromeTests: XCTestCase {
             makeClient: { let c = IPCClient(path: daemon.path); try c.connect(); return c },
             store: store)
         await model.start()
-        model.apply(.cycleUsagePlacement)
+        model.perform(.cycleUsagePlacement)
         store.flush()
 
         let client2 = IPCClient(path: daemon.path); try client2.connect()

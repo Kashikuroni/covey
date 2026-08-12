@@ -313,7 +313,7 @@ struct IssueBrowserPane: View {
         guard let session = sessionForIssue(issue) else { return }
         Task { @MainActor in
             await model.select(session.name)
-            model.apply(.enterTerminal)
+            model.perform(.focusAgent)
         }
     }
 

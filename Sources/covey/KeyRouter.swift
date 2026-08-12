@@ -84,55 +84,26 @@ struct KeyInput: Equatable {
 }
 
 enum KeyAction: Equatable {
+    case command(AppCommand)
     case selectNext, selectPrev, selectFirst
-    case enterTerminal
     case exitTerminal
-    case newSession(prefillDir: Bool)
-    case killSelected
-    case startFilter
     case openLeader
     case leaderDescend(LeaderMenu)
     case leaderBack
     case closeOverlay
-    case renameSelected
     case enterSelectMode
     case selectByNumber(Int)
     case resizeSplit(Int)
-    case moveSelected(up: Bool)
     case scrollTerminalPage(up: Bool)
     case scrollTerminalToBottom
-    case showHelp
-    case renameProject
     case sendShiftTab
     case sendShiftEnter
-    case promoteSelected
-    case deleteBranchSelected
-    case cleanupBranches
-    case restartSelected
-    case restartAllPrompt
-    case returnToRoot
-    case toggleTheme
-    case splitVertical
-    case splitHorizontal
-    case splitClose
     case splitFocusToggle
     case cycleFocus(forward: Bool)
-    case openRecent
-    case createIssue
-    case openIssueList
-    case toggleSessionsPanel
-    case toggleInspectorPanel
-    case toggleTracePanel
-    case toggleFooterPanel
-    case toggleHeaderPanel
-    case cycleUsagePlacement
-    case toggleLimitsOverlay
     case limitsSelectNext
     case limitsSelectPrev
     case limitsEnableSelected
     case limitsDisableSelected
-    case addProject
-    case removeProject
 }
 
 /// Map a Cyrillic char to the Latin key at the same physical QWERTY position;
@@ -235,7 +206,7 @@ enum KeyRouter {
         switch input.special {
         case .down: return .selectNext
         case .up: return .selectPrev
-        case .enter: return .enterTerminal
+        case .enter: return .command(.focusAgent)
         case .tab: return input.isShift ? .sendShiftTab : nil
         case .pageUp: return .scrollTerminalPage(up: true)
         case .pageDown: return .scrollTerminalPage(up: false)
@@ -247,21 +218,21 @@ enum KeyRouter {
         case "k": return .selectPrev
         case "g": return .selectFirst
         case "G": return .scrollTerminalToBottom
-        case "o": return .enterTerminal
-        case "n": return .newSession(prefillDir: false)
-        case "N": return .newSession(prefillDir: true)
-        case "r": return .openRecent
-        case "d": return .killSelected
-        case "/": return .startFilter
+        case "o": return .command(.focusAgent)
+        case "n": return .command(.newSession)
+        case "N": return .command(.newSessionInCurrentProject)
+        case "r": return .command(.recentSessions)
+        case "d": return .command(.killSession)
+        case "/": return .command(.filterSessions)
         case "s": return .enterSelectMode
         case " ": return .openLeader
-        case "K": return .moveSelected(up: true)
-        case "J": return .moveSelected(up: false)
+        case "K": return .command(.moveSessionUp)
+        case "J": return .command(.moveSessionDown)
         case "[": return .resizeSplit(-3)
         case "]": return .resizeSplit(3)
         case "{": return .resizeSplit(-8)
         case "}": return .resizeSplit(8)
-        case "?": return .showHelp
+        case "?": return .command(.showKeyboardHelp)
         default:
             return nil
         }
@@ -276,29 +247,29 @@ enum KeyRouter {
         case (.root, "t"): return .leaderDescend(.terminal)
         case (.root, "u"): return .leaderDescend(.ui)
         case (.root, "p"): return .leaderDescend(.project)
-        case (.root, "l"): return .toggleLimitsOverlay
-        case (.ui, "s"): return .toggleSessionsPanel
-        case (.ui, "i"): return .toggleInspectorPanel
-        case (.ui, "a"): return .toggleTracePanel
-        case (.ui, "f"): return .toggleFooterPanel
-        case (.ui, "h"): return .toggleHeaderPanel
-        case (.ui, "t"): return .toggleTheme
-        case (.ui, "l"): return .cycleUsagePlacement
-        case (.terminal, "v"): return .splitVertical
-        case (.terminal, "h"): return .splitHorizontal
-        case (.terminal, "x"): return .splitClose
-        case (.git, "i"): return .createIssue
-        case (.git, "l"): return .openIssueList
-        case (.git, "p"): return .promoteSelected
-        case (.git, "b"): return .deleteBranchSelected
-        case (.git, "c"): return .cleanupBranches
-        case (.git, "r"): return .returnToRoot
-        case (.session, "u"): return .restartSelected
-        case (.session, "U"): return .restartAllPrompt
-        case (.session, "r"): return .renameSelected
-        case (.session, "R"): return .renameProject
-        case (.project, "a"): return .addProject
-        case (.project, "d"): return .removeProject
+        case (.root, "l"): return .command(.showLimitsDetail)
+        case (.ui, "s"): return .command(.toggleSessionsPanel)
+        case (.ui, "i"): return .command(.toggleInspector)
+        case (.ui, "a"): return .command(.toggleAgentTrace)
+        case (.ui, "f"): return .command(.toggleStatusBar)
+        case (.ui, "h"): return .command(.toggleTopBar)
+        case (.ui, "t"): return .command(.toggleTheme)
+        case (.ui, "l"): return .command(.cycleUsagePlacement)
+        case (.terminal, "v"): return .command(.splitTerminalVertically)
+        case (.terminal, "h"): return .command(.splitTerminalHorizontally)
+        case (.terminal, "x"): return .command(.closeTerminalSplit)
+        case (.git, "i"): return .command(.createGitHubIssue)
+        case (.git, "l"): return .command(.openIssueList)
+        case (.git, "p"): return .command(.promoteWorktree)
+        case (.git, "b"): return .command(.deleteSessionBranch)
+        case (.git, "c"): return .command(.cleanupMergedBranches)
+        case (.git, "r"): return .command(.returnToRepositoryRoot)
+        case (.session, "u"): return .command(.restartSession)
+        case (.session, "U"): return .command(.restartAllClaudeSessions)
+        case (.session, "r"): return .command(.renameSession)
+        case (.session, "R"): return .command(.renameProject)
+        case (.project, "a"): return .command(.addProject)
+        case (.project, "d"): return .command(.removeProject)
         // Every other command in the tree is a later slice; like the TUI,
         // an unbound key closes the leader.
         default: return .closeOverlay

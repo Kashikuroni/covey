@@ -87,7 +87,7 @@ struct CoveyApp: App {
                     .keyboardShortcut("n", modifiers: .command)
             }
             CommandGroup(after: .textEditing) {
-                Button("Filter Sessions") { model?.apply(.startFilter) }
+                Button("Filter Sessions") { model?.perform(.filterSessions) }
                     .keyboardShortcut("f", modifiers: .command)
             }
             CommandMenu("Session") {

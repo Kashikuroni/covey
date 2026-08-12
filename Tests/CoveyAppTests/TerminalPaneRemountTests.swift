@@ -92,7 +92,7 @@ final class TerminalPaneRemountTests: XCTestCase {
         )
         XCTAssertTrue(model.isTerminalViewLeaseCurrent(initialCoordinator.lease))
 
-        model.apply(.splitVertical)
+        model.perform(.splitTerminalVertically)
         _ = await eventually { model.companion(of: "agent") != nil }
         let openRestored = await eventually {
             guard let root = window.contentView else { return false }
@@ -116,7 +116,7 @@ final class TerminalPaneRemountTests: XCTestCase {
             XCTFail("restored agent view missing after split open")
         }
 
-        model.apply(.splitClose)
+        model.perform(.closeTerminalSplit)
         _ = await eventually { model.companion(of: "agent") == nil }
         let closeRestored = await eventually {
             guard let root = window.contentView else { return false }

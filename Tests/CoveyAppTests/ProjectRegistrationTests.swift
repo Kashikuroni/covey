@@ -178,18 +178,18 @@ final class ProjectRegistrationTests: XCTestCase {
         model.addProject("/repo/x")
         _ = await eventually { model.selectedProjectRoot == "/repo/x" }
 
-        model.apply(.createIssue)
+        model.perform(.createGitHubIssue)
         XCTAssertTrue(model.showInspector)
         XCTAssertEqual(model.focus, .inspector)
         XCTAssertEqual(model.inspectorMode, .issues,
                        "a project ghost can still open the issue composer")
 
-        model.apply(.newSession(prefillDir: true))
+        model.perform(.newSessionInCurrentProject)
         XCTAssertEqual(model.newSessionPrefillDir, "/repo/x")
         XCTAssertEqual(model.modal, .newSession)
 
         model.modal = nil
-        model.apply(.renameProject)
+        model.perform(.renameProject)
         XCTAssertEqual(model.modal, .renameProject("/repo/x"))
     }
 
@@ -199,7 +199,7 @@ final class ProjectRegistrationTests: XCTestCase {
         defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
         await model.start()
-        model.apply(.addProject)
+        model.perform(.addProject)
         // Opens the path-input sheet (AddProjectSheet), not a Finder panel;
         // registration happens on submit, so nothing is added by the action.
         XCTAssertEqual(model.modal, .addProject)
@@ -215,19 +215,21 @@ final class ProjectRegistrationTests: XCTestCase {
         await model.start()
         model.addProject("/repo/x")
         _ = await eventually { model.selectedProjectRoot == "/repo/x" }
-        model.apply(.removeProject)
+        model.perform(.removeProject)
         XCTAssertEqual(model.projects, [])
         XCTAssertNil(model.selectedProjectRoot)
     }
 
     @MainActor
-    func testRemoveProjectActionWithNothingSelectedToasts() async throws {
+    func testRemoveProjectActionWithNothingSelectedIsDisabled() async throws {
         let daemon = try TestDaemon()
         defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
         await model.start()
-        model.apply(.removeProject)            // no session, no ghost selected
-        XCTAssertEqual(model.toast, "no project")
+        model.perform(.removeProject)            // no session, no ghost selected
+        XCTAssertEqual(model.commandAvailability(.removeProject),
+                       .disabled(reason: "No project selected"))
+        XCTAssertNil(model.toast)
         XCTAssertEqual(model.projects, [])
     }
 
