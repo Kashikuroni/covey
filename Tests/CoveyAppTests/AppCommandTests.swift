@@ -77,29 +77,4 @@ final class AppCommandTests: XCTestCase {
         daemon.registry.kill(name: "agent")
     }
 
-    func testImplementedLeaderLeavesRouteThroughSemanticCommands() {
-        let leaves: [(LeaderMenu, Character, AppCommand)] = [
-            (.root, "l", .showLimitsDetail),
-            (.git, "i", .createGitHubIssue), (.git, "l", .openIssueList),
-            (.git, "p", .promoteWorktree), (.git, "b", .deleteSessionBranch),
-            (.git, "c", .cleanupMergedBranches), (.git, "r", .returnToRepositoryRoot),
-            (.session, "r", .renameSession), (.session, "R", .renameProject),
-            (.session, "u", .restartSession), (.session, "U", .restartAllClaudeSessions),
-            (.terminal, "v", .splitTerminalVertically),
-            (.terminal, "h", .splitTerminalHorizontally),
-            (.terminal, "x", .closeTerminalSplit),
-            (.ui, "s", .toggleSessionsPanel), (.ui, "i", .toggleInspector),
-            (.ui, "a", .toggleAgentTrace), (.ui, "f", .toggleStatusBar),
-            (.ui, "h", .toggleTopBar), (.ui, "t", .toggleTheme),
-            (.ui, "l", .cycleUsagePlacement),
-            (.project, "a", .addProject), (.project, "d", .removeProject),
-        ]
-
-        for (menu, key, command) in leaves {
-            let context = KeyRouter.Context(mode: .leader(menu), focus: .sessions,
-                                            vimMode: true, sheetOpen: false)
-            XCTAssertEqual(KeyRouter.route(KeyInput(char: key), context: context),
-                           .command(command), "\(menu) \(key)")
-        }
-    }
 }

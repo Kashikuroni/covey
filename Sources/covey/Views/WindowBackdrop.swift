@@ -6,7 +6,7 @@ import SwiftUI
 ///
 /// `.glassEffect` is the wrong tool here — it blurs content inside the app and
 /// is meant for floating elements over it (the help overlay, the limits card,
-/// which-key and the toast all use it). A window background needs
+/// the command palette and toast all use it). A window background needs
 /// `behindWindow` blending, which only `NSVisualEffectView` provides.
 struct WindowBackdrop: NSViewRepresentable {
     func makeNSView(context: Context) -> NSVisualEffectView {

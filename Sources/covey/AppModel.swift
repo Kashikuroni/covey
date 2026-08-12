@@ -90,7 +90,7 @@ public final class AppModel {
     /// snapshot around for the dimmed popover row.
     public private(set) var claudeUsageEnabled = true
     public private(set) var codexUsageEnabled = true
-    /// Which provider `leader l`'s popover highlights — j/k moves it, h/l
+    /// Which provider the limits detail popover highlights — j/k moves it, h/l
     /// disables/enables it. Resets to `.claude` every time the popover opens;
     /// not persisted, this is transient keyboard-navigation state.
     public enum LimitsProvider: Equatable { case claude, codex }
@@ -136,7 +136,7 @@ public final class AppModel {
     public private(set) var newSessionPrefillName: String?
     /// The issue browser's state machine (gh access injected here).
     public let issueBrowser: IssueBrowserModel
-    /// Bumped by space g i; IssuePane focuses the title field on change.
+    /// Bumped when Create GitHub Issue activates the composer title field.
     public private(set) var issueFocusTick = 0
     public private(set) var sbWidth = 360
     public private(set) var vimMode = false
@@ -398,7 +398,7 @@ public final class AppModel {
         catch { let msg = errorText(error); toast = msg; return msg }
     }
 
-    /// The `space a u` bulk restart: every session whose agent's first word is
+    /// The bulk restart command: every session whose agent's first word is
     /// claude. Returns per-session error lines (empty = all good).
     public func restartAllClaude() async -> [String] {
         var errors: [String] = []
@@ -416,7 +416,7 @@ public final class AppModel {
         if !plan.idle.isEmpty {
             modal = .themeRestart
         } else if !plan.busy.isEmpty {
-            toast = "\(plan.busy.count) agent(s) keep old theme — restart when idle (space s u)"
+            toast = "\(plan.busy.count) agent(s) keep old theme — restart when idle (Command-P › Restart All Claude Sessions)"
         }
     }
 
@@ -1031,12 +1031,6 @@ public final class AppModel {
         case .exitTerminal:
             setFocus(.sessions)
             sendTerminalCommand(.blur)
-        case .openLeader:
-            inputMode = .leader(.root)
-        case .leaderDescend(let menu):
-            inputMode = .leader(menu)
-        case .leaderBack:
-            inputMode = .leader(.root)
         case .closeOverlay:
             inputMode = .normal
         case .enterSelectMode:
@@ -1091,17 +1085,24 @@ public final class AppModel {
             guard let selected else { toast = "no session"; return }
             focusPane(selected)
         case .issues:
-            guard showInspector else { toast = "inspector hidden — space u i"; return }
+            guard showInspector else {
+                toast = "inspector hidden — Command-P › Toggle Inspector"
+                return
+            }
             sendTerminalCommand(.blur)
             setFocus(.inspector)
             activateIssues()
         case .terminalSplit:
             guard let selected, let comp = companion(of: selected) else {
-                toast = "no split — space t v / h"; return
+                toast = "no split — Command-P › Split Terminal Vertically or Horizontally"
+                return
             }
             focusPane(comp.name)
         case .trace:
-            guard showInspector else { toast = "inspector hidden — space u i"; return }
+            guard showInspector else {
+                toast = "inspector hidden — Command-P › Toggle Inspector"
+                return
+            }
             sendTerminalCommand(.blur)
             setFocus(.inspector)
             setInspectorMode(.trace)
@@ -1410,7 +1411,7 @@ public final class AppModel {
             sessions.append(session)
             sessions.sort { $0.created < $1.created }
             // A companion born for the selected session: show it and hand it
-            // the keyboard (space t v flow).
+            // the keyboard (terminal split command flow).
             if session.companionOf == selected {
                 Task {
                     await attachPane(session.name)

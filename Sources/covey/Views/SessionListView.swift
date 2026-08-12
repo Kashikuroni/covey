@@ -151,7 +151,7 @@ private struct SessionCardView: View {
             }
             Group {
                 if isReturnable(session) {
-                    Text("⧉ worktree removed — space g r returns to root")
+                    Text("⧉ worktree removed — Command-P › Return to Repository Root")
                         .font(mono(11)).foregroundStyle(tk.t4)
                 } else if session.git != nil || modelName != nil {
                     HStack(spacing: 6) {

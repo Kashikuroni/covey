@@ -10,9 +10,9 @@ func topOverlayAlignment(_ placement: UsagePlacement) -> Alignment {
     }
 }
 
-/// `leader l` detail popover: full Claude/Codex breakdown (plan + every
+/// Command palette detail popover: full Claude/Codex breakdown (plan + every
 /// window + reset countdown + a threshold-colored progress bar), glass-styled
-/// like `HelpOverlay`/`WhichKeyView`. Layout follows the "AI Limits Panel"
+/// like `HelpOverlay`. Layout follows the "AI Limits Panel"
 /// design mockup; colors come from `Tokens` instead of the mockup's own
 /// palette, and the per-provider switch is the native `Toggle` tinted with
 /// `tk.accent` rather than the mockup's hand-drawn pill.

@@ -35,7 +35,6 @@ final class KeyRouterTests: XCTestCase {
             (key("d"), .command(.killSession)),
             (key("/"), .command(.filterSessions)),
             (key("s"), .enterSelectMode),
-            (key(" "), .openLeader),
             (key("K"), .command(.moveSessionUp)),
             (key("J"), .command(.moveSessionDown)),
             (key("["), .resizeSplit(-3)), (key("]"), .resizeSplit(3)),
@@ -84,44 +83,6 @@ final class KeyRouterTests: XCTestCase {
         XCTAssertNil(KeyRouter.route(key("j"), context: ctx(vim: false)))
     }
 
-    func testLeaderTree() {
-        let root = ctx(mode: .leader(.root))
-        XCTAssertEqual(KeyRouter.route(key("g"), context: root), .leaderDescend(.git))
-        XCTAssertEqual(KeyRouter.route(key("s"), context: root), .leaderDescend(.session))
-        XCTAssertEqual(KeyRouter.route(special(.escape), context: root), .closeOverlay)
-        XCTAssertEqual(KeyRouter.route(key("x"), context: root), .closeOverlay, "unbound closes")
-        let session = ctx(mode: .leader(.session))
-        XCTAssertEqual(KeyRouter.route(key("r"), context: session), .command(.renameSession))
-        XCTAssertEqual(KeyRouter.route(special(.backspace), context: session), .leaderBack)
-        XCTAssertEqual(KeyRouter.route(key("v"), context: session), .closeOverlay, "later command closes")
-        let git = ctx(mode: .leader(.git))
-        XCTAssertEqual(KeyRouter.route(key("p"), context: git), .command(.promoteWorktree))
-        XCTAssertEqual(KeyRouter.route(key("b"), context: git), .command(.deleteSessionBranch))
-        XCTAssertEqual(KeyRouter.route(key("c"), context: git), .command(.cleanupMergedBranches))
-        XCTAssertEqual(KeyRouter.route(key("i"), context: git), .command(.createGitHubIssue))
-        XCTAssertEqual(KeyRouter.route(key("u"), context: session), .command(.restartSession))
-        XCTAssertEqual(KeyRouter.route(key("U"), context: session),
-                       .command(.restartAllClaudeSessions))
-        XCTAssertEqual(KeyRouter.route(key("t"), context: ctx(mode: .leader(.ui))),
-                       .command(.toggleTheme))
-        XCTAssertEqual(KeyRouter.route(key("a"), context: ctx(mode: .leader(.ui))),
-                       .command(.toggleAgentTrace))
-        XCTAssertEqual(KeyRouter.route(key("r"), context: git),
-                       .command(.returnToRepositoryRoot))
-    }
-
-    func testRootMenuShowsEveryDescendKey() {
-        // The which-key panel must list every root key that opens a submenu —
-        // a chord that routes but has no visible row is invisible to the user.
-        let root = ctx(mode: .leader(.root))
-        let rowKeys = Set(LeaderMenu.root.rows.map(\.key))
-        for ch in "abcdefghijklmnopqrstuvwxyz" {
-            guard case .leaderDescend = KeyRouter.route(key(ch), context: root) else { continue }
-            XCTAssertTrue(rowKeys.contains(String(ch)),
-                          "space \(ch) descends into a submenu but has no row in the panel")
-        }
-    }
-
     func testSelectSessionMode() {
         let sel = ctx(mode: .selectSession)
         XCTAssertEqual(KeyRouter.route(key("1"), context: sel), .selectByNumber(1))
@@ -142,31 +103,7 @@ final class KeyRouterTests: XCTestCase {
         XCTAssertNil(KeyRouter.route(key("е"), context: ctx()), "ЙЦУКЕН t")
     }
 
-    func testLeaderSessionRenameProject() {
-        let session = ctx(mode: .leader(.session))
-        XCTAssertEqual(KeyRouter.route(key("R"), context: session), .command(.renameProject))
-    }
-
-    func testProjectLeaderGroup() {
-        XCTAssertEqual(KeyRouter.route(key("p"), context: ctx(mode: .leader(.root))),
-                       .leaderDescend(.project))
-        let p = ctx(mode: .leader(.project))
-        XCTAssertEqual(KeyRouter.route(key("a"), context: p), .command(.addProject))
-        XCTAssertEqual(KeyRouter.route(key("d"), context: p), .command(.removeProject))
-        XCTAssertEqual(KeyRouter.route(key("z"), context: p), .closeOverlay,
-                       "unbound key closes the leader")
-    }
-
     func testTerminalSplitChords() {
-        XCTAssertEqual(KeyRouter.route(key("t"), context: ctx(mode: .leader(.root))),
-                       .leaderDescend(.terminal))
-        let leaderT = ctx(mode: .leader(.terminal))
-        XCTAssertEqual(KeyRouter.route(key("v"), context: leaderT),
-                       .command(.splitTerminalVertically))
-        XCTAssertEqual(KeyRouter.route(key("h"), context: leaderT),
-                       .command(.splitTerminalHorizontally))
-        XCTAssertEqual(KeyRouter.route(key("x"), context: leaderT),
-                       .command(.closeTerminalSplit))
         // ⌃\ toggles pane focus from both the list and the live terminal.
         XCTAssertEqual(KeyRouter.route(key("\\", ctrl: true), context: ctx()),
                        .splitFocusToggle)
@@ -195,38 +132,6 @@ final class KeyRouterTests: XCTestCase {
         XCTAssertEqual(KeyRouter.route(key("s"), context: ctx()), .enterSelectMode)
     }
 
-    func testUiLeaderGroup() {
-        XCTAssertEqual(KeyRouter.route(key("u"), context: ctx(mode: .leader(.root))),
-                       .leaderDescend(.ui))
-        let u = ctx(mode: .leader(.ui))
-        XCTAssertEqual(KeyRouter.route(key("s"), context: u), .command(.toggleSessionsPanel))
-        XCTAssertEqual(KeyRouter.route(key("i"), context: u), .command(.toggleInspector))
-        XCTAssertEqual(KeyRouter.route(key("f"), context: u), .command(.toggleStatusBar))
-        XCTAssertEqual(KeyRouter.route(key("h"), context: u), .command(.toggleTopBar))
-        XCTAssertEqual(KeyRouter.route(key("t"), context: u), .command(.toggleTheme))
-        XCTAssertEqual(KeyRouter.route(key("v"), context: u), .closeOverlay)
-        XCTAssertEqual(KeyRouter.route(key("l"), context: u), .command(.cycleUsagePlacement))
-        XCTAssertFalse(LeaderMenu.ui.rows.contains { $0.key == "v" })
-        XCTAssertTrue(LeaderMenu.ui.rows.contains {
-            $0.key == "l" && $0.label == "cycle limits / clock position" && $0.implemented
-        })
-        // The old app group is gone.
-        XCTAssertEqual(KeyRouter.route(key("a"), context: ctx(mode: .leader(.root))),
-                       .closeOverlay)
-    }
-
-    func testGitIssueChord() {
-        XCTAssertEqual(KeyRouter.route(key("i"), context: ctx(mode: .leader(.git))),
-                       .command(.createGitHubIssue))
-    }
-
-    func testGitLeaderRoutesIssueList() {
-        let ctx = KeyRouter.Context(mode: .leader(.git), focus: .sessions,
-                                    vimMode: true, sheetOpen: false)
-        XCTAssertEqual(KeyRouter.route(KeyInput(char: "l"), context: ctx),
-                       .command(.openIssueList))
-    }
-
     func testRecentModalKey() {
         XCTAssertEqual(KeyRouter.route(key("r"), context: ctx()), .command(.recentSessions))
         // In the terminal the key belongs to the agent.
@@ -246,14 +151,9 @@ final class KeyRouterTests: XCTestCase {
                        .selectByNumber(2))
     }
 
-    func testLimitsOverlayOpensFromRootAndClosesOnAnyKey() {
-        XCTAssertEqual(KeyRouter.route(key("l"), context: ctx(mode: .leader(.root))),
-                       .command(.showLimitsDetail))
-        XCTAssertTrue(LeaderMenu.root.rows.contains { $0.key == "l" && $0.implemented },
-                      "space l must be advertised in the which-key root panel")
-        let limits = ctx(mode: .limits)
-        XCTAssertEqual(KeyRouter.route(key("x"), context: limits), .closeOverlay)
-        XCTAssertEqual(KeyRouter.route(special(.escape), context: limits), .closeOverlay)
+    func testSpaceIsNoLongerAnAppBinding() {
+        XCTAssertNil(KeyRouter.route(key(" "), context: ctx()))
+        XCTAssertNil(KeyRouter.route(key(" "), context: ctx(focus: .terminal)))
     }
 
     func testLimitsModeNavigationAndToggleKeys() {

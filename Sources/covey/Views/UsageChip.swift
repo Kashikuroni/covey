@@ -119,7 +119,7 @@ func headerDateTime(_ date: Date, locale: Locale = .current) -> String {
 }
 
 /// Compact top-bar group: Claude %, Codex %, date/time, hairline-divided.
-/// Full per-window detail lives in `LimitsOverlay` (leader l) now.
+/// Full per-window detail opens through `Show Limits Detail` in the command palette.
 struct UsageChip: View {
     let usage: Usage?
     let usageError: String?

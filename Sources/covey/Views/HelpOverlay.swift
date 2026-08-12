@@ -27,12 +27,6 @@ let helpGroups: [(String, [(String, String)])] = [
          "nav · view · edit/close/delete · session new/jump"),
         ("G / end", "terminal to bottom"),
     ]),
-    ("leader (space)", [
-        ("g", "git: issue · list issues · promote · delete branch · cleanup · return"),
-        ("s", "session: rename · restart · restart all · verify (later) · nvim (later)"),
-        ("t", "terminal: split v · split h · close"),
-        ("u", "ui: sessions · inspector · footer · header · theme"),
-    ]),
 ]
 
 /// Keyboard reference (port of amux-tui modal_help, keys tab only).

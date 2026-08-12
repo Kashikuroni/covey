@@ -15,10 +15,14 @@ final class HelpOverlayTests: XCTestCase {
         XCTAssertTrue(pairs.contains { $0.0 == "⌘1-5" && $0.1.contains("issues") })
     }
 
-    func testHelpAdvertisesPaletteAndKeepsLeaderDuringCompatibilityPhase() {
+    func testHelpAdvertisesPaletteAndNoLeaderAfterMigration() {
         let pairs = helpGroups.flatMap(\.1)
 
         XCTAssertTrue(pairs.contains { $0.0 == "⌘P" && $0.1.contains("command") })
-        XCTAssertTrue(helpGroups.contains { $0.0 == "leader (space)" })
+        XCTAssertFalse(helpGroups.contains { $0.0.localizedCaseInsensitiveContains("leader") })
+        XCTAssertFalse(pairs.contains {
+            $0.0.localizedCaseInsensitiveContains("space") &&
+                $0.1.localizedCaseInsensitiveContains("menu")
+        })
     }
 }

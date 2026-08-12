@@ -173,14 +173,6 @@ final class AppModelChromeTests: XCTestCase {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
         await model.start()
-        model.apply(.openLeader)
-        XCTAssertEqual(model.inputMode, .leader(.root))
-        model.apply(.leaderDescend(.session))
-        XCTAssertEqual(model.inputMode, .leader(.session))
-        model.apply(.leaderBack)
-        XCTAssertEqual(model.inputMode, .leader(.root))
-        model.apply(.closeOverlay)
-        XCTAssertEqual(model.inputMode, .normal)
         model.apply(.enterSelectMode)
         XCTAssertEqual(model.inputMode, .selectSession)
         model.apply(.closeOverlay)
@@ -524,7 +516,7 @@ final class AppModelChromeTests: XCTestCase {
         model.perform(.toggleTheme)
         XCTAssertNil(model.modal)
         XCTAssertEqual(model.toast,
-                       "1 agent(s) keep old theme — restart when idle (space s u)")
+                       "1 agent(s) keep old theme — restart when idle (Command-P › Restart All Claude Sessions)")
         daemon.registry.kill(name: "agent")
     }
 
@@ -609,9 +601,10 @@ final class AppModelChromeTests: XCTestCase {
         model.focusZone(.agent)
         XCTAssertEqual(model.toast, "no session")
         model.focusZone(.issues)
-        XCTAssertEqual(model.toast, "inspector hidden — space u i")
+        XCTAssertEqual(model.toast, "inspector hidden — Command-P › Toggle Inspector")
         model.focusZone(.terminalSplit)
-        XCTAssertEqual(model.toast, "no split — space t v / h")
+        XCTAssertEqual(model.toast,
+                       "no split — Command-P › Split Terminal Vertically or Horizontally")
         XCTAssertNotEqual(model.focus, .inspector)   // guards never move focus
     }
 
@@ -625,14 +618,12 @@ final class AppModelChromeTests: XCTestCase {
     }
 
     @MainActor
-    func testUsagePlacementCyclesAndClosesLeader() async throws {
+    func testUsagePlacementCycles() async throws {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
         await model.start()
         XCTAssertEqual(model.usagePlacement, .right)
 
-        model.apply(.openLeader)
-        model.apply(.leaderDescend(.ui))
         model.perform(.cycleUsagePlacement)
         XCTAssertEqual(model.usagePlacement, .left)
         XCTAssertEqual(model.inputMode, .normal)

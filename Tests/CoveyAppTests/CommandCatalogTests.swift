@@ -29,4 +29,17 @@ final class CommandCatalogTests: XCTestCase {
         }
         XCTAssertEqual(keys.count, Set(keys).count)
     }
+
+    func testFormerLeaderCommandsRemainInCatalog() {
+        let expected: Set<AppCommand> = [
+            .showLimitsDetail, .createGitHubIssue, .openIssueList, .promoteWorktree,
+            .deleteSessionBranch, .cleanupMergedBranches, .returnToRepositoryRoot,
+            .renameSession, .renameProject, .restartSession, .restartAllClaudeSessions,
+            .splitTerminalVertically, .splitTerminalHorizontally, .closeTerminalSplit,
+            .toggleSessionsPanel, .toggleInspector, .toggleAgentTrace, .toggleStatusBar,
+            .toggleTopBar, .toggleTheme, .cycleUsagePlacement, .addProject, .removeProject,
+        ]
+
+        XCTAssertTrue(expected.isSubset(of: Set(CommandCatalog.all.map(\.id))))
+    }
 }

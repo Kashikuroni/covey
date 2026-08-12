@@ -127,7 +127,7 @@ struct TerminalRepresentable: NSViewRepresentable {
         // daemon to replay the session state (preamble + backfill) into it.
         model.paneViewMounted(name)
         // A freshly mounted pane that already owns the pane focus grabs the
-        // keyboard (companion created via space t v).
+        // keyboard (companion created via the terminal split command).
         if model.focusedPane == name, model.focus == .terminal {
             DispatchQueue.main.async { [weak view] in
                 guard let view else { return }

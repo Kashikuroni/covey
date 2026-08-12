@@ -101,10 +101,9 @@ struct StatusBar: View {
                     return withPalette([("enter", "save"), ("esc", "cancel")])
                 }
             }
-            return withPalette([("space", "menu"), ("⌃h/⌃l", "zones")])
+            return withPalette([("⌃h/⌃l", "zones")])
         }
         switch model.inputMode {
-        case .leader: return [("esc", "close"), ("⌫", "back")]
         case .selectSession: return [("1-9", "jump"), ("esc", "cancel")]
         case .help: return [("any key", "closes")]
         case .limits: return [("any key", "closes")]
@@ -114,7 +113,7 @@ struct StatusBar: View {
             }
             return withPalette([
                 ("n", "new"), ("r", "recent"), ("enter", "attach"), ("d", "kill"),
-                ("space", "menu"), ("/", "filter"), ("?", "help"),
+                ("/", "filter"), ("?", "help"),
             ])
         }
     }

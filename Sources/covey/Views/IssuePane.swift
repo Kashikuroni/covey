@@ -36,7 +36,7 @@ struct IssuePane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if root == nil {
-                Text("no project — space p a adds one")
+                Text("no project — Command-P › Add Project")
                     .font(.caption).foregroundStyle(tk.t4)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {

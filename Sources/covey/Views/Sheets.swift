@@ -344,7 +344,7 @@ struct ThemeRestartSheet: View {
                                     statuses: model.statusByName)
         VStack(alignment: .leading, spacing: 12) {
             Text("Apply theme to agents?").font(.headline)
-            Text("Idle agents restart and resume their conversation; busy ones keep the old theme until restarted by hand (space s u).")
+                Text("Idle agents restart and resume their conversation; busy ones keep the old theme until restarted by hand (Command-P › Restart All Claude Sessions).")
                 .font(.caption).foregroundStyle(.secondary)
             if !plan.idle.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
