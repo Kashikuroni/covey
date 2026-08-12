@@ -223,4 +223,51 @@ final class TerminalPaneRemountTests: XCTestCase {
         daemon.registry.kill(name: "agent-a")
         daemon.registry.kill(name: "agent-b")
     }
+
+    func testTerminalContentKeepsFourPointInsetsOnPanelEdges() async throws {
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+
+        _ = try daemon.registry.create(
+            dir: "/usr",
+            agent: "cat",
+            argv: ["/bin/cat"],
+            name: "agent"
+        )
+        _ = await eventually {
+            model.sessions.contains { $0.name == "agent" }
+        }
+        await model.select("agent")
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let root = NSHostingView(rootView: TerminalPaneView(model: model))
+        window.contentView = root
+
+        let mounted = await eventually {
+            self.terminalViews(in: root).count == 1
+        }
+        XCTAssertTrue(mounted)
+        root.layoutSubtreeIfNeeded()
+
+        let terminal = try XCTUnwrap(terminalViews(in: root).first)
+        let frame = terminal.convert(terminal.bounds, to: root)
+        let leadingGap = frame.minX - root.bounds.minX
+        let trailingGap = root.bounds.maxX - frame.maxX
+        let bottomGap = root.isFlipped
+            ? root.bounds.maxY - frame.maxY
+            : frame.minY - root.bounds.minY
+
+        XCTAssertEqual(leadingGap, 4, accuracy: 0.5)
+        XCTAssertEqual(trailingGap, 4, accuracy: 0.5)
+        XCTAssertEqual(bottomGap, 4, accuracy: 0.5)
+
+        daemon.registry.kill(name: "agent")
+    }
 }
