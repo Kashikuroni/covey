@@ -263,10 +263,14 @@ final class TerminalPaneRemountTests: XCTestCase {
         let bottomGap = root.isFlipped
             ? root.bounds.maxY - frame.maxY
             : frame.minY - root.bounds.minY
+        let topGap = root.isFlipped
+            ? frame.minY - root.bounds.minY
+            : root.bounds.maxY - frame.maxY
 
         XCTAssertEqual(leadingGap, 4, accuracy: 0.5)
         XCTAssertEqual(trailingGap, 4, accuracy: 0.5)
         XCTAssertEqual(bottomGap, 4, accuracy: 0.5)
+        XCTAssertEqual(topGap, 23, accuracy: 0.5)
 
         daemon.registry.kill(name: "agent")
     }
