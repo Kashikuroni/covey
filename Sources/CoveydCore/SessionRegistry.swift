@@ -24,6 +24,7 @@ public final class SessionRegistry {
     public var onRenamed: ((String, String) -> Void)?
     private var entries: [String: (session: Session, process: any SessionRuntime,
                                    screen: ScreenModel, argv: [String],
+                                   env: [String: String]?, providerId: String?,
                                    size: (cols: UInt16, rows: UInt16))] = [:]
     private var pendingRestart: [String: String] = [:]   // name -> respawn dir
     private let lock = NSLock()
@@ -60,19 +61,33 @@ public final class SessionRegistry {
     private func persistNow() {
         guard let onPersist else { return }
         lock.lock()
-        // Companions are excluded: a dead shell is not worth resurfacing
-        // as lost after a daemon restart.
-        let metas = entries.values.filter { $0.session.companionOf == nil }.map {
+        let metas = Self.metas(of: entries) + lostMetas
+        lock.unlock()
+        onPersist(metas)
+    }
+
+    /// Same snapshot `persistNow` writes — exposed for tests.
+    func snapshotMetasForTesting() -> [SessionMeta] {
+        lock.lock(); defer { lock.unlock() }
+        return Self.metas(of: entries)
+    }
+
+    /// Live (non-companion) metas built from `entries`. Companions are excluded:
+    /// a dead shell is not worth resurfacing as lost after a daemon restart.
+    private static func metas(of entries: [String: (session: Session, process: any SessionRuntime,
+                              screen: ScreenModel, argv: [String], env: [String: String]?,
+                              providerId: String?, size: (cols: UInt16, rows: UInt16))])
+        -> [SessionMeta] {
+        entries.values.filter { $0.session.companionOf == nil }.map {
             SessionMeta(name: $0.session.name, dir: $0.session.dir,
                         agent: $0.session.agent, argv: $0.argv,
                         created: $0.session.created,
                         worktreeRepo: $0.session.worktreeRepo,
-                        resumeCmd: $0.session.resumeCmd)
-        } + lostMetas
-        lock.unlock()
-        onPersist(metas)
+                        resumeCmd: $0.session.resumeCmd,
+                        providerId: $0.providerId)
+        }
     }
-    
+
     public func create (
         dir: String,
         agent: String,
@@ -80,7 +95,9 @@ public final class SessionRegistry {
         name: String? = nil,
         worktreeRepo: String? = nil,
         resumeCmd: String? = nil,
-        companionOf: String? = nil
+        companionOf: String? = nil,
+        env: [String: String]? = nil,
+        providerId: String? = nil
     ) throws -> Session {
         lock.lock()
         var autoNumber: Int?
@@ -113,13 +130,13 @@ public final class SessionRegistry {
         let screen = ScreenModel(cols: 80, rows: 24)
         proc.setOutputHandler { bytes, _ in screen.feed(bytes) }
         do {
-            try proc.spawn(argv: argv, env: nil, cwd: dir, cols: 80, rows: 24)
+            try proc.spawn(argv: argv, env: env, cwd: dir, cols: 80, rows: 24)
         } catch {
             lock.unlock()
             throw error
         }
         if let autoNumber { counter = autoNumber }
-        entries[id] = (session, proc, screen, argv, (80, 24))
+        entries[id] = (session, proc, screen, argv, env, providerId, (80, 24))
         lock.unlock()
         persistNow()
         onSessionAdded?(session)
@@ -370,7 +387,7 @@ public final class SessionRegistry {
         let screen = old.screen
         proc.setOutputHandler { bytes, _ in screen.feed(bytes) }
         do {
-            try proc.spawn(argv: argv, env: nil, cwd: dir, cols: old.size.cols, rows: old.size.rows)
+            try proc.spawn(argv: argv, env: old.env, cwd: dir, cols: old.size.cols, rows: old.size.rows)
         } catch {
             return nil
         }
@@ -378,7 +395,7 @@ public final class SessionRegistry {
         session.cwd = dir
         session.git = nil        // GitMonitor re-reads for the (possibly new) dir
         lock.lock()
-        entries[id] = (session, proc, screen, argv, old.size)
+        entries[id] = (session, proc, screen, argv, old.env, old.providerId, old.size)
         lock.unlock()
         return session
     }

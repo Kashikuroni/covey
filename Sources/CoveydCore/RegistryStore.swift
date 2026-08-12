@@ -10,12 +10,18 @@ public struct SessionMeta: Codable, Equatable {
     public var created: Int64
     public var worktreeRepo: String?
     public var resumeCmd: String?
+    /// Covey provider id this session was created under (nil = anthropic/legacy).
+    /// Persisted so a relaunch re-resolves the same provider; the secret is
+    /// never persisted — re-read from Keychain by the GUI on relaunch.
+    public var providerId: String?
 
     public init(name: String, dir: String, agent: String, argv: [String], created: Int64,
-                worktreeRepo: String? = nil, resumeCmd: String? = nil) {
+                worktreeRepo: String? = nil, resumeCmd: String? = nil,
+                providerId: String? = nil) {
         self.name = name; self.dir = dir; self.agent = agent
         self.argv = argv; self.created = created
         self.worktreeRepo = worktreeRepo; self.resumeCmd = resumeCmd
+        self.providerId = providerId
     }
 }
 
