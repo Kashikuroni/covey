@@ -4,10 +4,19 @@ import Foundation
 public struct CoveyConfig: Codable, Equatable {
     public var defaultAgent: String?
     public var agentPresets: [String]?
+    /// User-defined / overridden Claude Code provider profiles, merged over the
+    /// built-ins (`anthropic`, `glm`) by id. See `ProviderRegistry`.
+    public var providers: [ProviderProfile]?
+    /// Provider id hoisted to the top of the picker (anthropic is always first
+    /// regardless; this controls the second slot).
+    public var defaultProvider: String?
 
-    public init(defaultAgent: String? = nil, agentPresets: [String]? = nil) {
+    public init(defaultAgent: String? = nil, agentPresets: [String]? = nil,
+                providers: [ProviderProfile]? = nil, defaultProvider: String? = nil) {
         self.defaultAgent = defaultAgent
         self.agentPresets = agentPresets
+        self.providers = providers
+        self.defaultProvider = defaultProvider
     }
 
     public static func load(path: String = defaultPath) -> CoveyConfig {
