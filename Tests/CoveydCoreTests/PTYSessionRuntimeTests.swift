@@ -116,4 +116,27 @@ final class PTYSessionRuntimeTests: XCTestCase {
         wait(for: [exitExp], timeout: 5)
     }
 
+    func testEnvIsAppliedToChild() throws {
+        // The child must inherit the keys Covey injects (provider redirection).
+        let p = PTYSessionRuntime()
+        let exp = expectOutput(p, contains: "MARKER=zzz")
+        try p.spawn(argv: ["/bin/sh", "-c", "echo MARKER=$MARKER"],
+                    env: ["MARKER": "zzz",
+                          "PATH": ProcessInfo.processInfo.environment["PATH"] ?? ""],
+                    cols: 80, rows: 24)
+        wait(for: [exp], timeout: 5)
+    }
+
+    func testStaleAnthropicKeysAreUnsetWhenEnvNil() throws {
+        // A stale ANTHROPIC_* value in the daemon's inherited env must not leak
+        // into a child spawned with no provider env (provider = anthropic).
+        setenv("ANTHROPIC_BASE_URL", "https://stale.example", 1)
+        defer { unsetenv("ANTHROPIC_BASE_URL") }
+        let p = PTYSessionRuntime()
+        let exp = expectOutput(p, contains: "BASE=<unset>")
+        try p.spawn(argv: ["/bin/sh", "-c", "echo BASE=${ANTHROPIC_BASE_URL:-<unset>}"],
+                    env: nil, cols: 80, rows: 24)
+        wait(for: [exp], timeout: 5)
+    }
+
 }
