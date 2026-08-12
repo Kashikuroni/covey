@@ -2,12 +2,15 @@ import SwiftUI
 
 enum PanelLabelRole {
     case zone(active: Bool)
+    case project
 }
 
 func panelLabelColor(_ role: PanelLabelRole, tk: Tokens) -> Color {
     switch role {
     case .zone(let active):
         return active ? tk.accent : tk.t1
+    case .project:
+        return tk.t1
     }
 }
 

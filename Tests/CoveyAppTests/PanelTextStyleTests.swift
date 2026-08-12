@@ -14,4 +14,10 @@ final class PanelTextStyleTests: XCTestCase {
 
         XCTAssertEqual(panelLabelColor(.zone(active: true), tk: tk), tk.accent)
     }
+
+    func testProjectNameUsesPrimaryTextColor() {
+        let tk = Tokens.light
+
+        XCTAssertEqual(panelLabelColor(.project, tk: tk), tk.t1)
+    }
 }

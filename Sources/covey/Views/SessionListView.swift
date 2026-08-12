@@ -88,7 +88,7 @@ struct SessionListView: View {
             Text(model.displayName(forDir: group.dir).uppercased())
                 .font(.system(size: 11, weight: .semibold))
                 .kerning(0.8)
-                .foregroundStyle(tk.t4)
+                .foregroundStyle(panelLabelColor(.project, tk: tk))
             Spacer()
             Text("\(running)/\(rows.count)").font(mono(11)).foregroundStyle(tk.t4)
         }
