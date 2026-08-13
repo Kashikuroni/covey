@@ -1,6 +1,17 @@
 import SwiftUI
 import CoveyKit
 
+func providerKeyLabel(profile: ProviderProfile, status: ProviderKeyStatus) -> String {
+    switch status {
+    case .checking:
+        return "Checking…"
+    case .set:
+        return "\(profile.label) API key set ✓"
+    case .missing:
+        return "Set \(profile.label) API key…"
+    }
+}
+
 struct SettingsSheet: View {
     let model: AppModel
     @State private var draft: SettingsDraft
@@ -16,9 +27,8 @@ struct SettingsSheet: View {
     }
 
     private func providerKeyRow(_ profile: ProviderProfile) -> some View {
-        let label = model.providerKeyIsSet(profile)
-            ? "\(profile.label) API key set ✓"
-            : "Set \(profile.label) API key…"
+        let status = model.providerKeyStatus(profile)
+        let label = providerKeyLabel(profile: profile, status: status)
         return Button {
             draft.selectedRow = .providerKey
             keyProfile = profile
@@ -34,6 +44,7 @@ struct SettingsSheet: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(status == .checking)
         .focusable(false)
         .settingsRow()
     }
@@ -86,6 +97,9 @@ struct SettingsSheet: View {
         .focusEffectDisabled()
         .focused($keyboardFocused)
         .onAppear { keyboardFocused = true }
+        .task {
+            await model.refreshProviderKeyStatuses(credentialProfiles)
+        }
         .onKeyPress(phases: .down) { press in handle(press) }
         .sheet(isPresented: $showingKeySheet) {
             ProviderKeySheet(profile: keyProfile, model: model,
@@ -244,6 +258,7 @@ private struct ProviderKeySheet: View {
     @Binding var isPresented: Bool
 
     @State private var key: String = ""
+    @State private var saving = false
     @FocusState private var focused: Bool
     private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
 
@@ -254,18 +269,30 @@ private struct ProviderKeySheet: View {
                 .textFieldStyle(.roundedBorder)
                 .focused($focused)
             HStack(spacing: 8) {
-                if model.providerKeyIsSet(profile) {
-                    Button("Clear") { model.setProviderKey(profile, ""); isPresented = false }
-                        .buttonStyle(AyuButton(tk: tk, prominent: false))
+                if model.providerKeyStatus(profile) == .set {
+                    Button("Clear") {
+                        saving = true
+                        Task {
+                            await model.setProviderKey(profile, "")
+                            isPresented = false
+                        }
+                    }
+                    .buttonStyle(AyuButton(tk: tk, prominent: false))
+                    .disabled(saving)
                 }
                 Spacer()
                 Button("Cancel") { isPresented = false }
                     .buttonStyle(AyuButton(tk: tk, prominent: false))
+                    .disabled(saving)
                 Button("Save") {
-                    model.setProviderKey(profile, key); isPresented = false
+                    saving = true
+                    Task {
+                        await model.setProviderKey(profile, key)
+                        isPresented = false
+                    }
                 }
                 .buttonStyle(AyuButton(tk: tk, prominent: true))
-                .disabled(key.isEmpty)
+                .disabled(key.isEmpty || saving)
             }
         }
         .padding(20)
