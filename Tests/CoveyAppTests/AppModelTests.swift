@@ -26,6 +26,25 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(err)
     }
 
+    func testDetectsSettingsJsonAnthropicConflict() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-settings-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try Data(#"{"env":{"ANTHROPIC_BASE_URL":"https://api.z.ai/api/anthropic","other":"x"}}"#.utf8)
+            .write(to: tmp)
+        let conflicts = AppModel.anthropicManagedKeys(inSettingsAt: tmp.path)
+        XCTAssertEqual(conflicts, ["ANTHROPIC_BASE_URL"])
+    }
+
+    func testNoConflictWhenEnvAbsentOrFileMissing() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-settings-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try Data(#"{"theme":"dark"}"#.utf8).write(to: tmp)
+        XCTAssertTrue(AppModel.anthropicManagedKeys(inSettingsAt: tmp.path).isEmpty)
+        XCTAssertTrue(AppModel.anthropicManagedKeys(inSettingsAt: "/nonexistent/settings.json").isEmpty)
+    }
+
     @MainActor
     func testStartListsExistingSessionsAndConnects() async throws {
         let daemon = try TestDaemon()

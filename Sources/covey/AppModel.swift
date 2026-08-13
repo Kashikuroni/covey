@@ -713,6 +713,9 @@ public final class AppModel {
     var activeProviderProfile: ProviderProfile {
         ProviderRegistry.profile(id: providerId) ?? .anthropic
     }
+    /// True when traffic goes to Anthropic (the Claude usage chip is only
+    /// meaningful then — a GLM/Kimi session consumes no claude.ai quota).
+    var providerIsAnthropic: Bool { providerId == "anthropic" }
 
     /// Stores (or, for an empty key, clears) a provider API key in the Keychain.
     func setProviderKey(_ profile: ProviderProfile, _ key: String) {
@@ -741,6 +744,26 @@ public final class AppModel {
         } catch {
             return (nil, "Set your \(profile.label) API key in Settings first.")
         }
+    }
+
+    /// The `ANTHROPIC_*` env keys Covey may set for a provider. Claude Code's
+    /// settings.json `env` block overrides the process environment, so any of
+    /// these present in `~/.claude/settings.json` would silently override
+    /// Covey's provider choice.
+    static let managedKeys = [
+        "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    ]
+
+    /// Which managed `ANTHROPIC_*` keys a Claude Code settings file's `env`
+    /// block pins (and would therefore override Covey). Empty when there is no
+    /// conflict, no `env` block, or no file.
+    nonisolated static func anthropicManagedKeys(inSettingsAt path: String) -> [String] {
+        guard let data = FileManager.default.contents(atPath: path),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let env = root["env"] as? [String: Any] else { return [] }
+        return managedKeys.filter { env[$0] != nil }
     }
 
     func openCommandPalette() {
@@ -935,6 +958,7 @@ public final class AppModel {
         }
         let themeChanged = values.theme != old.theme
         let codexChanged = values.codexUsageEnabled != old.codexUsageEnabled
+        let providerChanged = values.providerId != old.providerId
         themeRaw = values.theme.rawValue
         providerId = values.providerId
         vimMode = values.vimMode
@@ -946,6 +970,18 @@ public final class AppModel {
         codexUsageEnabled = values.codexUsageEnabled
         persist()
         if codexChanged { synchronizeCodexUsageServer() }
+        // Claude Code's ~/.claude/settings.json env block overrides the process
+        // environment, so keys pinned there win over Covey's injection. Warn
+        // (don't auto-edit) when switching to a non-Anthropic provider that the
+        // settings file would override.
+        if providerChanged, providerId != "anthropic" {
+            let settingsPath = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".claude/settings.json").path
+            let conflicts = Self.anthropicManagedKeys(inSettingsAt: settingsPath)
+            if !conflicts.isEmpty {
+                toast = "~/.claude/settings.json sets \(conflicts.joined(separator: ", ")); it overrides Covey. Remove those keys or they'll win."
+            }
+        }
         offerThemeRestartAfterModalDismiss = themeChanged
         modal = nil
     }
