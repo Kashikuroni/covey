@@ -53,6 +53,32 @@ final class PersistedStateTests: XCTestCase {
         XCTAssertFalse(object.keys.contains("inspectorSplit"))
     }
 
+    func testProviderRoundTrips() throws {
+        var s = PersistedState()
+        s.provider = "glm"
+        s.sessions["s-1"] = PersistedSession(dir: "/tmp", agent: "claude", providerId: "glm")
+        let back = try JSONDecoder().decode(PersistedState.self,
+                                            from: JSONEncoder().encode(s))
+        XCTAssertEqual(back.provider, "glm")
+        XCTAssertEqual(back.sessions["s-1"]?.providerId, "glm")
+    }
+
+    func testRecentProviderIdRoundTrips() throws {
+        var s = PersistedState()
+        s.recents = [RecentSession(name: "r", dir: "/tmp", agent: "claude", providerId: "glm")]
+        let back = try JSONDecoder().decode(PersistedState.self,
+                                            from: JSONEncoder().encode(s))
+        XCTAssertEqual(back.recents.first?.providerId, "glm")
+    }
+
+    func testLegacyPayloadDecodesWithoutProvider() throws {
+        let json = "{\"recents\":[],\"order\":[],\"projectOrder\":[],\"projectNames\":{},\"drafts\":{},\"sessions\":{\"s\":{\"dir\":\"/tmp\",\"agent\":\"claude\"}}}"
+        let s = try JSONDecoder().decode(PersistedState.self, from: json.data(using: .utf8)!)
+        XCTAssertNil(s.provider)
+        XCTAssertNil(s.sessions["s"]?.providerId)
+        XCTAssertNil(s.recents.first?.providerId)
+    }
+
     func testPushRecentDedupesNewestFirst() {
         var r: [RecentSession] = []
         pushRecent(&r, RecentSession(name: "a", dir: "/w", agent: "sh"))

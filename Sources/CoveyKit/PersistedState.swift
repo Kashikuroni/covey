@@ -6,8 +6,22 @@ public struct PersistedSession: Codable, Equatable {
     public var dir: String
     public var agent: String
     public var resumeCmd: String?
-    public init(dir: String, agent: String, resumeCmd: String? = nil) {
+    /// Covey provider this session was created under; nil = anthropic/legacy.
+    public var providerId: String?
+    public init(dir: String, agent: String, resumeCmd: String? = nil,
+                providerId: String? = nil) {
         self.dir = dir; self.agent = agent; self.resumeCmd = resumeCmd
+        self.providerId = providerId
+    }
+    // Custom decode so payloads persisted before `providerId` existed keep
+    // decoding (synthesized Decodable ignores property defaults for missing keys).
+    enum CodingKeys: String, CodingKey { case dir, agent, resumeCmd, providerId }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        dir = try c.decode(String.self, forKey: .dir)
+        agent = try c.decode(String.self, forKey: .agent)
+        resumeCmd = try c.decodeIfPresent(String.self, forKey: .resumeCmd)
+        providerId = try c.decodeIfPresent(String.self, forKey: .providerId)
     }
 }
 
@@ -21,12 +35,14 @@ public struct RecentSession: Codable, Equatable {
     /// before the field existed keep decoding.
     public var stoppedAt: Int64?
     public var branch: String?
+    /// Covey provider this session was created under; nil = anthropic/legacy.
+    public var providerId: String?
     public init(name: String, dir: String, agent: String,
                 resumeCmd: String? = nil, stoppedAt: Int64? = nil,
-                branch: String? = nil) {
+                branch: String? = nil, providerId: String? = nil) {
         self.name = name; self.dir = dir; self.agent = agent
         self.resumeCmd = resumeCmd; self.stoppedAt = stoppedAt
-        self.branch = branch
+        self.branch = branch; self.providerId = providerId
     }
 }
 
@@ -118,6 +134,8 @@ public struct PersistedCodexUsage: Codable, Equatable {
 public struct PersistedState: Codable, Equatable {
     // wired this slice
     public var theme: String?
+    /// Active Claude Code provider id ("anthropic" | "glm" | …); nil = anthropic.
+    public var provider: String?
     public var splitPct: Int?
     public var recents: [RecentSession]
     // schema-only (round-trip, no UI this slice)
@@ -163,7 +181,8 @@ public struct PersistedState: Codable, Equatable {
     public var codexPlan: String?
 
     public init(
-        theme: String? = nil, splitPct: Int? = nil, recents: [RecentSession] = [],
+        theme: String? = nil, provider: String? = nil, splitPct: Int? = nil,
+        recents: [RecentSession] = [],
         order: [String] = [], projectOrder: [String] = [],
         projectNames: [String: String] = [:], drafts: [String: String] = [:],
         sessions: [String: PersistedSession] = [:],
@@ -185,7 +204,8 @@ public struct PersistedState: Codable, Equatable {
         codexUsage: PersistedCodexUsage? = nil,
         codexPlan: String? = nil
     ) {
-        self.theme = theme; self.splitPct = splitPct; self.recents = recents
+        self.theme = theme; self.provider = provider
+        self.splitPct = splitPct; self.recents = recents
         self.order = order; self.projectOrder = projectOrder
         self.projectNames = projectNames
         self.drafts = drafts; self.sessions = sessions
