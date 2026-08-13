@@ -124,6 +124,10 @@ private func mono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
     .system(size: size, weight: weight, design: .monospaced)
 }
 
+private enum SessionCardFont {
+    static let metadata: CGFloat = 11
+}
+
 /// One session's row card, its own `View` type: `@Observable` tracks reads
 /// per view, so a status/git/model change on ONE session only invalidates
 /// its own card instead of forcing `SessionListView.body` (and every other
@@ -156,13 +160,17 @@ private struct SessionCardView: View {
                 } else if session.git != nil || modelName != nil {
                     HStack(spacing: 6) {
                         if let modelName {
-                            Text(modelName).font(mono(9)).foregroundStyle(tk.t4)
+                            Text(modelName)
+                                .font(mono(SessionCardFont.metadata))
+                                .foregroundStyle(tk.t3)
                         }
                         if let git = session.git {
                             HStack(spacing: 3) {
                                 Text(session.worktreeRepo != nil ? "⧉" : "⎇")
                                     .font(.system(size: 10)).foregroundStyle(tk.t4)
-                                Text(git.branch).font(mono(9)).foregroundStyle(tk.t3)
+                                Text(git.branch)
+                                    .font(mono(SessionCardFont.metadata))
+                                    .foregroundStyle(tk.t3)
                                     .lineLimit(1)
                             }
                         }
