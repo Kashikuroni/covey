@@ -15,6 +15,22 @@ struct IssueWip: Equatable {
     var hasDiff: Bool { (added ?? 0) > 0 || (removed ?? 0) > 0 }
 }
 
+struct IssueCardLabelPlan: Equatable {
+    var visible: [GhLabel]
+    var counter: String?
+}
+
+func issueCardLabelPlan(_ labels: [GhLabel], limit: Int = 2) -> IssueCardLabelPlan {
+    let shown = min(max(0, limit), labels.count)
+    return IssueCardLabelPlan(
+        visible: Array(labels.prefix(shown)),
+        counter: labels.count > shown ? "\(shown)/\(labels.count)" : nil)
+}
+
+func issueCardUpdatedText(age: String) -> String {
+    "updated \(age)"
+}
+
 /// A 1pt dashed guide line — SwiftUI has no dashed-border modifier.
 private struct DashedLine: Shape {
     var horizontal: Bool

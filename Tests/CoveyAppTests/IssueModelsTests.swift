@@ -131,33 +131,51 @@ final class IssueModelsTests: XCTestCase {
         XCTAssertNil(parseHexColor("zzzzzz"))    // non-hex
     }
 
-    func testLabelChipColorsInvalid() {
-        XCTAssertNil(labelChipColors(hex: "", darkTheme: false))
-        XCTAssertNil(labelChipColors(hex: "xyz", darkTheme: true))
+    func testLabelPillColorInvalid() {
+        XCTAssertNil(labelPillColor(hex: "", darkTheme: false))
+        XCTAssertNil(labelPillColor(hex: "xyz", darkTheme: true))
     }
 
-    func testLabelChipColorsBlendedTowardForeground() {
-        // Every label is pulled toward the theme foreground: dot and text share
-        // the themed color, no longer the raw GitHub hex.
-        let c = try! XCTUnwrap(labelChipColors(hex: "d73a4a", darkTheme: false))
-        XCTAssertEqual(c.dot, c.text)                              // unified
-        XCTAssertNotEqual(c.dot, 0xD73A4A)                         // moved off raw
-        XCTAssertEqual(c.dot, blend(0xD73A4A, toward: 0x5C6166, labelThemeBlend))
+    func testLabelPillColorBlendsTowardForeground() {
+        let color = try! XCTUnwrap(labelPillColor(hex: "d73a4a", darkTheme: false))
+        XCTAssertNotEqual(color, 0xD73A4A)
+        XCTAssertEqual(color, blend(0xD73A4A, toward: 0x5C6166, labelThemeBlend))
     }
 
-    func testLabelChipColorsPaleDarkenedTowardForegroundOnLight() {
-        // A near-white label ("ededed") darkens toward the light-theme fg so it
-        // stays readable on the light card.
-        let c = try! XCTUnwrap(labelChipColors(hex: "ededed", darkTheme: false))
-        XCTAssertEqual(c.dot, c.text)
-        XCTAssertLessThan(relativeLuminance(c.text), relativeLuminance(0xEDEDED))
+    func testLabelPillColorPaleDarkenedOnLight() {
+        let color = try! XCTUnwrap(labelPillColor(hex: "ededed", darkTheme: false))
+        XCTAssertLessThan(relativeLuminance(color), relativeLuminance(0xEDEDED))
     }
 
-    func testLabelChipColorsDarkLabelLiftedTowardForegroundOnDark() {
-        // A near-black label lifts toward the mirage fg so it does not vanish.
-        let c = try! XCTUnwrap(labelChipColors(hex: "0a0a0a", darkTheme: true))
-        XCTAssertEqual(c.dot, c.text)
-        XCTAssertGreaterThan(relativeLuminance(c.text), relativeLuminance(0x0A0A0A))
+    func testLabelPillColorDarkLiftedOnDark() {
+        let color = try! XCTUnwrap(labelPillColor(hex: "0a0a0a", darkTheme: true))
+        XCTAssertGreaterThan(relativeLuminance(color), relativeLuminance(0x0A0A0A))
+    }
+
+    func testIssueCardLabelPlanCapsAtTwoAndReportsTotal() {
+        let labels = [
+            GhLabel(name: "bug", color: "d73a4a"),
+            GhLabel(name: "critical", color: "b60205"),
+            GhLabel(name: "module: web-unit", color: "1d76db"),
+        ]
+        let plan = issueCardLabelPlan(labels)
+        XCTAssertEqual(plan.visible.map(\.name), ["bug", "critical"])
+        XCTAssertEqual(plan.counter, "2/3")
+    }
+
+    func testIssueCardLabelPlanOmitsCounterWhenEverythingFits() {
+        let one = issueCardLabelPlan([GhLabel(name: "bug", color: "d73a4a")])
+        XCTAssertEqual(one.visible.map(\.name), ["bug"])
+        XCTAssertNil(one.counter)
+
+        let empty = issueCardLabelPlan([])
+        XCTAssertTrue(empty.visible.isEmpty)
+        XCTAssertNil(empty.counter)
+    }
+
+    func testIssueCardUpdatedText() {
+        XCTAssertEqual(issueCardUpdatedText(age: "now"), "updated now")
+        XCTAssertEqual(issueCardUpdatedText(age: "21h"), "updated 21h")
     }
 
     func testIssueDescription() {

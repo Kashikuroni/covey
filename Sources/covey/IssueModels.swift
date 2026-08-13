@@ -170,19 +170,19 @@ func blend(_ rgb: UInt32, toward target: UInt32, _ t: Double) -> UInt32 {
 /// GitHub color, 1 replaces it with the theme text color. Tune here.
 let labelThemeBlend = 0.4
 
-/// Colors for a GitHub label chip, pulled toward the theme so raw GitHub hues
-/// settle into the ayu palette instead of clashing on the card. Both the dot and
-/// the text blend `labelThemeBlend` of the way toward the theme foreground
-/// (Tokens.t1 base): the hue survives, the loudness drops into ayu's matte tone,
-/// and low-contrast labels (pale on light, near-black on dark) get lifted toward
-/// the readable end for free. nil when the hex is empty/invalid so the caller can
-/// fall back to a neutral token.
-func labelChipColors(hex: String, darkTheme: Bool) -> (dot: UInt32, text: UInt32)? {
+/// A GitHub label hue pulled toward the current theme foreground so pill text,
+/// outline, and translucent fill stay readable without losing the source hue.
+/// Nil lets the view fall back to neutral Covey tokens for invalid colors.
+func labelPillColor(hex: String, darkTheme: Bool) -> UInt32? {
     guard let rgb = parseHexColor(hex) else { return nil }
-    // Theme foreground — keep in sync with Tokens.dark/.light `t1`.
-    let fg: UInt32 = darkTheme ? 0xCCCAC2 : 0x5C6166
-    let themed = blend(rgb, toward: fg, labelThemeBlend)
-    return (dot: themed, text: themed)
+    let foreground: UInt32 = darkTheme ? 0xCCCAC2 : 0x5C6166
+    return blend(rgb, toward: foreground, labelThemeBlend)
+}
+
+/// Compatibility for the current dot-based card; removed with the pill layout.
+func labelChipColors(hex: String, darkTheme: Bool) -> (dot: UInt32, text: UInt32)? {
+    guard let color = labelPillColor(hex: hex, darkTheme: darkTheme) else { return nil }
+    return (dot: color, text: color)
 }
 
 /// The card's description block: the whole body, edge-trimmed, or nil when
