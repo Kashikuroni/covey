@@ -92,6 +92,9 @@ public final class AppModel {
     public private(set) var usage: Usage?
     public private(set) var plan: String?
     public private(set) var usageError: String?
+    public private(set) var glmUsage: Usage?
+    public private(set) var glmUsageError: String?
+    public private(set) var glmUsageEnabled = true
     /// Per-provider display/polling toggle — off skips the network call (and,
     /// for Codex, tears down the whole subprocess) but keeps the last known
     /// snapshot around for the dimmed popover row.
@@ -203,14 +206,17 @@ public final class AppModel {
     private var persisted = PersistedState()   // last known full state (keeps schema-only fields)
     private var eventLoop: Task<Void, Never>?
     private let fetchAccount: () async -> Account
+    private let fetchGlmAccount: () async -> Account
     private let usageInterval: TimeInterval
     private var usagePoller: Task<Void, Never>?
+    private var glmUsagePoller: Task<Void, Never>?
     @ObservationIgnored private var codexServer: CodexAppServer?
 
     public init(client: IPCClient,
                 makeClient: @escaping () throws -> IPCClient,
                 store: StateStore,
                 fetchAccount: @escaping () async -> Account = { Account() },
+                fetchGlmAccount: @escaping () async -> Account = { Account() },
                 usageInterval: TimeInterval = 60) {
         // Created before any self-capturing closures below.
         issueBrowser = IssueBrowserModel(
@@ -221,6 +227,7 @@ public final class AppModel {
         self.makeClient = makeClient
         self.store = store
         self.fetchAccount = fetchAccount
+        self.fetchGlmAccount = fetchGlmAccount
         self.usageInterval = usageInterval
         issueBrowser.toast = { [weak self] msg in self?.showToast(msg) }
         issueBrowser.fetchBranches = { [weak self] dir in
@@ -252,6 +259,8 @@ public final class AppModel {
         plan = persisted.claudePlan
         if let cached = persisted.codexUsage { codexUsage = cached.live }
         codexPlan = persisted.codexPlan
+        glmUsageEnabled = persisted.glmUsageEnabled ?? true
+        if let cached = persisted.glmUsage { glmUsage = cached.live }
         do {
             let (list, statuses, lost, models) = try await client.list()
             sessions = list.sorted { $0.created < $1.created }
@@ -294,6 +303,14 @@ public final class AppModel {
             guard let self else { return }
             while !Task.isCancelled {
                 await self.tickUsage()
+                try? await Task.sleep(nanoseconds: UInt64(self.usageInterval * 1_000_000_000))
+            }
+        }
+        glmUsagePoller?.cancel()
+        glmUsagePoller = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                await self.tickGlmUsage()
                 try? await Task.sleep(nanoseconds: UInt64(self.usageInterval * 1_000_000_000))
             }
         }
@@ -1414,7 +1431,20 @@ public final class AppModel {
         persisted.claudePlan = plan
         persisted.codexUsage = codexUsage.map(PersistedCodexUsage.init)
         persisted.codexPlan = codexPlan
+        persisted.glmUsageEnabled = glmUsageEnabled
+        persisted.glmUsage = glmUsage.map(PersistedUsage.init)
         store.save(persisted)
+    }
+
+    /// GLM's poll: usage-only (no plan, no window alerts — those are Claude's
+    /// 5h/7d alerting, out of scope for the read-only 5h token gauge here).
+    private func tickGlmUsage() async {
+        guard glmUsageEnabled else { return }
+        let acc = await fetchGlmAccount()
+        var changed = false
+        if let newUsage = acc.usage { glmUsage = newUsage; changed = true }
+        if changed { persist() }
+        glmUsageError = acc.usageError
     }
 
     private func tickUsage() async {

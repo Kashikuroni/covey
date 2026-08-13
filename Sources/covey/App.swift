@@ -63,7 +63,8 @@ struct CoveyApp: App {
                     let m = AppModel(client: try CoveyApp.makeClient(),
                                      makeClient: CoveyApp.makeClient,
                                      store: store,
-                                     fetchAccount: UsageService.fetchAccount)
+                                     fetchAccount: UsageService.fetchAccount,
+                                     fetchGlmAccount: GlmUsageService.fetchAccount)
                     await m.start()
                     Notifier.requestPermission()
                     model = m
