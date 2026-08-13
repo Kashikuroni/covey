@@ -130,7 +130,7 @@ public final class IPCServer {
             let lost = registry.lost.map {
                 Session(name: $0.name, dir: $0.dir, cwd: $0.dir, agent: $0.agent,
                         created: $0.created, git: nil, worktreeRepo: $0.worktreeRepo,
-                        resumeCmd: $0.resumeCmd)
+                        resumeCmd: $0.resumeCmd, providerId: $0.providerId)
             }
             reply(.sessions(sessions: sessions, statuses: statuses,
                             lost: lost.isEmpty ? nil : lost,
