@@ -53,6 +53,32 @@ final class PersistedStateTests: XCTestCase {
         XCTAssertFalse(object.keys.contains("inspectorSplit"))
     }
 
+    func testProviderRoundTrips() throws {
+        var s = PersistedState()
+        s.provider = "glm"
+        s.sessions["s-1"] = PersistedSession(dir: "/tmp", agent: "claude", providerId: "glm")
+        let back = try JSONDecoder().decode(PersistedState.self,
+                                            from: JSONEncoder().encode(s))
+        XCTAssertEqual(back.provider, "glm")
+        XCTAssertEqual(back.sessions["s-1"]?.providerId, "glm")
+    }
+
+    func testRecentProviderIdRoundTrips() throws {
+        var s = PersistedState()
+        s.recents = [RecentSession(name: "r", dir: "/tmp", agent: "claude", providerId: "glm")]
+        let back = try JSONDecoder().decode(PersistedState.self,
+                                            from: JSONEncoder().encode(s))
+        XCTAssertEqual(back.recents.first?.providerId, "glm")
+    }
+
+    func testLegacyPayloadDecodesWithoutProvider() throws {
+        let json = "{\"recents\":[],\"order\":[],\"projectOrder\":[],\"projectNames\":{},\"drafts\":{},\"sessions\":{\"s\":{\"dir\":\"/tmp\",\"agent\":\"claude\"}}}"
+        let s = try JSONDecoder().decode(PersistedState.self, from: json.data(using: .utf8)!)
+        XCTAssertNil(s.provider)
+        XCTAssertNil(s.sessions["s"]?.providerId)
+        XCTAssertNil(s.recents.first?.providerId)
+    }
+
     func testPushRecentDedupesNewestFirst() {
         var r: [RecentSession] = []
         pushRecent(&r, RecentSession(name: "a", dir: "/w", agent: "sh"))
@@ -161,11 +187,23 @@ final class PersistedStateTests: XCTestCase {
         XCTAssertFalse(json.contains("claudePlan"))
         XCTAssertFalse(json.contains("codexUsage"))
         XCTAssertFalse(json.contains("codexPlan"))
+        XCTAssertFalse(json.contains("glmUsage"))
         // A state.json written before these fields existed still decodes.
         let old = #"{"recents":[],"order":[],"projectOrder":[],"projectNames":{},"#
                 + #""projectNotes":{},"notes":{},"drafts":{},"sessions":{}}"#
         let decoded = try JSONDecoder().decode(PersistedState.self, from: old.data(using: .utf8)!)
         XCTAssertNil(decoded.claudeUsageEnabled)
         XCTAssertNil(decoded.claudeUsage)
+        XCTAssertNil(decoded.glmUsageEnabled)
+        XCTAssertNil(decoded.glmUsage)
+    }
+
+    func testGlmUsageCacheFieldsRoundTrip() throws {
+        var st = PersistedState()
+        st.glmUsageEnabled = false
+        st.glmUsage = PersistedUsage(fiveHour: PersistedUsageWindow(utilization: 17, resetUnix: 5),
+                                     sevenDay: nil, sevenDaySonnet: nil)
+        let back = try JSONDecoder().decode(PersistedState.self, from: JSONEncoder().encode(st))
+        XCTAssertEqual(back, st)
     }
 }

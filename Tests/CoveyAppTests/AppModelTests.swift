@@ -4,6 +4,47 @@ import CoveyKit
 import CoveydCore
 
 final class AppModelTests: XCTestCase {
+    func testResolveProviderEnvGlmWithKey() {
+        ProviderKeychain.write(account: "covey.provider.glm", value: "TESTKEY")
+        defer { ProviderKeychain.delete(account: "covey.provider.glm") }
+        let (env, err) = AppModel.resolveProviderEnv("glm")
+        XCTAssertNil(err)
+        XCTAssertEqual(env?["ANTHROPIC_BASE_URL"], "https://api.z.ai/api/anthropic")
+        XCTAssertEqual(env?["ANTHROPIC_AUTH_TOKEN"], "TESTKEY")
+    }
+
+    func testResolveProviderEnvGlmWithoutKey() {
+        ProviderKeychain.delete(account: "covey.provider.glm")   // ensure absent
+        let (env, err) = AppModel.resolveProviderEnv("glm")
+        XCTAssertNil(env)
+        XCTAssertNotNil(err)
+    }
+
+    func testResolveProviderEnvAnthropicIsNil() {
+        let (env, err) = AppModel.resolveProviderEnv("anthropic")
+        XCTAssertNil(env)
+        XCTAssertNil(err)
+    }
+
+    func testDetectsSettingsJsonAnthropicConflict() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-settings-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try Data(#"{"env":{"ANTHROPIC_BASE_URL":"https://api.z.ai/api/anthropic","other":"x"}}"#.utf8)
+            .write(to: tmp)
+        let conflicts = AppModel.anthropicManagedKeys(inSettingsAt: tmp.path)
+        XCTAssertEqual(conflicts, ["ANTHROPIC_BASE_URL"])
+    }
+
+    func testNoConflictWhenEnvAbsentOrFileMissing() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-settings-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try Data(#"{"theme":"dark"}"#.utf8).write(to: tmp)
+        XCTAssertTrue(AppModel.anthropicManagedKeys(inSettingsAt: tmp.path).isEmpty)
+        XCTAssertTrue(AppModel.anthropicManagedKeys(inSettingsAt: "/nonexistent/settings.json").isEmpty)
+    }
+
     @MainActor
     func testStartListsExistingSessionsAndConnects() async throws {
         let daemon = try TestDaemon()

@@ -2,6 +2,7 @@ import Foundation
 
 struct SettingsValues: Equatable {
     var theme: Theme
+    var providerId: String = "anthropic"
     var vimMode: Bool
     var showSessions: Bool
     var showHeader: Bool
@@ -9,10 +10,13 @@ struct SettingsValues: Equatable {
     var usagePlacement: UsagePlacement
     var claudeUsageEnabled: Bool
     var codexUsageEnabled: Bool
+    var glmUsageEnabled: Bool
 }
 
 enum SettingsRow: Int, CaseIterable, Equatable {
     case theme
+    case provider
+    case providerKey
     case vimMode
     case showSessions
     case showHeader
@@ -20,6 +24,7 @@ enum SettingsRow: Int, CaseIterable, Equatable {
     case usagePlacement
     case claudeUsage
     case codexUsage
+    case glmUsage
 }
 
 enum SettingsAction: Equatable { case cancel, save }
@@ -40,7 +45,14 @@ func settingsKey(for character: Character) -> SettingsKey? {
 
 struct SettingsDraft: Equatable {
     var values: SettingsValues
+    /// Provider ids the `.provider` row cycles through (from `ProviderRegistry`).
+    var providerIds: [String] = ["anthropic", "glm"]
     var selectedRow: SettingsRow = .theme
+
+    init(values: SettingsValues, providerIds: [String] = ["anthropic", "glm"]) {
+        self.values = values
+        self.providerIds = providerIds.isEmpty ? ["anthropic"] : providerIds
+    }
 
     mutating func handle(_ key: SettingsKey) -> SettingsAction? {
         switch key {
@@ -71,6 +83,13 @@ struct SettingsDraft: Equatable {
         case .theme:
             if increasing { values.theme = .light }
             else { values.theme = .dark }
+        case .provider:
+            // Cycle through the registry's provider ids, wrapping at both ends.
+            let i = providerIds.firstIndex(of: values.providerId) ?? 0
+            let next = (i + (increasing ? 1 : -1) + providerIds.count) % providerIds.count
+            values.providerId = providerIds[next]
+        case .providerKey:
+            break   // activated via .activate in the sheet (opens the key prompt)
         case .vimMode:
             values.vimMode = increasing
         case .showSessions:
@@ -91,6 +110,8 @@ struct SettingsDraft: Equatable {
             values.claudeUsageEnabled = increasing
         case .codexUsage:
             values.codexUsageEnabled = increasing
+        case .glmUsage:
+            values.glmUsageEnabled = increasing
         }
     }
 }

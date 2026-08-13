@@ -41,7 +41,8 @@ final class SettingsApplyTests: XCTestCase {
                        SettingsValues(theme: .dark, vimMode: true,
                                       showSessions: true, showHeader: true, showFooter: true,
                                       usagePlacement: .right,
-                                      claudeUsageEnabled: true, codexUsageEnabled: true))
+                                      claudeUsageEnabled: true, codexUsageEnabled: true,
+                                      glmUsageEnabled: true))
     }
 
     @MainActor
@@ -59,7 +60,7 @@ final class SettingsApplyTests: XCTestCase {
             theme: .light, vimMode: false,
             showSessions: false, showHeader: false, showFooter: false,
             usagePlacement: .left,
-            claudeUsageEnabled: false, codexUsageEnabled: false))
+            claudeUsageEnabled: false, codexUsageEnabled: false, glmUsageEnabled: false))
         store.flush()
 
         XCTAssertEqual(model.themeRaw, "light")
@@ -70,6 +71,7 @@ final class SettingsApplyTests: XCTestCase {
         XCTAssertEqual(model.usagePlacement, .left)
         XCTAssertFalse(model.claudeUsageEnabled)
         XCTAssertFalse(model.codexUsageEnabled)
+        XCTAssertFalse(model.glmUsageEnabled)
         XCTAssertNil(model.modal)
         XCTAssertEqual(store.writeCount, writesBefore + 1)
 
@@ -82,6 +84,27 @@ final class SettingsApplyTests: XCTestCase {
         XCTAssertEqual(saved.usagePlacement, "left")
         XCTAssertEqual(saved.claudeUsageEnabled, false)
         XCTAssertEqual(saved.codexUsageEnabled, false)
+        XCTAssertEqual(saved.glmUsageEnabled, false)
+    }
+
+    @MainActor
+    func testProviderIsAppliedAndPersisted() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let path = "\(NSTemporaryDirectory())covey-settings-\(UUID().uuidString).json"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = StateStore(path: path, debounce: 0.05)
+        let model = try makeSettingsModel(daemon, store: store)
+        await model.start()
+
+        var v = model.settingsValues
+        v.providerId = "glm"
+        model.modal = .settings
+        model.applySettings(v)
+        store.flush()
+
+        XCTAssertEqual(model.providerId, "glm")
+        XCTAssertEqual(store.load().provider, "glm")
+        XCTAssertNil(model.modal)   // no restart prompt for provider (new sessions only)
     }
 
     @MainActor

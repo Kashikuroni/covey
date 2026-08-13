@@ -6,6 +6,7 @@ final class AppModelUsageTests: XCTestCase {
     @MainActor
     private func makeUsageModel(_ daemon: TestDaemon,
                                 fetch: @escaping () async -> Account,
+                                fetchGlm: @escaping () async -> Account = { Account() },
                                 interval: TimeInterval = 0.05) throws -> AppModel {
         let client = IPCClient(path: daemon.path); try client.connect()
         let statePath = "\(NSTemporaryDirectory())covey-usage-\(UInt32.random(in: 0..<UInt32.max)).json"
@@ -14,6 +15,7 @@ final class AppModelUsageTests: XCTestCase {
             makeClient: { let c = IPCClient(path: daemon.path); try c.connect(); return c },
             store: StateStore(path: statePath, debounce: 0.05),
             fetchAccount: fetch,
+            fetchGlmAccount: fetchGlm,
             usageInterval: interval)
     }
 
@@ -28,6 +30,34 @@ final class AppModelUsageTests: XCTestCase {
         let ok = await eventually { model.usage?.fiveHour?.utilization == 55 && model.plan == "Max 5×" }
         XCTAssertTrue(ok)
         XCTAssertNil(model.usageError)
+    }
+
+    @MainActor
+    func testGlmPollerAppliesUsageIndependentlyOfClaude() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let claudeAcc = Account(usage: Usage(fiveHour: UsageWindow(utilization: 55, resetUnix: nil),
+                                             sevenDay: nil, sevenDaySonnet: nil),
+                                plan: "Max 5×")
+        let glmAcc = Account(usage: Usage(fiveHour: UsageWindow(utilization: 17, resetUnix: nil),
+                                          sevenDay: nil, sevenDaySonnet: nil))
+        let model = try makeUsageModel(daemon, fetch: { claudeAcc }, fetchGlm: { glmAcc })
+        await model.start()
+        let ok = await eventually {
+            model.usage?.fiveHour?.utilization == 55 && model.glmUsage?.fiveHour?.utilization == 17
+        }
+        XCTAssertTrue(ok)
+        XCTAssertNil(model.glmUsageError)
+    }
+
+    @MainActor
+    func testGlmPollerAppliesError() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let model = try makeUsageModel(daemon, fetch: { Account() },
+                                       fetchGlm: { Account(usageError: "no key") })
+        await model.start()
+        let ok = await eventually { model.glmUsageError == "no key" }
+        XCTAssertTrue(ok)
+        XCTAssertNil(model.glmUsage)
     }
 
     @MainActor

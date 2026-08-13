@@ -79,12 +79,22 @@ public final class AppModel {
     }
     public private(set) var connected = false
     public private(set) var themeRaw: String = "dark"
+    /// Active Claude Code provider id ("anthropic" | "glm" | …). Applied to
+    /// new sessions at spawn; running sessions keep the provider they started with.
+    public private(set) var providerId: String = "anthropic"
+    /// Provider each live session was created under, so a relaunched recent
+    /// keeps its original provider even after the global toggle moves. Client
+    /// side because the GUI owns provider resolution; cleared with the session.
+    private var providerBySession: [String: String] = [:]
     public private(set) var splitPct: Int = 38
     public private(set) var usagePlacement: UsagePlacement = .right
     public private(set) var recents: [RecentSession] = []
     public private(set) var usage: Usage?
     public private(set) var plan: String?
     public private(set) var usageError: String?
+    public private(set) var glmUsage: Usage?
+    public private(set) var glmUsageError: String?
+    public private(set) var glmUsageEnabled = true
     /// Per-provider display/polling toggle — off skips the network call (and,
     /// for Codex, tears down the whole subprocess) but keeps the last known
     /// snapshot around for the dimmed popover row.
@@ -93,7 +103,7 @@ public final class AppModel {
     /// Which provider the limits detail popover highlights — j/k moves it, h/l
     /// disables/enables it. Resets to `.claude` every time the popover opens;
     /// not persisted, this is transient keyboard-navigation state.
-    public enum LimitsProvider: Equatable { case claude, codex }
+    public enum LimitsProvider: Equatable, CaseIterable { case claude, codex, glm }
     public private(set) var limitsSelectedProvider: LimitsProvider = .claude
     // Codex limits are consumed only in-module (TopBar) + @testable tests, so
     // these stay internal — their types (CodexRateLimitsSnapshot/State) are too.
@@ -196,14 +206,17 @@ public final class AppModel {
     private var persisted = PersistedState()   // last known full state (keeps schema-only fields)
     private var eventLoop: Task<Void, Never>?
     private let fetchAccount: () async -> Account
+    private let fetchGlmAccount: () async -> Account
     private let usageInterval: TimeInterval
     private var usagePoller: Task<Void, Never>?
+    private var glmUsagePoller: Task<Void, Never>?
     @ObservationIgnored private var codexServer: CodexAppServer?
 
     public init(client: IPCClient,
                 makeClient: @escaping () throws -> IPCClient,
                 store: StateStore,
                 fetchAccount: @escaping () async -> Account = { Account() },
+                fetchGlmAccount: @escaping () async -> Account = { Account() },
                 usageInterval: TimeInterval = 60) {
         // Created before any self-capturing closures below.
         issueBrowser = IssueBrowserModel(
@@ -214,6 +227,7 @@ public final class AppModel {
         self.makeClient = makeClient
         self.store = store
         self.fetchAccount = fetchAccount
+        self.fetchGlmAccount = fetchGlmAccount
         self.usageInterval = usageInterval
         issueBrowser.toast = { [weak self] msg in self?.showToast(msg) }
         issueBrowser.fetchBranches = { [weak self] dir in
@@ -224,6 +238,7 @@ public final class AppModel {
     public func start() async {
         persisted = store.load()
         themeRaw = persisted.theme ?? "dark"
+        providerId = persisted.provider ?? "anthropic"
         splitPct = persisted.splitPct ?? 38
         usagePlacement = persisted.usagePlacement.flatMap(UsagePlacement.init(rawValue:)) ?? .right
         recents = persisted.recents
@@ -244,6 +259,8 @@ public final class AppModel {
         plan = persisted.claudePlan
         if let cached = persisted.codexUsage { codexUsage = cached.live }
         codexPlan = persisted.codexPlan
+        glmUsageEnabled = persisted.glmUsageEnabled ?? true
+        if let cached = persisted.glmUsage { glmUsage = cached.live }
         do {
             let (list, statuses, lost, models) = try await client.list()
             sessions = list.sorted { $0.created < $1.created }
@@ -286,6 +303,14 @@ public final class AppModel {
             guard let self else { return }
             while !Task.isCancelled {
                 await self.tickUsage()
+                try? await Task.sleep(nanoseconds: UInt64(self.usageInterval * 1_000_000_000))
+            }
+        }
+        glmUsagePoller?.cancel()
+        glmUsagePoller = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                await self.tickGlmUsage()
                 try? await Task.sleep(nanoseconds: UInt64(self.usageInterval * 1_000_000_000))
             }
         }
@@ -444,11 +469,15 @@ public final class AppModel {
     public func createFull(name: String?, dir: String, agent: String,
                            terminal: Bool, worktree: WorktreeSpec?,
                            model: String?, effort: String?) async -> String? {
+        let (env, keyErr) = Self.resolveProviderEnv(providerId)
+        if let keyErr { return keyErr }
         do {
+            let providerArg = providerId == "anthropic" ? nil : providerId
             let s = try await client.create(dir: dir, agent: agent, name: name,
                                             terminal: terminal ? true : nil,
                                             worktree: worktree, model: model,
-                                            effort: effort)
+                                            effort: effort, env: env, providerId: providerArg)
+            providerBySession[s.name] = providerId
             // Land in the fresh session, keyboard in its terminal.
             await select(s.name)
             setFocus(.terminal)
@@ -571,9 +600,16 @@ public final class AppModel {
 
     @discardableResult
     public func relaunchRecent(_ r: RecentSession, activate: Bool = true) async -> Bool {
+        // Keep the provider the session originally used (fallback to current);
+        // a relaunched GLM session stays GLM even if the global toggle moved.
+        let pid = r.providerId ?? providerId
+        let (env, keyErr) = Self.resolveProviderEnv(pid)
+        if let keyErr { toast = keyErr; return false }
         do {
+            let providerArg = pid == "anthropic" ? nil : pid
             let s = try await client.create(dir: r.dir, agent: r.agent, name: r.name,
-                                            resume: r.resumeCmd)
+                                            resume: r.resumeCmd, env: env, providerId: providerArg)
+            providerBySession[s.name] = pid
             if activate {
                 await select(s.name)
                 setFocus(.terminal)
@@ -677,16 +713,75 @@ public final class AppModel {
     public func setVimMode(_ on: Bool) { vimMode = on; persist() }
 
     var settingsValues: SettingsValues {
-        SettingsValues(theme: Theme(raw: themeRaw), vimMode: vimMode,
-                       showSessions: showSessions, showHeader: showHeader,
-                       showFooter: showFooter, usagePlacement: usagePlacement,
+        SettingsValues(theme: Theme(raw: themeRaw), providerId: providerId,
+                       vimMode: vimMode, showSessions: showSessions,
+                       showHeader: showHeader, showFooter: showFooter,
+                       usagePlacement: usagePlacement,
                        claudeUsageEnabled: claudeUsageEnabled,
-                       codexUsageEnabled: codexUsageEnabled)
+                       codexUsageEnabled: codexUsageEnabled,
+                       glmUsageEnabled: glmUsageEnabled)
     }
 
     func openSettings() {
         guard modal == nil else { return }
         modal = .settings
+    }
+
+    /// The active provider profile (built-in or from config), or anthropic.
+    var activeProviderProfile: ProviderProfile {
+        ProviderRegistry.profile(id: providerId) ?? .anthropic
+    }
+    /// True when traffic goes to Anthropic (the Claude usage chip is only
+    /// meaningful then — a GLM/Kimi session consumes no claude.ai quota).
+    var providerIsAnthropic: Bool { providerId == "anthropic" }
+
+    /// Stores (or, for an empty key, clears) a provider API key in the Keychain.
+    func setProviderKey(_ profile: ProviderProfile, _ key: String) {
+        guard let account = profile.keychainAccount else { return }
+        if key.isEmpty { ProviderKeychain.delete(account: account) }
+        else { ProviderKeychain.write(account: account, value: key) }
+    }
+
+    /// Whether the active provider's key is present (oauth providers need none).
+    func providerKeyIsSet(_ profile: ProviderProfile) -> Bool {
+        guard let account = profile.keychainAccount else { return true }
+        return ProviderKeychain.read(account: account) != nil
+    }
+
+    /// Resolves the env block to inject for provider `id` (reads the Keychain).
+    /// Returns nil env for anthropic (no injection) or an unknown id; returns a
+    /// user-facing `error` when a needed API key is absent so callers can surface
+    /// it instead of spawning a session that will immediately 401.
+    nonisolated static func resolveProviderEnv(_ id: String) -> (env: [String: String]?, error: String?) {
+        guard let profile = ProviderRegistry.profile(id: id) else { return (nil, nil) }
+        do {
+            let env = try ProviderResolver.resolve(profile: profile) { account in
+                ProviderKeychain.read(account: account)
+            }
+            return (env.isEmpty ? nil : env, nil)
+        } catch {
+            return (nil, "Set your \(profile.label) API key in Settings first.")
+        }
+    }
+
+    /// The `ANTHROPIC_*` env keys Covey may set for a provider. Claude Code's
+    /// settings.json `env` block overrides the process environment, so any of
+    /// these present in `~/.claude/settings.json` would silently override
+    /// Covey's provider choice.
+    static let managedKeys = [
+        "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    ]
+
+    /// Which managed `ANTHROPIC_*` keys a Claude Code settings file's `env`
+    /// block pins (and would therefore override Covey). Empty when there is no
+    /// conflict, no `env` block, or no file.
+    nonisolated static func anthropicManagedKeys(inSettingsAt path: String) -> [String] {
+        guard let data = FileManager.default.contents(atPath: path),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let env = root["env"] as? [String: Any] else { return [] }
+        return managedKeys.filter { env[$0] != nil }
     }
 
     func openCommandPalette() {
@@ -881,7 +976,9 @@ public final class AppModel {
         }
         let themeChanged = values.theme != old.theme
         let codexChanged = values.codexUsageEnabled != old.codexUsageEnabled
+        let providerChanged = values.providerId != old.providerId
         themeRaw = values.theme.rawValue
+        providerId = values.providerId
         vimMode = values.vimMode
         showSessions = values.showSessions
         showHeader = values.showHeader
@@ -889,8 +986,21 @@ public final class AppModel {
         usagePlacement = values.usagePlacement
         claudeUsageEnabled = values.claudeUsageEnabled
         codexUsageEnabled = values.codexUsageEnabled
+        glmUsageEnabled = values.glmUsageEnabled
         persist()
         if codexChanged { synchronizeCodexUsageServer() }
+        // Claude Code's ~/.claude/settings.json env block overrides the process
+        // environment, so keys pinned there win over Covey's injection. Warn
+        // (don't auto-edit) when switching to a non-Anthropic provider that the
+        // settings file would override.
+        if providerChanged, providerId != "anthropic" {
+            let settingsPath = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".claude/settings.json").path
+            let conflicts = Self.anthropicManagedKeys(inSettingsAt: settingsPath)
+            if !conflicts.isEmpty {
+                toast = "~/.claude/settings.json sets \(conflicts.joined(separator: ", ")); it overrides Covey. Remove those keys or they'll win."
+            }
+        }
         offerThemeRestartAfterModalDismiss = themeChanged
         modal = nil
     }
@@ -909,6 +1019,10 @@ public final class AppModel {
         codexUsageEnabled = on
         persist()
         synchronizeCodexUsageServer()
+    }
+    public func setGlmUsageEnabled(_ on: Bool) {
+        glmUsageEnabled = on
+        persist()
     }
 
     private func synchronizeCodexUsageServer() {
@@ -1052,17 +1166,21 @@ public final class AppModel {
             guard let target = focusedPane ?? selected else { return }
             Task { try? await client.input(name: target, bytes: [0x1b, 0x0d]) }
         case .limitsSelectNext, .limitsSelectPrev:
-            // Only two providers exist — next and prev are the same swap.
-            limitsSelectedProvider = limitsSelectedProvider == .claude ? .codex : .claude
+            let all = LimitsProvider.allCases
+            let i = all.firstIndex(of: limitsSelectedProvider) ?? 0
+            let delta = action == .limitsSelectNext ? 1 : -1
+            limitsSelectedProvider = all[(i + delta + all.count) % all.count]
         case .limitsEnableSelected:
             switch limitsSelectedProvider {
             case .claude: setClaudeUsageEnabled(true)
             case .codex: setCodexUsageEnabled(true)
+            case .glm: setGlmUsageEnabled(true)
             }
         case .limitsDisableSelected:
             switch limitsSelectedProvider {
             case .claude: setClaudeUsageEnabled(false)
             case .codex: setCodexUsageEnabled(false)
+            case .glm: setGlmUsageEnabled(false)
             }
         case .splitFocusToggle:
             guard let selected, let comp = companion(of: selected) else { return }
@@ -1303,6 +1421,7 @@ public final class AppModel {
 
     private func persist() {
         persisted.theme = themeRaw
+        persisted.provider = providerId
         persisted.splitPct = splitPct
         persisted.usagePlacement = usagePlacement.rawValue
         persisted.recents = recents
@@ -1323,7 +1442,20 @@ public final class AppModel {
         persisted.claudePlan = plan
         persisted.codexUsage = codexUsage.map(PersistedCodexUsage.init)
         persisted.codexPlan = codexPlan
+        persisted.glmUsageEnabled = glmUsageEnabled
+        persisted.glmUsage = glmUsage.map(PersistedUsage.init)
         store.save(persisted)
+    }
+
+    /// GLM's poll: usage-only (no plan, no window alerts — those are Claude's
+    /// 5h/7d alerting, out of scope for the read-only 5h token gauge here).
+    private func tickGlmUsage() async {
+        guard glmUsageEnabled else { return }
+        let acc = await fetchGlmAccount()
+        var changed = false
+        if let newUsage = acc.usage { glmUsage = newUsage; changed = true }
+        if changed { persist() }
+        glmUsageError = acc.usageError
     }
 
     private func tickUsage() async {
@@ -1430,12 +1562,14 @@ public final class AppModel {
                 pushRecent(&recents, RecentSession(name: s.name, dir: s.dir, agent: s.agent,
                                                    resumeCmd: s.resumeCmd,
                                                    stoppedAt: Int64(Date().timeIntervalSince1970),
-                                                   branch: s.git?.branch))
+                                                   branch: s.git?.branch,
+                                                   providerId: providerBySession[name]))
                 persist()
             }
             sessions.removeAll { $0.name == name }
             statusByName[name] = nil
             modelByName[name] = nil
+            providerBySession[name] = nil
             dropPaneState(name)
             if selected == name { selected = nil }
         case let .statusChanged(name, status):

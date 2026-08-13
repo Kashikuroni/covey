@@ -41,4 +41,17 @@ final class UsageChipBuilderTests: XCTestCase {
         XCTAssertNil(codexChip(snapshot: CodexRateLimitsSnapshot(primary: nil, secondary: nil),
                                plan: "Pro"))
     }
+
+    func testGlmChipFromUsage() {
+        let u = Usage(fiveHour: UsageWindow(utilization: 17, resetUnix: 1),
+                      sevenDay: nil, sevenDaySonnet: nil)
+        let chip = glmChip(usage: u)
+        XCTAssertEqual(chip?.name, "GLM")
+        XCTAssertNil(chip?.plan, "z.ai's quota endpoint carries no plan/tier name")
+        XCTAssertEqual(chip?.windows.map(\.label), ["5h"])
+    }
+
+    func testGlmChipNilWhenNoUsage() {
+        XCTAssertNil(glmChip(usage: nil))
+    }
 }

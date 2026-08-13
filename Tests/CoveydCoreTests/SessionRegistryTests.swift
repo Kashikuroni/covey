@@ -11,6 +11,19 @@ final class SessionRegistryTests: XCTestCase {
         XCTAssertEqual(reg.list().map(\.name), [s.name])
         reg.kill(name: s.name)
     }
+
+    func testCreateStoresProviderIdOnMeta() throws {
+        // env-to-child injection is PTYSessionRuntimeTests' job; here we verify
+        // the registry records providerId on the session meta it persists, and
+        // threads env without throwing. sleep keeps the entry alive for the read.
+        let reg = SessionRegistry()
+        let s = try reg.create(dir: NSTemporaryDirectory(), agent: "/bin/sh",
+                               argv: ["/bin/sh", "-c", "sleep 30"],
+                               env: ["ANTHROPIC_AUTH_TOKEN": "secret"], providerId: "glm")
+        XCTAssertEqual(s.agent, "/bin/sh")
+        XCTAssertEqual(reg.snapshotMetasForTesting().first { $0.name == s.name }?.providerId, "glm")
+        reg.kill(name: s.name)
+    }
     
     func testDuplicateNameThrows() throws {
         let reg = SessionRegistry()

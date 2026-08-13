@@ -25,6 +25,14 @@ public protocol SessionRuntime: AnyObject {
 /// Owns one child process running in its own PTY: spawn via forkpty, read output
 /// through a DispatchSource, write input, resize, kill. Byte-transparent.
 public final class PTYSessionRuntime: SessionRuntime {
+    /// The `ANTHROPIC_*` env keys Covey may set for a provider. Cleared in the
+    /// child before applying the active provider's block, so a stale value in
+    /// the daemon's inherited env can't leak when the provider is anthropic.
+    static let managedAnthropicKeys = [
+        "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    ]
     /// Output handler, invoked on the internal queue with each chunk and the
     /// seq of its first byte. Assign it via `setOutputHandler`.
     private var onOutput: (([UInt8], Int) -> Void)?
@@ -86,7 +94,15 @@ public final class PTYSessionRuntime: SessionRuntime {
         }
         
         if childPid == 0 {
-            // CHILD: async-signal-safe calls only. `env` is inherited in slice 1.
+            // CHILD: apply the provider env before exec. `setenv`/`unsetenv` are
+            // not strictly async-signal-safe, but the child execs immediately
+            // after. First clear the ANTHROPIC_* keys Covey manages so a stale
+            // value inherited from the daemon's launchd env can't leak when
+            // provider = anthropic (env == nil); then apply the supplied block.
+            for k in PTYSessionRuntime.managedAnthropicKeys { unsetenv(k) }
+            if let env {
+                for (k, v) in env { setenv(k, v, 1) }
+            }
             // Reset signal state: ignored dispositions and the blocked mask
             // survive fork+exec, so a parent that ignores SIGTERM (coveyd does,
             // for its own shutdown handling) would breed unkillable children.

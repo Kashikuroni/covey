@@ -18,16 +18,20 @@ final class ProtocolTests: XCTestCase {
         let ops: [Request.Op] = [
             .list,
             .create(dir: "/work", agent: "claude", argv: ["claude"], name: nil,
-                    terminal: nil, worktree: nil, model: nil, effort: nil, resume: nil, companionOf: nil),
+                    terminal: nil, worktree: nil, model: nil, effort: nil, resume: nil, companionOf: nil,
+                    env: nil, providerId: nil),
             .create(dir: "/work", agent: "claude", argv: nil, name: "s9",
                     terminal: true, worktree: .new(branch: "b", base: "main"),
-                    model: "opus", effort: "max", resume: "claude --resume u", companionOf: nil),
+                    model: "opus", effort: "max", resume: "claude --resume u", companionOf: nil,
+                    env: ["ANTHROPIC_AUTH_TOKEN": "k"], providerId: "glm"),
             .create(dir: "/work", agent: "claude", argv: nil, name: nil,
                     terminal: nil, worktree: .checkout(branch: "feat"),
-                    model: nil, effort: nil, resume: nil, companionOf: nil),
+                    model: nil, effort: nil, resume: nil, companionOf: nil,
+                    env: nil, providerId: nil),
             .create(dir: "/work", agent: "claude", argv: nil, name: nil,
                     terminal: nil, worktree: .checkoutNew(branch: "feat", base: "main"),
-                    model: nil, effort: nil, resume: nil, companionOf: nil),
+                    model: nil, effort: nil, resume: nil, companionOf: nil,
+                    env: nil, providerId: nil),
             .kill(name: "s-1", removeWorktree: nil, deleteBranch: nil),
             .kill(name: "s-1", removeWorktree: true, deleteBranch: nil),
             .kill(name: "s-1", removeWorktree: true, deleteBranch: true),
@@ -52,7 +56,8 @@ final class ProtocolTests: XCTestCase {
     func testCreateCompanionOfRoundTrip() throws {
         let op = Request.Op.create(dir: "/tmp", agent: "sh", argv: nil, name: nil,
                                    terminal: true, worktree: nil, model: nil,
-                                   effort: nil, resume: nil, companionOf: "agent-1")
+                                   effort: nil, resume: nil, companionOf: "agent-1",
+                                   env: nil, providerId: nil)
         try roundTrip(Request(id: 7, op: op))
 
         var s = Session(name: "agent-1+sh", dir: "/tmp", cwd: "/tmp",
@@ -110,7 +115,8 @@ final class ProtocolTests: XCTestCase {
             try line(
                 Request(id: 3, op: .create(dir: "/w", agent: "claude", argv: nil, name: nil,
                                            terminal: nil, worktree: nil, model: nil,
-                                           effort: nil, resume: nil, companionOf: nil))
+                                           effort: nil, resume: nil, companionOf: nil,
+                                           env: nil, providerId: nil))
             ), #"{"id":3,"op":{"create":{"agent":"claude","dir":"/w"}}}"#
         )
     }
