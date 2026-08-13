@@ -16,6 +16,11 @@ struct PanelLayout: Equatable {
     let terminal: CGFloat
     let inspector: CGFloat
 
+    static let minSessionSplitPercent = 15
+    static let maxSessionSplitPercent = 90
+    static let minInspectorWidth = 240
+    static let maxInspectorWidth = 1200
+
     /// Narrowest the session list may get before a drag stops shrinking it.
     static let minSessions: CGFloat = 220
     /// Width the terminal keeps while the session list grows.

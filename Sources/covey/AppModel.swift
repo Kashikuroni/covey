@@ -601,7 +601,8 @@ public final class AppModel {
     }
 
     public func setSplitPct(_ pct: Int) {
-        let clamped = min(80, max(15, pct))
+        let clamped = min(PanelLayout.maxSessionSplitPercent,
+                          max(PanelLayout.minSessionSplitPercent, pct))
         guard clamped != splitPct else { return }
         splitPct = clamped
         persist()
@@ -1046,7 +1047,8 @@ public final class AppModel {
     }
 
     public func setSbWidth(_ px: Int) {
-        let clamped = min(600, max(240, px))
+        let clamped = min(PanelLayout.maxInspectorWidth,
+                          max(PanelLayout.minInspectorWidth, px))
         guard clamped != sbWidth else { return }
         sbWidth = clamped
         persist()

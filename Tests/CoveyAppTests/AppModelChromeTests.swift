@@ -128,14 +128,18 @@ final class AppModelChromeTests: XCTestCase {
     }
 
     @MainActor
-    func testSbWidthClampsAndFocusInspector() async throws {
+    func testSidebarBoundsClampAndFocusInspector() async throws {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
         await model.start()
         model.setSbWidth(100)
         XCTAssertEqual(model.sbWidth, 240)
         model.setSbWidth(9000)
-        XCTAssertEqual(model.sbWidth, 600)
+        XCTAssertEqual(model.sbWidth, 1200)
+        model.setSplitPct(0)
+        XCTAssertEqual(model.splitPct, 15)
+        model.setSplitPct(9000)
+        XCTAssertEqual(model.splitPct, 90)
         model.setFocus(.inspector)
         XCTAssertEqual(model.focus, .inspector)
     }

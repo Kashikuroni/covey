@@ -72,14 +72,27 @@ final class PanelLayoutTests: XCTestCase {
     /// dead end rather than a visible squeeze.
     func testTerminalNeverStarvesAcrossWindowSizes() {
         for width in stride(from: CGFloat(400), through: 2000, by: 25) {
-            for splitPct in [15, 38, 80] {
-                for sbWidth in [240, 360, 600] {
+            for splitPct in [PanelLayout.minSessionSplitPercent, 38,
+                             PanelLayout.maxSessionSplitPercent] {
+                for sbWidth in [PanelLayout.minInspectorWidth, 360,
+                                PanelLayout.maxInspectorWidth] {
                     let layout = make(total: width, splitPct: splitPct, sbWidth: sbWidth)
                     XCTAssertGreaterThan(layout.terminal, 0,
                         "terminal starved at width \(width), splitPct \(splitPct), sbWidth \(sbWidth)")
                 }
             }
         }
+    }
+
+    func testWideWindowsCanUseNewSidebarMaxima() {
+        let sessions = make(total: 6000, inspector: false,
+                            splitPct: PanelLayout.maxSessionSplitPercent)
+        XCTAssertEqual(sessions.sessions, sessions.inner * 0.90, accuracy: 0.001)
+
+        let inspector = make(total: 2500, sessions: false,
+                             sbWidth: PanelLayout.maxInspectorWidth)
+        XCTAssertEqual(inspector.inspector, 1200)
+        XCTAssertGreaterThanOrEqual(inspector.terminal, PanelLayout.minTerminalSliver)
     }
 
     func testInspectorDragMeasuresFromTheRightEdge() {
