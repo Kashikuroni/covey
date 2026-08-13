@@ -18,7 +18,7 @@ final class IPCServerTests: XCTestCase {
                                monitor: StatusMonitor(snapshot: { registry.snapshotScreens() }))
         let sink = FakeSink(id: 1)
         server.register(sink)
-        server.handle(Request(id: 10, op: .create(dir: "/usr", agent: "sh", argv: ["/bin/cat"], name: "s1", terminal: nil, worktree: nil, model: nil, effort: nil, resume: nil, companionOf: nil)), from: sink)
+        server.handle(Request(id: 10, op: .create(dir: "/usr", agent: "sh", argv: ["/bin/cat"], name: "s1", terminal: nil, worktree: nil, model: nil, effort: nil, resume: nil, companionOf: nil, env: nil, providerId: nil)), from: sink)
         waitUntil({ sink.captured.contains { if case .response(10, .session) = $0 { return true }; return false } }, "create response")
         waitUntil({ sink.captured.contains { if case .event(.sessionAdded) = $0 { return true }; return false } }, "added event")
         server.handle(Request(id: 11, op: .kill(name: "s1", removeWorktree: nil, deleteBranch: nil)), from: sink)
@@ -33,12 +33,14 @@ final class IPCServerTests: XCTestCase {
         server.handle(Request(id: 1, op: .create(dir: "/tmp", agent: "claude",
                                                  argv: ["/bin/cat"], name: "agent",
                                                  terminal: nil, worktree: nil, model: nil,
-                                                 effort: nil, resume: nil, companionOf: nil)),
+                                                 effort: nil, resume: nil, companionOf: nil,
+                                                 env: nil, providerId: nil)),
                       from: sink)
         server.handle(Request(id: 2, op: .create(dir: "/tmp", agent: "zsh",
                                                  argv: ["/bin/cat"], name: "ignored",
                                                  terminal: nil, worktree: nil, model: nil,
-                                                 effort: nil, resume: nil, companionOf: "agent")),
+                                                 effort: nil, resume: nil, companionOf: "agent",
+                                                 env: nil, providerId: nil)),
                       from: sink)
         // The daemon derives the companion name, ignoring the client's.
         waitUntil({ sink.captured.contains {
@@ -153,7 +155,7 @@ final class IPCServerTests: XCTestCase {
                                monitor: StatusMonitor(snapshot: { registry.snapshotScreens() }))
         let sink = FakeSink(id: 1)
         server.register(sink)
-        server.handle(Request(id: 1, op: .create(dir: "/usr", agent: "sh", argv: ["/bin/cat"], name: "s1", terminal: nil, worktree: nil, model: nil, effort: nil, resume: nil, companionOf: nil)), from: sink)
+        server.handle(Request(id: 1, op: .create(dir: "/usr", agent: "sh", argv: ["/bin/cat"], name: "s1", terminal: nil, worktree: nil, model: nil, effort: nil, resume: nil, companionOf: nil, env: nil, providerId: nil)), from: sink)
         server.handle(Request(id: 2, op: .attach(name: "s1", sinceSeq: nil)), from: sink)
         server.handle(Request(id: 3, op: .input(name: "s1", bytesB64: Data("ping\n".utf8).base64EncodedString())), from: sink)
         waitUntil({ sink.captured.contains {
@@ -177,7 +179,7 @@ final class IPCServerTests: XCTestCase {
             dir: "/usr", agent: "sh",
             argv: ["/bin/sh", "-c", "printf '\\033[?1049h\\033[?1002h\\033[?1006hFRAME'; exec cat"],
             name: "tui", terminal: nil, worktree: nil, model: nil,
-            effort: nil, resume: nil, companionOf: nil)), from: sink)
+            effort: nil, resume: nil, companionOf: nil, env: nil, providerId: nil)), from: sink)
         waitUntil({ registry.statePreamble(name: "tui")?.isEmpty == false },
                   "modes parsed before attach")
         server.handle(Request(id: 2, op: .attach(name: "tui", sinceSeq: nil)), from: sink)
@@ -208,7 +210,7 @@ final class IPCServerTests: XCTestCase {
             dir: "/tmp", agent: "sh",
             argv: ["/bin/sh", "-c", "printf 'pick:\\n  1. yes\\n  2. no\\n'; exec cat"],
             name: "menu", terminal: nil, worktree: nil, model: nil,
-            effort: nil, resume: nil, companionOf: nil)), from: sink)
+            effort: nil, resume: nil, companionOf: nil, env: nil, providerId: nil)), from: sink)
         waitUntil({ registry.snapshotScreens()["menu"]?.contains("2. no") == true },
                   "menu rendered")
         monitor.tick()
@@ -269,7 +271,7 @@ final class IPCServerTests: XCTestCase {
         server.handle(Request(id: 1, op: .create(
             dir: repo, agent: "sh", argv: nil, name: "wt",
             terminal: nil, worktree: .new(branch: "wt-branch", base: "main"),
-            model: nil, effort: nil, resume: nil, companionOf: nil)), from: sink)
+            model: nil, effort: nil, resume: nil, companionOf: nil, env: nil, providerId: nil)), from: sink)
         var created: Session?
         waitUntil({ sink.captured.contains {
             if case .response(1, .session(let s)) = $0 { created = s; return true }
@@ -303,7 +305,8 @@ final class IPCServerTests: XCTestCase {
         // promote a plain (non-worktree) session -> promoteFailed
         server.handle(Request(id: 1, op: .create(dir: repo, agent: "sh", argv: ["/bin/cat"],
                                                  name: "plain", terminal: nil, worktree: nil,
-                                                 model: nil, effort: nil, resume: nil, companionOf: nil)), from: sink)
+                                                 model: nil, effort: nil, resume: nil, companionOf: nil,
+                                                 env: nil, providerId: nil)), from: sink)
         server.handle(Request(id: 2, op: .promote(name: "plain")), from: sink)
         waitUntil({ sink.captured.contains {
             if case .response(2, .error(let code, _)) = $0 { return code == "promoteFailed" }
@@ -429,7 +432,7 @@ final class IPCServerTests: XCTestCase {
         server.handle(Request(id: 1, op: .create(
             dir: repo, agent: "sh", argv: nil, name: "wt",
             terminal: nil, worktree: .new(branch: "feat", base: "main"),
-            model: nil, effort: nil, resume: nil, companionOf: nil)), from: sink)
+            model: nil, effort: nil, resume: nil, companionOf: nil, env: nil, providerId: nil)), from: sink)
         var created: Session?
         waitUntil({ sink.captured.contains {
             if case .response(1, .session(let s)) = $0 { created = s; return true }
@@ -466,7 +469,7 @@ final class IPCServerTests: XCTestCase {
         server.handle(Request(id: 1, op: .create(dir: "/tmp", agent: "sh", argv: ["/bin/cat"],
                                                  name: "s1", terminal: nil, worktree: nil,
                                                  model: nil, effort: nil, resume: nil,
-                                                 companionOf: nil)), from: sink)
+                                                 companionOf: nil, env: nil, providerId: nil)), from: sink)
         waitUntil({ sink.captured.contains {
             if case .response(1, .session) = $0 { return true }; return false
         } }, "created")

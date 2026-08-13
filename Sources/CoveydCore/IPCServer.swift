@@ -139,14 +139,15 @@ public final class IPCServer {
         case .clearLost:
             registry.clearLost(); reply(.ok)
 
-        case let .create(dir, agent, argv, name, terminal, worktree, model, effort, resume, companionOf):
+        case let .create(dir, agent, argv, name, terminal, worktree, model, effort, resume, companionOf, env, providerId):
             do {
                 // A companion's name is derived, never client-chosen.
                 let effectiveName = companionOf.map { "\($0)+sh" } ?? name
                 let s: Session
                 if let argv {   // explicit argv: the raw path (tests, compatibility)
                     s = try registry.create(dir: dir, agent: agent, argv: argv,
-                                            name: effectiveName, companionOf: companionOf)
+                                            name: effectiveName, companionOf: companionOf,
+                                            env: env, providerId: providerId)
                 } else {
                     let spec = CreateSpec(name: effectiveName, dir: expandTilde(dir), agent: agent,
                                           terminal: terminal ?? false, worktree: worktree,
@@ -157,7 +158,8 @@ public final class IPCServer {
                                             argv: prepared.argv, name: effectiveName,
                                             worktreeRepo: prepared.worktreeRepo,
                                             resumeCmd: prepared.resumeCmd,
-                                            companionOf: companionOf)
+                                            companionOf: companionOf,
+                                            env: env, providerId: providerId)
                 }
                 attachOutputFanout(for: s.name)
                 // The card's git line should not wait out the poll interval.
