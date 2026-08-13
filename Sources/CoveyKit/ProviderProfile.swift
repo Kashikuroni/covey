@@ -68,14 +68,12 @@ public struct ProviderProfile: Codable, Equatable, Identifiable {
     /// nothing; claude reads its own credentials.
     public static let anthropic = ProviderProfile(id: "anthropic", label: "Anthropic")
 
-    /// z.ai GLM Coding Plan — the env block z.ai's own helper writes, verbatim.
+    /// Z.AI GLM Coding Plan for Claude Code. Model slots intentionally stay
+    /// unset so Z.AI can apply its current server-side defaults.
     public static let glm = ProviderProfile(
         id: "glm", label: "GLM", baseURL: "https://api.z.ai/api/anthropic", auth: .bearer,
         keychainAccount: "covey.provider.glm",
-        modelSlots: .init(haiku: "glm-4.7", sonnet: "glm-5.2[1m]", opus: "glm-5.2[1m]"),
-        extraEnv: ["API_TIMEOUT_MS": "3000000",
-                   "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "1000000",
-                   "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"])
+        extraEnv: ["API_TIMEOUT_MS": "3000000"])
 }
 
 /// Loads the provider list: built-ins (`anthropic`, `glm`) overlaid by user

@@ -6,15 +6,16 @@ final class ProviderProfileTests: XCTestCase {
         let env = ProviderProfile.anthropic.envTemplate(secret: nil)
         XCTAssertEqual(env, [:])
     }
-    func testBuiltinGLMTemplateMatchesZai() throws {
+    func testBuiltinGLMTemplateMatchesCurrentZaiClaudeCodeConfig() {
         let env = ProviderProfile.glm.envTemplate(secret: "KEY")
+
         XCTAssertEqual(env["ANTHROPIC_BASE_URL"], "https://api.z.ai/api/anthropic")
         XCTAssertEqual(env["ANTHROPIC_AUTH_TOKEN"], "KEY")
-        XCTAssertNil(env["ANTHROPIC_API_KEY"])
-        XCTAssertEqual(env["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "glm-4.7")
-        XCTAssertEqual(env["ANTHROPIC_DEFAULT_SONNET_MODEL"], "glm-5.2[1m]")
-        XCTAssertEqual(env["ANTHROPIC_DEFAULT_OPUS_MODEL"], "glm-5.2[1m]")
         XCTAssertEqual(env["API_TIMEOUT_MS"], "3000000")
+        XCTAssertNil(env["ANTHROPIC_API_KEY"])
+        XCTAssertNil(env["ANTHROPIC_DEFAULT_HAIKU_MODEL"])
+        XCTAssertNil(env["ANTHROPIC_DEFAULT_SONNET_MODEL"])
+        XCTAssertNil(env["ANTHROPIC_DEFAULT_OPUS_MODEL"])
     }
     func testRegistryBuiltinsAnthropicFirst() {
         let regs = ProviderRegistry.load(path: "/nonexistent/covey/config.json")
