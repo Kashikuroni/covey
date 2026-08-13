@@ -222,6 +222,29 @@ final class AppModelChromeTests: XCTestCase {
     }
 
     @MainActor
+    func testLimitsSelectionCyclesThroughThreeProviders() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        model.perform(.showLimitsDetail)
+        XCTAssertEqual(model.limitsSelectedProvider, .claude)
+        model.apply(.limitsSelectNext)
+        XCTAssertEqual(model.limitsSelectedProvider, .codex)
+        model.apply(.limitsSelectNext)
+        XCTAssertEqual(model.limitsSelectedProvider, .glm, "codex -> glm, the new third provider")
+        model.apply(.limitsSelectNext)
+        XCTAssertEqual(model.limitsSelectedProvider, .claude, "wraps forward past glm")
+        model.apply(.limitsSelectPrev)
+        XCTAssertEqual(model.limitsSelectedProvider, .glm, "wraps backward before claude")
+        model.apply(.limitsDisableSelected)
+        XCTAssertFalse(model.glmUsageEnabled)
+        XCTAssertTrue(model.claudeUsageEnabled)
+        XCTAssertTrue(model.codexUsageEnabled)
+        model.apply(.limitsEnableSelected)
+        XCTAssertTrue(model.glmUsageEnabled)
+    }
+
+    @MainActor
     func testTransientToastAutoDismisses() async throws {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)

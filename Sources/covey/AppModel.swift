@@ -103,7 +103,7 @@ public final class AppModel {
     /// Which provider `leader l`'s popover highlights — j/k moves it, h/l
     /// disables/enables it. Resets to `.claude` every time the popover opens;
     /// not persisted, this is transient keyboard-navigation state.
-    public enum LimitsProvider: Equatable { case claude, codex }
+    public enum LimitsProvider: Equatable, CaseIterable { case claude, codex, glm }
     public private(set) var limitsSelectedProvider: LimitsProvider = .claude
     // Codex limits are consumed only in-module (TopBar) + @testable tests, so
     // these stay internal — their types (CodexRateLimitsSnapshot/State) are too.
@@ -1018,6 +1018,10 @@ public final class AppModel {
         persist()
         synchronizeCodexUsageServer()
     }
+    public func setGlmUsageEnabled(_ on: Bool) {
+        glmUsageEnabled = on
+        persist()
+    }
 
     private func synchronizeCodexUsageServer() {
         if codexUsageEnabled {
@@ -1166,17 +1170,21 @@ public final class AppModel {
             guard let target = focusedPane ?? selected else { return }
             Task { try? await client.input(name: target, bytes: [0x1b, 0x0d]) }
         case .limitsSelectNext, .limitsSelectPrev:
-            // Only two providers exist — next and prev are the same swap.
-            limitsSelectedProvider = limitsSelectedProvider == .claude ? .codex : .claude
+            let all = LimitsProvider.allCases
+            let i = all.firstIndex(of: limitsSelectedProvider) ?? 0
+            let delta = action == .limitsSelectNext ? 1 : -1
+            limitsSelectedProvider = all[(i + delta + all.count) % all.count]
         case .limitsEnableSelected:
             switch limitsSelectedProvider {
             case .claude: setClaudeUsageEnabled(true)
             case .codex: setCodexUsageEnabled(true)
+            case .glm: setGlmUsageEnabled(true)
             }
         case .limitsDisableSelected:
             switch limitsSelectedProvider {
             case .claude: setClaudeUsageEnabled(false)
             case .codex: setCodexUsageEnabled(false)
+            case .glm: setGlmUsageEnabled(false)
             }
         case .splitFocusToggle:
             guard let selected, let comp = companion(of: selected) else { return }
