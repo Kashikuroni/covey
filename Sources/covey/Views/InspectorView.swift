@@ -1,5 +1,9 @@
 import SwiftUI
 
+func issueListHeaderFilterLabel(_ state: IssueState) -> String? {
+    state == .open ? nil : state.rawValue.uppercased()
+}
+
 /// Right drawer: GitHub Issues or the selected agent's trace.
 struct InspectorView: View {
     @Bindable var model: AppModel
@@ -17,6 +21,14 @@ struct InspectorView: View {
                         zoneTitle("Issues", badge: 3,
                                   active: model.focus == .inspector, tk: tk)
                         Spacer()
+                        if let filter = issueListHeaderFilterLabel(model.issueBrowser.stateFilter) {
+                            Text(filter)
+                                .font(.system(size: IssueFont.meta, design: .monospaced))
+                                .foregroundStyle(tk.accent)
+                        }
+                        if model.issueBrowser.revalidating {
+                            ProgressView().controlSize(.mini)
+                        }
                     }
                     .padding(.horizontal, 8)
                     .padding(.top, Tokens.paneHeaderTop)

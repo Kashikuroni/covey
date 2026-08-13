@@ -184,6 +184,12 @@ final class IssueModelsTests: XCTestCase {
         XCTAssertFalse(issueCardIsHighlighted(selected: false, inspectorFocused: true))
     }
 
+    func testIssueListHeaderHidesOpenAndNamesNonDefaultFilters() {
+        XCTAssertNil(issueListHeaderFilterLabel(.open))
+        XCTAssertEqual(issueListHeaderFilterLabel(.closed), "CLOSED")
+        XCTAssertEqual(issueListHeaderFilterLabel(.all), "ALL")
+    }
+
     func testIssueDescriptionTrimsOrdinaryText() {
         XCTAssertEqual(issueDescription("  hello\nworld \n"), "hello\nworld")
         XCTAssertNil(issueDescription("   \n\n "))

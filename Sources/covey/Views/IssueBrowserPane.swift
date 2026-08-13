@@ -170,25 +170,14 @@ struct IssueBrowserPane: View {
 
     private var listScreen: some View {
         VStack(alignment: .leading, spacing: 6) {
-            header
             if searchVisible { searchField }
             listBody
             if let prompt = browser.prompt { promptCard(prompt) }   // inline close/delete prompt
             Spacer(minLength: 0)
             footerHints
         }
-        .padding(8)
-    }
-
-    private var header: some View {
-        HStack(spacing: 6) {
-            Spacer()
-            if browser.revalidating {
-                ProgressView().controlSize(.mini)
-            }
-            Text(browser.stateFilter.rawValue)
-                .font(.system(size: IssueFont.meta, design: .monospaced)).foregroundStyle(tk.accent)
-        }
+        .padding(.horizontal, 8)
+        .padding(.bottom, 8)
     }
 
     private var searchField: some View {
