@@ -66,6 +66,13 @@ func codexChip(snapshot: CodexRateLimitsSnapshot?, plan: String?) -> AgentUsageC
                           windows: snapshot.windows)
 }
 
+/// GLM chip from the polled 5h-token Usage (nil when there's no snapshot).
+/// z.ai's quota endpoint carries no plan/tier name, so there is no plan badge.
+func glmChip(usage: Usage?) -> AgentUsageChip? {
+    guard let usage, let window = usage.fiveHour else { return nil }
+    return AgentUsageChip(name: "GLM", plan: nil, windows: [LabeledWindow(label: "5h", window: window)])
+}
+
 /// The Codex window to treat as "current session" in the compact header:
 /// the window labeled `7d`, falling back to `secondary` then `primary` —
 /// tolerant of the same missing-duration cases `codexChip` already is.
@@ -86,11 +93,13 @@ struct HeaderSegment: Equatable {
     let level: UsageLevel?
 }
 
-/// Claude and Codex segments for the compact header, in display order.
+/// Claude, Codex, and GLM segments for the compact header, in display order.
 /// Claude's error string takes its slot when there's no usage snapshot yet;
-/// a provider with no data at all contributes no segment.
+/// a provider with no data at all contributes no segment. `glmUsage` defaults
+/// to nil so existing two-provider call sites are unaffected.
 func headerSegments(usage: Usage?, usageError: String?,
-                    codexUsage: CodexRateLimitsSnapshot?) -> [HeaderSegment] {
+                    codexUsage: CodexRateLimitsSnapshot?,
+                    glmUsage: Usage? = nil) -> [HeaderSegment] {
     var segments: [HeaderSegment] = []
     if let window = usage?.fiveHour {
         let pct = Int(window.utilization.rounded())
@@ -101,6 +110,10 @@ func headerSegments(usage: Usage?, usageError: String?,
     if let window = codexHeaderWindow(codexUsage) {
         let pct = Int(window.utilization.rounded())
         segments.append(HeaderSegment(label: "Codex", value: "\(pct)%", level: usageLevel(pct)))
+    }
+    if let window = glmUsage?.fiveHour {
+        let pct = Int(window.utilization.rounded())
+        segments.append(HeaderSegment(label: "GLM", value: "\(pct)%", level: usageLevel(pct)))
     }
     return segments
 }
@@ -124,20 +137,19 @@ struct UsageChip: View {
     let usage: Usage?
     let usageError: String?
     let codexUsage: CodexRateLimitsSnapshot?
+    let glmUsage: Usage?
     let tk: Tokens
 
     var body: some View {
         // Ticks every minute so the clock and countdown-derived data advance
         // even when the snapshot is Equatable-equal (no re-render otherwise).
         TimelineView(.everyMinute) { ctx in
-            let segments = headerSegments(usage: usage, usageError: usageError, codexUsage: codexUsage)
+            let segments = headerSegments(usage: usage, usageError: usageError,
+                                          codexUsage: codexUsage, glmUsage: glmUsage)
             HStack(spacing: 12) {
-                if let first = segments.first {
-                    segmentView(first)
-                }
-                if segments.count > 1 {
-                    divider
-                    segmentView(segments[1])
+                ForEach(Array(segments.enumerated()), id: \.offset) { index, seg in
+                    if index > 0 { divider }
+                    segmentView(seg)
                 }
                 if !segments.isEmpty { divider }
                 Text(headerDateTime(ctx.date)).foregroundStyle(tk.t3)
@@ -162,6 +174,10 @@ struct UsageChip: View {
     }
 
     private func brandColor(_ label: String) -> Color {
-        label == "Codex" ? tk.codexBrand : tk.claudeBrand
+        switch label {
+        case "Codex": return tk.codexBrand
+        case "GLM": return tk.glmBrand
+        default: return tk.claudeBrand
+        }
     }
 }
