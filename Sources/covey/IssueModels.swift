@@ -179,9 +179,32 @@ func labelPillColor(hex: String, darkTheme: Bool) -> UInt32? {
     return blend(rgb, toward: foreground, labelThemeBlend)
 }
 
-/// The card's description block: the whole body, edge-trimmed, or nil when
-/// blank. (bodyPreview stays for first-line-only callers.)
+private let issuePreviewImagePatterns = [
+    #"(?i)<img\b[^>]*>"#,
+    #"!\[[^\]]*\]\([^\n)]*\)"#,
+]
+
+private let issuePreviewBlankRunPattern = #"\n[ \t]*\n(?:[ \t]*\n)+"#
+
+/// The card's description block with image markup omitted: the whole remaining
+/// body, edge-trimmed, or nil when blank. Issue detail keeps the raw body.
 func issueDescription(_ body: String) -> String? {
-    let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+    var preview = body
+    var removedImage = false
+    for pattern in issuePreviewImagePatterns {
+        let sanitized = preview.replacingOccurrences(
+            of: pattern,
+            with: "",
+            options: .regularExpression)
+        removedImage = removedImage || sanitized != preview
+        preview = sanitized
+    }
+    if removedImage {
+        preview = preview.replacingOccurrences(
+            of: issuePreviewBlankRunPattern,
+            with: "\n\n",
+            options: .regularExpression)
+    }
+    let trimmed = preview.trimmingCharacters(in: .whitespacesAndNewlines)
     return trimmed.isEmpty ? nil : trimmed
 }

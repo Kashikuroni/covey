@@ -178,10 +178,32 @@ final class IssueModelsTests: XCTestCase {
         XCTAssertEqual(issueCardUpdatedText(age: "21h"), "updated 21h")
     }
 
-    func testIssueDescription() {
+    func testIssueDescriptionTrimsOrdinaryText() {
         XCTAssertEqual(issueDescription("  hello\nworld \n"), "hello\nworld")
         XCTAssertNil(issueDescription("   \n\n "))
         XCTAssertNil(issueDescription(""))
+    }
+
+    func testIssueDescriptionRemovesHTMLImagesAndKeepsText() {
+        let body = """
+        Before
+
+        <img width="640" alt="capture" src="https://example.test/capture.png">
+
+        After
+        """
+        XCTAssertEqual(issueDescription(body), "Before\n\nAfter")
+    }
+
+    func testIssueDescriptionRemovesMarkdownImages() {
+        XCTAssertEqual(
+            issueDescription("Text\n![diagram](https://example.test/diagram.png)\nMore"),
+            "Text\n\nMore")
+    }
+
+    func testIssueDescriptionOmitsImageOnlyBody() {
+        XCTAssertNil(issueDescription("<IMG src=\"https://example.test/a.png\" />"))
+        XCTAssertNil(issueDescription("![capture](https://example.test/capture.png)"))
     }
 
     func testIssueWipHasDiff() {
