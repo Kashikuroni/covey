@@ -85,37 +85,70 @@ func codexHeaderWindow(_ snapshot: CodexRateLimitsSnapshot?) -> UsageWindow? {
 }
 
 /// One compact top-bar segment: a provider label with its threshold-colored
-/// percent, or (Claude only, when usage failed to load) a plain error label
-/// with no percent.
+/// percent, or a neutral em dash while no usage snapshot is available.
 struct HeaderSegment: Equatable {
     let label: String
-    let value: String?
+    let value: String
     let level: UsageLevel?
 }
 
 /// Claude, Codex, and GLM segments for the compact header, in display order.
-/// Claude's error string takes its slot when there's no usage snapshot yet;
-/// a provider with no data at all contributes no segment. `glmUsage` defaults
-/// to nil so existing two-provider call sites are unaffected.
+/// The three slots are stable; a provider without data shows an em dash.
 func headerSegments(usage: Usage?, usageError: String?,
                     codexUsage: CodexRateLimitsSnapshot?,
                     glmUsage: Usage? = nil) -> [HeaderSegment] {
-    var segments: [HeaderSegment] = []
-    if let window = usage?.fiveHour {
+    func segment(_ label: String, _ window: UsageWindow?) -> HeaderSegment {
+        guard let window else {
+            return HeaderSegment(label: label, value: "—", level: nil)
+        }
         let pct = Int(window.utilization.rounded())
-        segments.append(HeaderSegment(label: "Claude", value: "\(pct)%", level: usageLevel(pct)))
-    } else if let usageError {
-        segments.append(HeaderSegment(label: "usage: \(usageError)", value: nil, level: nil))
+        return HeaderSegment(label: label, value: "\(pct)%", level: usageLevel(pct))
     }
-    if let window = codexHeaderWindow(codexUsage) {
-        let pct = Int(window.utilization.rounded())
-        segments.append(HeaderSegment(label: "Codex", value: "\(pct)%", level: usageLevel(pct)))
-    }
-    if let window = glmUsage?.fiveHour {
-        let pct = Int(window.utilization.rounded())
-        segments.append(HeaderSegment(label: "GLM", value: "\(pct)%", level: usageLevel(pct)))
-    }
-    return segments
+    return [
+        segment("Claude", usage?.fiveHour),
+        segment("Codex", codexHeaderWindow(codexUsage)),
+        segment("GLM", glmUsage?.fiveHour),
+    ]
+}
+
+enum UsageProvider: Equatable, CaseIterable {
+    case claude, codex, glm
+}
+
+/// Stable provider row for the limits detail popover. A row exists even when
+/// its provider has no snapshot, in which case `emptyMessage` explains why.
+struct LimitsRowModel: Equatable, Identifiable {
+    var id: UsageProvider { provider }
+    let provider: UsageProvider
+    let chip: AgentUsageChip
+    let enabled: Bool
+    let stale: Bool
+    let emptyMessage: String?
+}
+
+func limitsRows(usage: Usage?, plan: String?, error: String?,
+                codexUsage: CodexRateLimitsSnapshot?, codexPlan: String?,
+                glmUsage: Usage?, glmError: String?,
+                claudeEnabled: Bool, codexEnabled: Bool,
+                glmEnabled: Bool) -> [LimitsRowModel] {
+    let claude = claudeChip(usage: usage, plan: plan)
+        ?? AgentUsageChip(name: "Claude", plan: distinctPlan(plan, name: "Claude"), windows: [])
+    let codex = codexChip(snapshot: codexUsage, plan: codexPlan)
+        ?? AgentUsageChip(name: "Codex", plan: distinctPlan(codexPlan, name: "Codex"), windows: [])
+    let glm = glmChip(usage: glmUsage)
+        ?? AgentUsageChip(name: "GLM", plan: nil, windows: [])
+
+    return [
+        LimitsRowModel(provider: .claude, chip: claude, enabled: claudeEnabled,
+                       stale: error != nil && !claude.windows.isEmpty,
+                       emptyMessage: claude.windows.isEmpty ? (error ?? "No usage data") : nil),
+        LimitsRowModel(provider: .codex, chip: codex, enabled: codexEnabled,
+                       stale: false,
+                       emptyMessage: codex.windows.isEmpty ? "No usage data" : nil),
+        LimitsRowModel(provider: .glm, chip: glm, enabled: glmEnabled,
+                       stale: glmError != nil && !glm.windows.isEmpty,
+                       emptyMessage: glm.windows.isEmpty ? (glmError ?? "No usage data") : nil),
+    ]
 }
 
 /// Localized "24 июля · 14:32" — day + full month name (in whatever case
@@ -163,13 +196,13 @@ struct UsageChip: View {
 
     @ViewBuilder
     private func segmentView(_ seg: HeaderSegment) -> some View {
-        if let value = seg.value, let level = seg.level {
-            HStack(spacing: 6) {
-                Text(seg.label).foregroundStyle(brandColor(seg.label))
-                Text(value).foregroundStyle(levelColor(level, tk: tk))
+        HStack(spacing: 6) {
+            Text(seg.label).foregroundStyle(brandColor(seg.label))
+            if let level = seg.level {
+                Text(seg.value).foregroundStyle(levelColor(level, tk: tk))
+            } else {
+                Text(seg.value).foregroundStyle(tk.t3)
             }
-        } else {
-            Text(seg.label).foregroundStyle(.orange)
         }
     }
 

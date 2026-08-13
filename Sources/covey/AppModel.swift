@@ -8,6 +8,11 @@ public enum FocusZone: Equatable {
     case session, agent, issues, terminalSplit, trace
 }
 
+struct ProviderLaunch: Equatable {
+    let env: [String: String]?
+    let providerId: String?
+}
+
 /// UI state machine. The daemon is the single source of truth about sessions:
 /// actions call the IPC client and the model mutates only when the daemon's
 /// events confirm the change. One instance owns the single `client.events`
@@ -79,13 +84,6 @@ public final class AppModel {
     }
     public private(set) var connected = false
     public private(set) var themeRaw: String = "dark"
-    /// Active Claude Code provider id ("anthropic" | "glm" | …). Applied to
-    /// new sessions at spawn; running sessions keep the provider they started with.
-    public private(set) var providerId: String = "anthropic"
-    /// Provider each live session was created under, so a relaunched recent
-    /// keeps its original provider even after the global toggle moves. Client
-    /// side because the GUI owns provider resolution; cleared with the session.
-    private var providerBySession: [String: String] = [:]
     public private(set) var splitPct: Int = 38
     public private(set) var usagePlacement: UsagePlacement = .right
     public private(set) var recents: [RecentSession] = []
@@ -238,7 +236,6 @@ public final class AppModel {
     public func start() async {
         persisted = store.load()
         themeRaw = persisted.theme ?? "dark"
-        providerId = persisted.provider ?? "anthropic"
         splitPct = persisted.splitPct ?? 38
         usagePlacement = persisted.usagePlacement.flatMap(UsagePlacement.init(rawValue:)) ?? .right
         recents = persisted.recents
@@ -274,7 +271,8 @@ public final class AppModel {
                 for s in lost.sorted(by: { $0.created < $1.created }) {
                     pushRecent(&recents, RecentSession(name: s.name, dir: s.dir, agent: s.agent,
                                                        resumeCmd: s.resumeCmd,
-                                                       stoppedAt: Int64(Date().timeIntervalSince1970)))
+                                                       stoppedAt: Int64(Date().timeIntervalSince1970),
+                                                       providerId: s.providerId))
                 }
                 persist()
                 try? await client.clearLost()
@@ -468,16 +466,27 @@ public final class AppModel {
     @discardableResult
     public func createFull(name: String?, dir: String, agent: String,
                            terminal: Bool, worktree: WorktreeSpec?,
-                           model: String?, effort: String?) async -> String? {
-        let (env, keyErr) = Self.resolveProviderEnv(providerId)
-        if let keyErr { return keyErr }
+                           model: String?, effort: String?,
+                           providerId: String? = nil) async -> String? {
+        let (resolved, providerError) = Self.resolveProviderLaunch(
+            agent: agent, selectedProviderId: providerId
+        )
+        if let providerError { return providerError }
+        guard let resolved else { return "Unable to resolve Claude Code provider." }
+        if resolved.providerId != nil {
+            let settingsPath = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".claude/settings.json").path
+            let conflicts = Self.anthropicManagedKeys(inSettingsAt: settingsPath)
+            if !conflicts.isEmpty {
+                toast = "~/.claude/settings.json sets \(conflicts.joined(separator: ", ")); it overrides Covey. Remove those keys or they'll win."
+            }
+        }
         do {
-            let providerArg = providerId == "anthropic" ? nil : providerId
             let s = try await client.create(dir: dir, agent: agent, name: name,
                                             terminal: terminal ? true : nil,
                                             worktree: worktree, model: model,
-                                            effort: effort, env: env, providerId: providerArg)
-            providerBySession[s.name] = providerId
+                                            effort: effort, env: resolved.env,
+                                            providerId: resolved.providerId)
             // Land in the fresh session, keyboard in its terminal.
             await select(s.name)
             setFocus(.terminal)
@@ -600,16 +609,18 @@ public final class AppModel {
 
     @discardableResult
     public func relaunchRecent(_ r: RecentSession, activate: Bool = true) async -> Bool {
-        // Keep the provider the session originally used (fallback to current);
-        // a relaunched GLM session stays GLM even if the global toggle moved.
-        let pid = r.providerId ?? providerId
-        let (env, keyErr) = Self.resolveProviderEnv(pid)
-        if let keyErr { toast = keyErr; return false }
+        // Keep the provider the session originally used; legacy recents are
+        // Anthropic. Non-Claude agents always resolve to a neutral launch.
+        let selectedId = r.providerId ?? ProviderProfile.anthropic.id
+        let (resolved, providerError) = Self.resolveProviderLaunch(
+            agent: r.agent, selectedProviderId: selectedId
+        )
+        if let providerError { toast = providerError; return false }
+        guard let resolved else { return false }
         do {
-            let providerArg = pid == "anthropic" ? nil : pid
             let s = try await client.create(dir: r.dir, agent: r.agent, name: r.name,
-                                            resume: r.resumeCmd, env: env, providerId: providerArg)
-            providerBySession[s.name] = pid
+                                            resume: r.resumeCmd, env: resolved.env,
+                                            providerId: resolved.providerId)
             if activate {
                 await select(s.name)
                 setFocus(.terminal)
@@ -713,7 +724,7 @@ public final class AppModel {
     public func setVimMode(_ on: Bool) { vimMode = on; persist() }
 
     var settingsValues: SettingsValues {
-        SettingsValues(theme: Theme(raw: themeRaw), providerId: providerId,
+        SettingsValues(theme: Theme(raw: themeRaw),
                        vimMode: vimMode, showSessions: showSessions,
                        showHeader: showHeader, showFooter: showFooter,
                        usagePlacement: usagePlacement,
@@ -726,14 +737,6 @@ public final class AppModel {
         guard modal == nil else { return }
         modal = .settings
     }
-
-    /// The active provider profile (built-in or from config), or anthropic.
-    var activeProviderProfile: ProviderProfile {
-        ProviderRegistry.profile(id: providerId) ?? .anthropic
-    }
-    /// True when traffic goes to Anthropic (the Claude usage chip is only
-    /// meaningful then — a GLM/Kimi session consumes no claude.ai quota).
-    var providerIsAnthropic: Bool { providerId == "anthropic" }
 
     /// Stores (or, for an empty key, clears) a provider API key in the Keychain.
     func setProviderKey(_ profile: ProviderProfile, _ key: String) {
@@ -764,11 +767,32 @@ public final class AppModel {
         }
     }
 
+    /// Resolves the provider block for one new process. Provider overrides are
+    /// valid only for the exact Claude preset; every other agent stays neutral.
+    nonisolated static func resolveProviderLaunch(
+        agent: String,
+        selectedProviderId: String?
+    ) -> (launch: ProviderLaunch?, error: String?) {
+        guard agent == "claude" else {
+            return (ProviderLaunch(env: nil, providerId: nil), nil)
+        }
+        let id = selectedProviderId ?? ProviderProfile.anthropic.id
+        guard ProviderRegistry.profile(id: id) != nil else {
+            return (nil, "Unknown Claude Code provider: \(id)")
+        }
+        let resolved = resolveProviderEnv(id)
+        if let error = resolved.error { return (nil, error) }
+        return (ProviderLaunch(
+            env: resolved.env,
+            providerId: id == ProviderProfile.anthropic.id ? nil : id
+        ), nil)
+    }
+
     /// The `ANTHROPIC_*` env keys Covey may set for a provider. Claude Code's
     /// settings.json `env` block overrides the process environment, so any of
     /// these present in `~/.claude/settings.json` would silently override
     /// Covey's provider choice.
-    static let managedKeys = [
+    nonisolated static let managedKeys = [
         "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY",
         "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
         "ANTHROPIC_DEFAULT_OPUS_MODEL",
@@ -976,9 +1000,7 @@ public final class AppModel {
         }
         let themeChanged = values.theme != old.theme
         let codexChanged = values.codexUsageEnabled != old.codexUsageEnabled
-        let providerChanged = values.providerId != old.providerId
         themeRaw = values.theme.rawValue
-        providerId = values.providerId
         vimMode = values.vimMode
         showSessions = values.showSessions
         showHeader = values.showHeader
@@ -989,18 +1011,6 @@ public final class AppModel {
         glmUsageEnabled = values.glmUsageEnabled
         persist()
         if codexChanged { synchronizeCodexUsageServer() }
-        // Claude Code's ~/.claude/settings.json env block overrides the process
-        // environment, so keys pinned there win over Covey's injection. Warn
-        // (don't auto-edit) when switching to a non-Anthropic provider that the
-        // settings file would override.
-        if providerChanged, providerId != "anthropic" {
-            let settingsPath = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".claude/settings.json").path
-            let conflicts = Self.anthropicManagedKeys(inSettingsAt: settingsPath)
-            if !conflicts.isEmpty {
-                toast = "~/.claude/settings.json sets \(conflicts.joined(separator: ", ")); it overrides Covey. Remove those keys or they'll win."
-            }
-        }
         offerThemeRestartAfterModalDismiss = themeChanged
         modal = nil
     }
@@ -1421,7 +1431,6 @@ public final class AppModel {
 
     private func persist() {
         persisted.theme = themeRaw
-        persisted.provider = providerId
         persisted.splitPct = splitPct
         persisted.usagePlacement = usagePlacement.rawValue
         persisted.recents = recents
@@ -1563,13 +1572,12 @@ public final class AppModel {
                                                    resumeCmd: s.resumeCmd,
                                                    stoppedAt: Int64(Date().timeIntervalSince1970),
                                                    branch: s.git?.branch,
-                                                   providerId: providerBySession[name]))
+                                                   providerId: s.providerId))
                 persist()
             }
             sessions.removeAll { $0.name == name }
             statusByName[name] = nil
             modelByName[name] = nil
-            providerBySession[name] = nil
             dropPaneState(name)
             if selected == name { selected = nil }
         case let .statusChanged(name, status):

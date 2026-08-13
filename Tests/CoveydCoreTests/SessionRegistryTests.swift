@@ -21,6 +21,8 @@ final class SessionRegistryTests: XCTestCase {
                                argv: ["/bin/sh", "-c", "sleep 30"],
                                env: ["ANTHROPIC_AUTH_TOKEN": "secret"], providerId: "glm")
         XCTAssertEqual(s.agent, "/bin/sh")
+        XCTAssertEqual(s.providerId, "glm")
+        XCTAssertEqual(reg.list().first { $0.name == s.name }?.providerId, "glm")
         XCTAssertEqual(reg.snapshotMetasForTesting().first { $0.name == s.name }?.providerId, "glm")
         reg.kill(name: s.name)
     }

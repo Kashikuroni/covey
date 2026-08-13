@@ -4,6 +4,43 @@ import CoveyKit
 import CoveydCore
 
 final class AppModelTests: XCTestCase {
+    func testResolveProviderLaunchForClaudeGlm() {
+        ProviderKeychain.write(account: "covey.provider.glm", value: "TESTKEY")
+        defer { ProviderKeychain.delete(account: "covey.provider.glm") }
+
+        let (launch, error) = AppModel.resolveProviderLaunch(
+            agent: "claude", selectedProviderId: "glm"
+        )
+
+        XCTAssertNil(error)
+        XCTAssertEqual(launch?.providerId, "glm")
+        XCTAssertEqual(launch?.env?["ANTHROPIC_AUTH_TOKEN"], "TESTKEY")
+    }
+
+    func testResolveProviderLaunchDefaultsClaudeToAnthropic() {
+        let (launch, error) = AppModel.resolveProviderLaunch(
+            agent: "claude", selectedProviderId: nil
+        )
+        XCTAssertNil(error)
+        XCTAssertEqual(launch, ProviderLaunch(env: nil, providerId: nil))
+    }
+
+    func testResolveProviderLaunchNeverInjectsIntoNonClaude() {
+        let (launch, error) = AppModel.resolveProviderLaunch(
+            agent: "codex", selectedProviderId: "glm"
+        )
+        XCTAssertNil(error)
+        XCTAssertEqual(launch, ProviderLaunch(env: nil, providerId: nil))
+    }
+
+    func testResolveProviderLaunchRejectsUnknownClaudeProvider() {
+        let (launch, error) = AppModel.resolveProviderLaunch(
+            agent: "claude", selectedProviderId: "missing"
+        )
+        XCTAssertNil(launch)
+        XCTAssertEqual(error, "Unknown Claude Code provider: missing")
+    }
+
     func testResolveProviderEnvGlmWithKey() {
         ProviderKeychain.write(account: "covey.provider.glm", value: "TESTKEY")
         defer { ProviderKeychain.delete(account: "covey.provider.glm") }

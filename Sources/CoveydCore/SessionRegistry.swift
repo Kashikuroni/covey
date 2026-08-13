@@ -24,7 +24,7 @@ public final class SessionRegistry {
     public var onRenamed: ((String, String) -> Void)?
     private var entries: [String: (session: Session, process: any SessionRuntime,
                                    screen: ScreenModel, argv: [String],
-                                   env: [String: String]?, providerId: String?,
+                                   env: [String: String]?,
                                    size: (cols: UInt16, rows: UInt16))] = [:]
     private var pendingRestart: [String: String] = [:]   // name -> respawn dir
     private let lock = NSLock()
@@ -76,7 +76,7 @@ public final class SessionRegistry {
     /// a dead shell is not worth resurfacing as lost after a daemon restart.
     private static func metas(of entries: [String: (session: Session, process: any SessionRuntime,
                               screen: ScreenModel, argv: [String], env: [String: String]?,
-                              providerId: String?, size: (cols: UInt16, rows: UInt16))])
+                              size: (cols: UInt16, rows: UInt16))])
         -> [SessionMeta] {
         entries.values.filter { $0.session.companionOf == nil }.map {
             SessionMeta(name: $0.session.name, dir: $0.session.dir,
@@ -84,7 +84,7 @@ public final class SessionRegistry {
                         created: $0.session.created,
                         worktreeRepo: $0.session.worktreeRepo,
                         resumeCmd: $0.session.resumeCmd,
-                        providerId: $0.providerId)
+                        providerId: $0.session.providerId)
         }
     }
 
@@ -118,7 +118,8 @@ public final class SessionRegistry {
         let session = Session(
             name: id, dir: dir, cwd: dir, agent: agent,
             created: clock(), git: nil, worktreeRepo: worktreeRepo,
-            resumeCmd: resumeCmd, companionOf: companionOf
+            resumeCmd: resumeCmd, companionOf: companionOf,
+            providerId: providerId
         )
         let proc = PTYSessionRuntime()
         // Identify the entry by process, not by name: the exit may arrive
@@ -136,7 +137,7 @@ public final class SessionRegistry {
             throw error
         }
         if let autoNumber { counter = autoNumber }
-        entries[id] = (session, proc, screen, argv, env, providerId, (80, 24))
+        entries[id] = (session, proc, screen, argv, env, (80, 24))
         lock.unlock()
         persistNow()
         onSessionAdded?(session)
@@ -395,7 +396,7 @@ public final class SessionRegistry {
         session.cwd = dir
         session.git = nil        // GitMonitor re-reads for the (possibly new) dir
         lock.lock()
-        entries[id] = (session, proc, screen, argv, old.env, old.providerId, old.size)
+        entries[id] = (session, proc, screen, argv, old.env, old.size)
         lock.unlock()
         return session
     }

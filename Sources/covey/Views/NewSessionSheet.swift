@@ -20,6 +20,7 @@ struct NewSessionSheet: View {
     @State private var worktrees: [String: String] = [:]
     @State private var agentChoice: String
     @State private var customAgent = ""
+    @State private var providerId = SessionProviderSelection.defaultClaudeProviderId
     @State private var repoRoot: String?
     @State private var branches: [String] = []
     @State private var dirEntries: [String] = []
@@ -32,6 +33,7 @@ struct NewSessionSheet: View {
     private let presets: [String]
 
     private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
+    private var providerProfiles: [ProviderProfile] { ProviderRegistry.load() }
 
     init(model: AppModel) {
         self.model = model
@@ -44,6 +46,16 @@ struct NewSessionSheet: View {
 
     private var effectiveAgent: String {
         agentChoice == customAgentSlot ? customAgent : agentChoice
+    }
+
+    private var showProviderChoice: Bool {
+        SessionProviderSelection.providerChoiceIsVisible(agent: agentChoice)
+    }
+
+    private var effectiveProviderId: String? {
+        SessionProviderSelection.effectiveProviderId(
+            agent: agentChoice, selectedId: providerId
+        )
     }
 
     private var trimmedBranch: String { branchInput.trimmingCharacters(in: .whitespaces) }
@@ -74,14 +86,19 @@ struct NewSessionSheet: View {
         var seq = formFieldSequence(isRepo: repoRoot != nil,
                                     showWorktreeToggle: showWorktreeToggle,
                                     showBase: branchIsNew,
-                                    customAgent: agentChoice == customAgentSlot)
+                                    customAgent: agentChoice == customAgentSlot,
+                                    showProvider: showProviderChoice)
         // From an issue the dir is locked to the project root — drop it from
         // the keyboard cycle (it's shown as static text, not a field).
         if boundIssue != nil { seq.removeAll { $0 == .dir } }
         return seq
     }
 
-    private var commandPreview: String { effectiveAgent }
+    private var commandPreview: String {
+        guard showProviderChoice else { return effectiveAgent }
+        let label = providerProfiles.first { $0.id == providerId }?.label ?? providerId
+        return "\(effectiveAgent) · provider: \(label)"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -121,6 +138,11 @@ struct NewSessionSheet: View {
         }
         .onChange(of: branchInput) { _, _ in branchSelected = 0 }
         .onChange(of: baseInput) { _, _ in baseSelected = 0 }
+        .onChange(of: agentChoice) { _, newValue in
+            if !SessionProviderSelection.providerChoiceIsVisible(agent: newValue) {
+                providerId = SessionProviderSelection.defaultClaudeProviderId
+            }
+        }
         .onChange(of: focus) { _, new in
             // macOS selects the whole text when a field gains focus; for the
             // path field that would make the first keystroke wipe "~/" — put
@@ -158,6 +180,9 @@ struct NewSessionSheet: View {
                     .focused($focus, equals: .customAgent)
                     .ayuField(tk, focused: focus == .customAgent)
                     .onSubmit { advance(from: .customAgent) }
+            }
+            if showProviderChoice {
+                providerCycleRow
             }
             Text(commandPreview)
                 .font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
@@ -362,6 +387,36 @@ struct NewSessionSheet: View {
         }
     }
 
+    private var providerCycleRow: some View {
+        let ids = providerProfiles.map(\.id)
+        return HStack(spacing: 8) {
+            Text("Provider").frame(width: 60, alignment: .leading)
+                .font(.callout).foregroundStyle(.secondary)
+            ForEach(providerProfiles) { profile in
+                Text(profile.label)
+                    .font(.callout)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(providerId == profile.id
+                                ? Color.accentColor.opacity(0.3) : Color.gray.opacity(0.12),
+                                in: RoundedRectangle(cornerRadius: 4))
+                    .onTapGesture { providerId = profile.id; focus = .provider }
+            }
+            Spacer()
+        }
+        .padding(2)
+        .background(focus == .provider ? Color.accentColor.opacity(0.12) : .clear)
+        .focusable()
+        .focused($focus, equals: .provider)
+        .onKeyPress(.rightArrow) { cycle(ids, $providerId, 1); return .handled }
+        .onKeyPress(.leftArrow) { cycle(ids, $providerId, -1); return .handled }
+        .onKeyPress(.space) { cycle(ids, $providerId, 1); return .handled }
+        .onKeyPress(.return, phases: .down) { press in
+            guard !press.modifiers.contains(.shift) else { return .ignored }
+            advance(from: .provider)
+            return .handled
+        }
+    }
+
     // MARK: - behavior
 
     /// TUI cycle with wrap.
@@ -445,12 +500,13 @@ struct NewSessionSheet: View {
         let spec = (name: trimmedName.isEmpty ? nil : trimmedName,
                     dir: expandTilde(cleanDir),
                     agent: effectiveAgent,
-                    worktree: worktree)
+                    worktree: worktree,
+                    providerId: effectiveProviderId)
         Task {
             if let err = await model.createFull(name: spec.name, dir: spec.dir,
                                                 agent: spec.agent, terminal: false,
                                                 worktree: spec.worktree, model: nil,
-                                                effort: nil) {
+                                                effort: nil, providerId: spec.providerId) {
                 error = err
             } else {
                 if let issue = boundIssue, let created = spec.name {

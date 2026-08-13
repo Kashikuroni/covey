@@ -23,11 +23,15 @@ public struct Session: Codable, Equatable {
     /// Name of the parent session when this is a split companion shell;
     /// nil for regular sessions. Companions are hidden from the GUI lists.
     public var companionOf: String?
+    /// Claude-compatible provider used to create this session; nil means
+    /// Anthropic or a payload written before provider identity was persisted.
+    public var providerId: String?
 
     public init(
         name: String, dir: String, cwd: String, agent: String,
         created: Int64, git: GitInfo? = nil, worktreeRepo: String? = nil,
-        resumeCmd: String? = nil, companionOf: String? = nil
+        resumeCmd: String? = nil, companionOf: String? = nil,
+        providerId: String? = nil
     ) {
         self.name = name
         self.dir = dir
@@ -38,6 +42,7 @@ public struct Session: Codable, Equatable {
         self.worktreeRepo = worktreeRepo
         self.resumeCmd = resumeCmd
         self.companionOf = companionOf
+        self.providerId = providerId
     }
 }
 
@@ -47,4 +52,3 @@ public enum Status: String, Codable, Equatable {
 
 /// Branches that destructive git actions refuse to touch (git.rs port).
 public let protectedBranches = ["main", "master", "develop", "dev"]
-

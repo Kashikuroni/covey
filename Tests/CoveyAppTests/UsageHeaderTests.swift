@@ -36,7 +36,7 @@ final class UsageHeaderTests: XCTestCase {
         XCTAssertNil(codexHeaderWindow(CodexRateLimitsSnapshot(primary: nil, secondary: nil)))
     }
 
-    func testHeaderSegmentsBothProvidersPresent() {
+    func testHeaderSegmentsKeepAllProvidersWhenOnlyClaudeAndCodexHaveData() {
         let usage = Usage(fiveHour: UsageWindow(utilization: 65, resetUnix: 1),
                           sevenDay: nil, sevenDaySonnet: nil)
         let codex = CodexRateLimitsSnapshot(
@@ -46,19 +46,28 @@ final class UsageHeaderTests: XCTestCase {
         XCTAssertEqual(segs, [
             HeaderSegment(label: "Claude", value: "65%", level: .warn),
             HeaderSegment(label: "Codex", value: "18%", level: .ok),
+            HeaderSegment(label: "GLM", value: "—", level: nil),
         ])
     }
 
-    func testHeaderSegmentsClaudeErrorFallback() {
+    func testHeaderSegmentsKeepProviderNamesAndPlaceholdersOnError() {
         let segs = headerSegments(usage: nil, usageError: "network", codexUsage: nil)
-        XCTAssertEqual(segs, [HeaderSegment(label: "usage: network", value: nil, level: nil)])
+        XCTAssertEqual(segs, [
+            HeaderSegment(label: "Claude", value: "—", level: nil),
+            HeaderSegment(label: "Codex", value: "—", level: nil),
+            HeaderSegment(label: "GLM", value: "—", level: nil),
+        ])
     }
 
-    func testHeaderSegmentsOmitsAbsentProvider() {
+    func testHeaderSegmentsNeverOmitAbsentProviders() {
         let usage = Usage(fiveHour: UsageWindow(utilization: 5, resetUnix: nil),
                           sevenDay: nil, sevenDaySonnet: nil)
         let segs = headerSegments(usage: usage, usageError: nil, codexUsage: nil)
-        XCTAssertEqual(segs, [HeaderSegment(label: "Claude", value: "5%", level: .ok)])
+        XCTAssertEqual(segs, [
+            HeaderSegment(label: "Claude", value: "5%", level: .ok),
+            HeaderSegment(label: "Codex", value: "—", level: nil),
+            HeaderSegment(label: "GLM", value: "—", level: nil),
+        ])
     }
 
     func testHeaderSegmentsIncludesGlmAsThirdSegment() {
@@ -77,13 +86,15 @@ final class UsageHeaderTests: XCTestCase {
         ])
     }
 
-    func testHeaderSegmentsGlmOmittedWhenAbsentDefaultsExistingCallers() {
-        // Existing 3-arg call sites (no glmUsage) must keep behaving exactly
-        // as before — this is the regression guard for the generalization.
+    func testHeaderSegmentsDefaultGlmArgumentStillKeepsGlmSlot() {
         let usage = Usage(fiveHour: UsageWindow(utilization: 5, resetUnix: nil),
                           sevenDay: nil, sevenDaySonnet: nil)
         let segs = headerSegments(usage: usage, usageError: nil, codexUsage: nil)
-        XCTAssertEqual(segs, [HeaderSegment(label: "Claude", value: "5%", level: .ok)])
+        XCTAssertEqual(segs, [
+            HeaderSegment(label: "Claude", value: "5%", level: .ok),
+            HeaderSegment(label: "Codex", value: "—", level: nil),
+            HeaderSegment(label: "GLM", value: "—", level: nil),
+        ])
     }
 
     func testHeaderDateTimeNoYear() {

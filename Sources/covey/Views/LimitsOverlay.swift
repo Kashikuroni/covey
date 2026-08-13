@@ -23,6 +23,7 @@ struct LimitsOverlay: View {
     let codexUsage: CodexRateLimitsSnapshot?
     let codexPlan: String?
     let glmUsage: Usage?
+    let glmError: String?
     let claudeUsageEnabled: Bool
     let codexUsageEnabled: Bool
     let glmUsageEnabled: Bool
@@ -34,57 +35,21 @@ struct LimitsOverlay: View {
 
     private let cardWidth: CGFloat = 320
 
-    /// One row's worth of inputs to `providerSection`. Building this list is
-    /// what lets the body iterate instead of hand-writing one block per
-    /// provider — adding a fourth provider later is one more entry here.
-    private struct Row: Identifiable {
-        var id: String { chip.name }
-        let chip: AgentUsageChip
-        let enabled: Bool
-        let stale: Bool
-        let selected: Bool
-        let onSetEnabled: (Bool) -> Void
-    }
-
-    private func rows(now: Date) -> [Row] {
-        var rows: [Row] = []
-        if let claude = claudeChip(usage: usage, plan: plan) {
-            rows.append(Row(chip: claude, enabled: claudeUsageEnabled, stale: error != nil,
-                            selected: selectedProvider == .claude,
-                            onSetEnabled: onSetClaudeUsageEnabled))
-        }
-        if let codex = codexChip(snapshot: codexUsage, plan: codexPlan) {
-            // Codex has no separate error signal today (a failed poll just
-            // silently keeps the last snapshot), so only the disabled state
-            // gets a marker here, not staleness.
-            rows.append(Row(chip: codex, enabled: codexUsageEnabled, stale: false,
-                            selected: selectedProvider == .codex,
-                            onSetEnabled: onSetCodexUsageEnabled))
-        }
-        if let glm = glmChip(usage: glmUsage) {
-            rows.append(Row(chip: glm, enabled: glmUsageEnabled, stale: false,
-                            selected: selectedProvider == .glm,
-                            onSetEnabled: onSetGlmUsageEnabled))
-        }
-        return rows
+    private var rows: [LimitsRowModel] {
+        limitsRows(usage: usage, plan: plan, error: error,
+                   codexUsage: codexUsage, codexPlan: codexPlan,
+                   glmUsage: glmUsage, glmError: glmError,
+                   claudeEnabled: claudeUsageEnabled,
+                   codexEnabled: codexUsageEnabled,
+                   glmEnabled: glmUsageEnabled)
     }
 
     var body: some View {
         TimelineView(.everyMinute) { ctx in
             VStack(alignment: .leading, spacing: 0) {
                 cardHeader(now: ctx.date)
-                // Claude's error text takes its slot when there's no usage
-                // snapshot yet, independent of whether Codex/GLM have rows.
-                if claudeChip(usage: usage, plan: plan) == nil, let error {
-                    Text("usage: \(error)")
-                        .font(.system(size: 13, design: .monospaced))
-                        .foregroundStyle(.orange)
-                        .padding(.horizontal, 18).padding(.vertical, 12)
-                }
-                ForEach(rows(now: ctx.date)) { row in
-                    providerSection(chip: row.chip, now: ctx.date,
-                                    enabled: row.enabled, stale: row.stale,
-                                    selected: row.selected, onSetEnabled: row.onSetEnabled)
+                ForEach(rows) { row in
+                    providerSection(row: row, now: ctx.date)
                 }
             }
             .frame(width: cardWidth)
@@ -111,38 +76,60 @@ struct LimitsOverlay: View {
         .padding(.horizontal, 18).padding(.top, 16).padding(.bottom, 12)
     }
 
-    private func providerSection(chip: AgentUsageChip, now: Date,
-                                  enabled: Bool, stale: Bool, selected: Bool,
-                                  onSetEnabled: @escaping (Bool) -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private func providerSection(row: LimitsRowModel, now: Date) -> some View {
+        let selected = isSelected(row.provider)
+        let onSetEnabled = enabledSetter(row.provider)
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                Text(chip.name)
+                Text(row.chip.name)
                     .font(.system(size: 17, weight: .bold, design: .monospaced))
                     .foregroundStyle(selected ? tk.accent : tk.t1)
-                if let plan = chip.plan {
+                if let plan = row.chip.plan {
                     Text(plan)
                         .font(.system(size: 12, weight: .semibold, design: .monospaced))
                         .foregroundStyle(tk.t2)
                         .padding(.horizontal, 7).padding(.vertical, 3)
                         .background(tk.surf2, in: Capsule())
                 }
-                if stale { Text("*").foregroundStyle(tk.warn) }
+                if row.stale { Text("*").foregroundStyle(tk.warn) }
                 Spacer()
-                Toggle("", isOn: Binding(get: { enabled }, set: onSetEnabled))
+                Toggle("", isOn: Binding(get: { row.enabled }, set: onSetEnabled))
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .tint(tk.accent)
                     .controlSize(.small)
                     .scaleEffect(0.8)
             }
-            .opacity(enabled ? 1 : 0.55)
-            ForEach(Array(chip.windows.enumerated()), id: \.offset) { entry in
+            .opacity(row.enabled ? 1 : 0.55)
+            ForEach(Array(row.chip.windows.enumerated()), id: \.offset) { entry in
                 windowRow(entry.element, now: now)
             }
-            .opacity(enabled ? 1 : 0.55)
+            .opacity(row.enabled ? 1 : 0.55)
+            if let message = row.emptyMessage {
+                Text(message)
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundStyle(message == "No usage data" ? tk.t3 : tk.warn)
+                    .opacity(row.enabled ? 1 : 0.55)
+            }
         }
         .padding(.horizontal, 18).padding(.vertical, 16)
         .overlay(alignment: .top) { Rectangle().fill(tk.bd2).frame(height: 1) }
+    }
+
+    private func isSelected(_ provider: UsageProvider) -> Bool {
+        switch provider {
+        case .claude: return selectedProvider == .claude
+        case .codex: return selectedProvider == .codex
+        case .glm: return selectedProvider == .glm
+        }
+    }
+
+    private func enabledSetter(_ provider: UsageProvider) -> (Bool) -> Void {
+        switch provider {
+        case .claude: return onSetClaudeUsageEnabled
+        case .codex: return onSetCodexUsageEnabled
+        case .glm: return onSetGlmUsageEnabled
+        }
     }
 
     private func windowRow(_ w: LabeledWindow, now: Date) -> some View {
