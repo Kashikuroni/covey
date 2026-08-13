@@ -1,4 +1,5 @@
 import SwiftUI
+import CoveyKit
 
 struct SettingsSheet: View {
     let model: AppModel
@@ -9,7 +10,9 @@ struct SettingsSheet: View {
 
     init(model: AppModel) {
         self.model = model
-        _draft = State(initialValue: SettingsDraft(values: model.settingsValues))
+        _draft = State(initialValue: SettingsDraft(
+            values: model.settingsValues,
+            providerIds: ProviderRegistry.load().map { $0.id }))
     }
 
     var body: some View {

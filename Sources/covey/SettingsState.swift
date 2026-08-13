@@ -14,6 +14,8 @@ struct SettingsValues: Equatable {
 
 enum SettingsRow: Int, CaseIterable, Equatable {
     case theme
+    case provider
+    case providerKey
     case vimMode
     case showSessions
     case showHeader
@@ -41,7 +43,14 @@ func settingsKey(for character: Character) -> SettingsKey? {
 
 struct SettingsDraft: Equatable {
     var values: SettingsValues
+    /// Provider ids the `.provider` row cycles through (from `ProviderRegistry`).
+    var providerIds: [String] = ["anthropic", "glm"]
     var selectedRow: SettingsRow = .theme
+
+    init(values: SettingsValues, providerIds: [String] = ["anthropic", "glm"]) {
+        self.values = values
+        self.providerIds = providerIds.isEmpty ? ["anthropic"] : providerIds
+    }
 
     mutating func handle(_ key: SettingsKey) -> SettingsAction? {
         switch key {
@@ -72,6 +81,13 @@ struct SettingsDraft: Equatable {
         case .theme:
             if increasing { values.theme = .light }
             else { values.theme = .dark }
+        case .provider:
+            // Cycle through the registry's provider ids, wrapping at both ends.
+            let i = providerIds.firstIndex(of: values.providerId) ?? 0
+            let next = (i + (increasing ? 1 : -1) + providerIds.count) % providerIds.count
+            values.providerId = providerIds[next]
+        case .providerKey:
+            break   // activated via .activate in the sheet (opens the key prompt)
         case .vimMode:
             values.vimMode = increasing
         case .showSessions:
