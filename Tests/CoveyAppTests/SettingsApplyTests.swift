@@ -36,6 +36,13 @@ private final class ProviderKeyIOProbe: @unchecked Sendable {
 }
 
 final class SettingsApplyTests: XCTestCase {
+    func testProviderKeyLabelDistinguishesCheckingSetAndMissing() {
+        XCTAssertEqual(providerKeyLabel(profile: .glm, status: .checking), "Checking…")
+        XCTAssertEqual(providerKeyLabel(profile: .glm, status: .set), "GLM API key set ✓")
+        XCTAssertEqual(providerKeyLabel(profile: .glm, status: .missing),
+                       "Set GLM API key…")
+    }
+
     @MainActor
     private func makeSettingsModel(
         _ daemon: TestDaemon,

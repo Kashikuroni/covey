@@ -784,18 +784,17 @@ public final class AppModel {
         return providerKeyStatuses[account] ?? .checking
     }
 
-    /// Compatibility for views migrating to the three-state status API.
-    func providerKeyIsSet(_ profile: ProviderProfile) -> Bool {
-        providerKeyStatus(profile) == .set
-    }
-
     /// Loads key presence without blocking the main actor or SwiftUI rendering.
     func refreshProviderKeyStatuses(_ profiles: [ProviderProfile]) async {
         let accounts = Set(profiles.compactMap(\.keychainAccount))
+        for account in accounts {
+            providerKeyStatuses[account] = .checking
+        }
         let reader = readProviderKey
         let present = await Task.detached(priority: .userInitiated) {
             Set(accounts.filter { reader($0) != nil })
         }.value
+        guard !Task.isCancelled else { return }
         for account in accounts {
             providerKeyStatuses[account] = present.contains(account) ? .set : .missing
         }
