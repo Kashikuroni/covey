@@ -41,7 +41,8 @@ final class SettingsApplyTests: XCTestCase {
                        SettingsValues(theme: .dark, vimMode: true,
                                       showSessions: true, showHeader: true, showFooter: true,
                                       usagePlacement: .right,
-                                      claudeUsageEnabled: true, codexUsageEnabled: true))
+                                      claudeUsageEnabled: true, codexUsageEnabled: true,
+                                      glmUsageEnabled: true))
     }
 
     @MainActor
@@ -59,7 +60,7 @@ final class SettingsApplyTests: XCTestCase {
             theme: .light, vimMode: false,
             showSessions: false, showHeader: false, showFooter: false,
             usagePlacement: .left,
-            claudeUsageEnabled: false, codexUsageEnabled: false))
+            claudeUsageEnabled: false, codexUsageEnabled: false, glmUsageEnabled: false))
         store.flush()
 
         XCTAssertEqual(model.themeRaw, "light")
@@ -70,6 +71,7 @@ final class SettingsApplyTests: XCTestCase {
         XCTAssertEqual(model.usagePlacement, .left)
         XCTAssertFalse(model.claudeUsageEnabled)
         XCTAssertFalse(model.codexUsageEnabled)
+        XCTAssertFalse(model.glmUsageEnabled)
         XCTAssertNil(model.modal)
         XCTAssertEqual(store.writeCount, writesBefore + 1)
 
@@ -82,6 +84,7 @@ final class SettingsApplyTests: XCTestCase {
         XCTAssertEqual(saved.usagePlacement, "left")
         XCTAssertEqual(saved.claudeUsageEnabled, false)
         XCTAssertEqual(saved.codexUsageEnabled, false)
+        XCTAssertEqual(saved.glmUsageEnabled, false)
     }
 
     @MainActor

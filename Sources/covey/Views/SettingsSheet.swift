@@ -82,6 +82,8 @@ struct SettingsSheet: View {
                             value: $draft.values.claudeUsageEnabled)
                 checkboxRow(.codexUsage, label: "Codex usage limits",
                             value: $draft.values.codexUsageEnabled)
+                checkboxRow(.glmUsage, label: "GLM usage limits",
+                            value: $draft.values.glmUsageEnabled)
             }
             actionRow
         }

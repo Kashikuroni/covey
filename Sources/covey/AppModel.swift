@@ -718,7 +718,8 @@ public final class AppModel {
                        showHeader: showHeader, showFooter: showFooter,
                        usagePlacement: usagePlacement,
                        claudeUsageEnabled: claudeUsageEnabled,
-                       codexUsageEnabled: codexUsageEnabled)
+                       codexUsageEnabled: codexUsageEnabled,
+                       glmUsageEnabled: glmUsageEnabled)
     }
 
     func openSettings() {
@@ -985,6 +986,7 @@ public final class AppModel {
         usagePlacement = values.usagePlacement
         claudeUsageEnabled = values.claudeUsageEnabled
         codexUsageEnabled = values.codexUsageEnabled
+        glmUsageEnabled = values.glmUsageEnabled
         persist()
         if codexChanged { synchronizeCodexUsageServer() }
         // Claude Code's ~/.claude/settings.json env block overrides the process
