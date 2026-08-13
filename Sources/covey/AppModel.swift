@@ -82,6 +82,10 @@ public final class AppModel {
     /// Active Claude Code provider id ("anthropic" | "glm" | …). Applied to
     /// new sessions at spawn; running sessions keep the provider they started with.
     public private(set) var providerId: String = "anthropic"
+    /// Provider each live session was created under, so a relaunched recent
+    /// keeps its original provider even after the global toggle moves. Client
+    /// side because the GUI owns provider resolution; cleared with the session.
+    private var providerBySession: [String: String] = [:]
     public private(set) var splitPct: Int = 38
     public private(set) var usagePlacement: UsagePlacement = .right
     public private(set) var recents: [RecentSession] = []
@@ -448,11 +452,15 @@ public final class AppModel {
     public func createFull(name: String?, dir: String, agent: String,
                            terminal: Bool, worktree: WorktreeSpec?,
                            model: String?, effort: String?) async -> String? {
+        let (env, keyErr) = Self.resolveProviderEnv(providerId)
+        if let keyErr { return keyErr }
         do {
+            let providerArg = providerId == "anthropic" ? nil : providerId
             let s = try await client.create(dir: dir, agent: agent, name: name,
                                             terminal: terminal ? true : nil,
                                             worktree: worktree, model: model,
-                                            effort: effort)
+                                            effort: effort, env: env, providerId: providerArg)
+            providerBySession[s.name] = providerId
             // Land in the fresh session, keyboard in its terminal.
             await select(s.name)
             setFocus(.terminal)
@@ -575,9 +583,16 @@ public final class AppModel {
 
     @discardableResult
     public func relaunchRecent(_ r: RecentSession, activate: Bool = true) async -> Bool {
+        // Keep the provider the session originally used (fallback to current);
+        // a relaunched GLM session stays GLM even if the global toggle moved.
+        let pid = r.providerId ?? providerId
+        let (env, keyErr) = Self.resolveProviderEnv(pid)
+        if let keyErr { toast = keyErr; return false }
         do {
+            let providerArg = pid == "anthropic" ? nil : pid
             let s = try await client.create(dir: r.dir, agent: r.agent, name: r.name,
-                                            resume: r.resumeCmd)
+                                            resume: r.resumeCmd, env: env, providerId: providerArg)
+            providerBySession[s.name] = pid
             if activate {
                 await select(s.name)
                 setFocus(.terminal)
@@ -710,6 +725,22 @@ public final class AppModel {
     func providerKeyIsSet(_ profile: ProviderProfile) -> Bool {
         guard let account = profile.keychainAccount else { return true }
         return ProviderKeychain.read(account: account) != nil
+    }
+
+    /// Resolves the env block to inject for provider `id` (reads the Keychain).
+    /// Returns nil env for anthropic (no injection) or an unknown id; returns a
+    /// user-facing `error` when a needed API key is absent so callers can surface
+    /// it instead of spawning a session that will immediately 401.
+    nonisolated static func resolveProviderEnv(_ id: String) -> (env: [String: String]?, error: String?) {
+        guard let profile = ProviderRegistry.profile(id: id) else { return (nil, nil) }
+        do {
+            let env = try ProviderResolver.resolve(profile: profile) { account in
+                ProviderKeychain.read(account: account)
+            }
+            return (env.isEmpty ? nil : env, nil)
+        } catch {
+            return (nil, "Set your \(profile.label) API key in Settings first.")
+        }
     }
 
     func openCommandPalette() {
@@ -1454,12 +1485,14 @@ public final class AppModel {
                 pushRecent(&recents, RecentSession(name: s.name, dir: s.dir, agent: s.agent,
                                                    resumeCmd: s.resumeCmd,
                                                    stoppedAt: Int64(Date().timeIntervalSince1970),
-                                                   branch: s.git?.branch))
+                                                   branch: s.git?.branch,
+                                                   providerId: providerBySession[name]))
                 persist()
             }
             sessions.removeAll { $0.name == name }
             statusByName[name] = nil
             modelByName[name] = nil
+            providerBySession[name] = nil
             dropPaneState(name)
             if selected == name { selected = nil }
         case let .statusChanged(name, status):

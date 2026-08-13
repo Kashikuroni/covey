@@ -4,6 +4,28 @@ import CoveyKit
 import CoveydCore
 
 final class AppModelTests: XCTestCase {
+    func testResolveProviderEnvGlmWithKey() {
+        ProviderKeychain.write(account: "covey.provider.glm", value: "TESTKEY")
+        defer { ProviderKeychain.delete(account: "covey.provider.glm") }
+        let (env, err) = AppModel.resolveProviderEnv("glm")
+        XCTAssertNil(err)
+        XCTAssertEqual(env?["ANTHROPIC_BASE_URL"], "https://api.z.ai/api/anthropic")
+        XCTAssertEqual(env?["ANTHROPIC_AUTH_TOKEN"], "TESTKEY")
+    }
+
+    func testResolveProviderEnvGlmWithoutKey() {
+        ProviderKeychain.delete(account: "covey.provider.glm")   // ensure absent
+        let (env, err) = AppModel.resolveProviderEnv("glm")
+        XCTAssertNil(env)
+        XCTAssertNotNil(err)
+    }
+
+    func testResolveProviderEnvAnthropicIsNil() {
+        let (env, err) = AppModel.resolveProviderEnv("anthropic")
+        XCTAssertNil(env)
+        XCTAssertNil(err)
+    }
+
     @MainActor
     func testStartListsExistingSessionsAndConnects() async throws {
         let daemon = try TestDaemon()
