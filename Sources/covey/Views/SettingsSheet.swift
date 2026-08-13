@@ -10,9 +10,7 @@ struct SettingsSheet: View {
     private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
 
     private var profiles: [ProviderProfile] { ProviderRegistry.load() }
-    private var activeProfile: ProviderProfile {
-        profiles.first { $0.id == draft.values.providerId } ?? .anthropic
-    }
+    private var activeProfile: ProviderProfile { .glm }
     private var providerKeyLabel: String? {
         guard activeProfile.needsKey else { return nil }
         return model.providerKeyIsSet(activeProfile)
@@ -44,9 +42,7 @@ struct SettingsSheet: View {
 
     init(model: AppModel) {
         self.model = model
-        _draft = State(initialValue: SettingsDraft(
-            values: model.settingsValues,
-            providerIds: ProviderRegistry.load().map { $0.id }))
+        _draft = State(initialValue: SettingsDraft(values: model.settingsValues))
     }
 
     var body: some View {
@@ -59,9 +55,6 @@ struct SettingsSheet: View {
                 checkboxRow(.vimMode, label: "Vim mode", value: $draft.values.vimMode)
             }
             section("Claude Code") {
-                choiceRow(.provider, label: "Provider",
-                          choices: profiles.map { ($0.label, $0.id) },
-                          selection: $draft.values.providerId)
                 providerKeyRow
             }
             section("Layout") {

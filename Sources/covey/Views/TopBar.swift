@@ -29,8 +29,8 @@ struct TopBar: View {
     private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
 
     var body: some View {
-        UsageChip(usage: (model.claudeUsageEnabled && model.providerIsAnthropic) ? model.usage : nil,
-                  usageError: (model.claudeUsageEnabled && model.providerIsAnthropic) ? model.usageError : nil,
+        UsageChip(usage: model.claudeUsageEnabled ? model.usage : nil,
+                  usageError: model.claudeUsageEnabled ? model.usageError : nil,
                   codexUsage: model.codexUsageEnabled ? model.codexUsage : nil,
                   glmUsage: model.glmUsageEnabled ? model.glmUsage : nil, tk: tk)
             .font(.system(size: topBarFontSize, design: topBarFontDesign))

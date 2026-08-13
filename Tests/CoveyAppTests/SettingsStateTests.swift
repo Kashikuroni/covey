@@ -19,7 +19,7 @@ final class SettingsStateTests: XCTestCase {
     func testJKWalkEveryRowAndClamp() {
         var draft = SettingsDraft(values: values())
         let down: [SettingsRow] = [
-            .provider, .providerKey, .vimMode, .showSessions, .showHeader, .showFooter,
+            .providerKey, .vimMode, .showSessions, .showHeader, .showFooter,
             .usagePlacement, .claudeUsage, .codexUsage, .glmUsage,
         ]
         for expected in down {
@@ -31,7 +31,7 @@ final class SettingsStateTests: XCTestCase {
 
         let up: [SettingsRow] = [
             .codexUsage, .claudeUsage, .usagePlacement, .showFooter,
-            .showHeader, .showSessions, .vimMode, .providerKey, .provider, .theme,
+            .showHeader, .showSessions, .vimMode, .providerKey, .theme,
         ]
         for expected in up {
             XCTAssertNil(draft.handle(.moveUp))
@@ -90,18 +90,11 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertEqual(draft.values.usagePlacement, .right)
     }
 
-    func testProviderCyclesThroughIds() {
-        // `adjust` is private; cycle via the public `handle` (h/l mapping).
-        var draft = SettingsDraft(values: values(), providerIds: ["anthropic", "glm", "kimi"])
-        draft.selectedRow = .provider
-        _ = draft.handle(.increase)   // anthropic -> glm
-        XCTAssertEqual(draft.values.providerId, "glm")
-        _ = draft.handle(.increase)   // glm -> kimi
-        XCTAssertEqual(draft.values.providerId, "kimi")
-        _ = draft.handle(.increase)   // wrap -> anthropic
-        XCTAssertEqual(draft.values.providerId, "anthropic")
-        _ = draft.handle(.decrease)   // anthropic -> kimi (wrap back)
-        XCTAssertEqual(draft.values.providerId, "kimi")
+    func testRowsContainCredentialsButNoActiveProvider() {
+        XCTAssertEqual(SettingsRow.allCases, [
+            .theme, .providerKey, .vimMode, .showSessions, .showHeader, .showFooter,
+            .usagePlacement, .claudeUsage, .codexUsage, .glmUsage,
+        ])
     }
 
     func testEnterSavesAndEscapeCancelsFromAnySettingRow() {
