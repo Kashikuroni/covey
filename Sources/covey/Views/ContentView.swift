@@ -78,10 +78,13 @@ struct ContentView: View {
             if model.inputMode == .limits {
                 LimitsOverlay(usage: model.usage, plan: model.plan, error: model.usageError,
                               codexUsage: model.codexUsage, codexPlan: model.codexPlan,
+                              glmUsage: model.glmUsage,
                               claudeUsageEnabled: model.claudeUsageEnabled,
                               codexUsageEnabled: model.codexUsageEnabled,
+                              glmUsageEnabled: model.glmUsageEnabled,
                               onSetClaudeUsageEnabled: { model.setClaudeUsageEnabled($0) },
                               onSetCodexUsageEnabled: { model.setCodexUsageEnabled($0) },
+                              onSetGlmUsageEnabled: { model.setGlmUsageEnabled($0) },
                               selectedProvider: model.limitsSelectedProvider,
                               tk: tokens)
                     .padding(.top, 42)

@@ -22,40 +22,69 @@ struct LimitsOverlay: View {
     let error: String?
     let codexUsage: CodexRateLimitsSnapshot?
     let codexPlan: String?
+    let glmUsage: Usage?
     let claudeUsageEnabled: Bool
     let codexUsageEnabled: Bool
+    let glmUsageEnabled: Bool
     let onSetClaudeUsageEnabled: (Bool) -> Void
     let onSetCodexUsageEnabled: (Bool) -> Void
+    let onSetGlmUsageEnabled: (Bool) -> Void
     let selectedProvider: AppModel.LimitsProvider
     let tk: Tokens
 
     private let cardWidth: CGFloat = 320
 
+    /// One row's worth of inputs to `providerSection`. Building this list is
+    /// what lets the body iterate instead of hand-writing one block per
+    /// provider — adding a fourth provider later is one more entry here.
+    private struct Row: Identifiable {
+        var id: String { chip.name }
+        let chip: AgentUsageChip
+        let enabled: Bool
+        let stale: Bool
+        let selected: Bool
+        let onSetEnabled: (Bool) -> Void
+    }
+
+    private func rows(now: Date) -> [Row] {
+        var rows: [Row] = []
+        if let claude = claudeChip(usage: usage, plan: plan) {
+            rows.append(Row(chip: claude, enabled: claudeUsageEnabled, stale: error != nil,
+                            selected: selectedProvider == .claude,
+                            onSetEnabled: onSetClaudeUsageEnabled))
+        }
+        if let codex = codexChip(snapshot: codexUsage, plan: codexPlan) {
+            // Codex has no separate error signal today (a failed poll just
+            // silently keeps the last snapshot), so only the disabled state
+            // gets a marker here, not staleness.
+            rows.append(Row(chip: codex, enabled: codexUsageEnabled, stale: false,
+                            selected: selectedProvider == .codex,
+                            onSetEnabled: onSetCodexUsageEnabled))
+        }
+        if let glm = glmChip(usage: glmUsage) {
+            rows.append(Row(chip: glm, enabled: glmUsageEnabled, stale: false,
+                            selected: selectedProvider == .glm,
+                            onSetEnabled: onSetGlmUsageEnabled))
+        }
+        return rows
+    }
+
     var body: some View {
         TimelineView(.everyMinute) { ctx in
-            let claude = claudeChip(usage: usage, plan: plan)
-            let codex = codexChip(snapshot: codexUsage, plan: codexPlan)
             VStack(alignment: .leading, spacing: 0) {
                 cardHeader(now: ctx.date)
-                if let claude {
-                    providerSection(chip: claude, now: ctx.date,
-                                    enabled: claudeUsageEnabled, stale: error != nil,
-                                    selected: selectedProvider == .claude,
-                                    onSetEnabled: onSetClaudeUsageEnabled)
-                } else if let error {
+                // Claude's error text takes its slot when there's no usage
+                // snapshot yet, independent of whether Codex/GLM have rows.
+                if claudeChip(usage: usage, plan: plan) == nil, let error {
                     Text("usage: \(error)")
                         .font(.system(size: 13, design: .monospaced))
                         .foregroundStyle(.orange)
                         .padding(.horizontal, 18).padding(.vertical, 12)
                 }
-                if let codex {
-                    // Codex has no separate error signal today (a failed
-                    // poll just silently keeps the last snapshot), so only
-                    // the disabled state gets a marker here, not staleness.
-                    providerSection(chip: codex, now: ctx.date,
-                                    enabled: codexUsageEnabled, stale: false,
-                                    selected: selectedProvider == .codex,
-                                    onSetEnabled: onSetCodexUsageEnabled)
+                ForEach(rows(now: ctx.date)) { row in
+                    providerSection(chip: row.chip, now: ctx.date,
+                                    enabled: row.enabled, stale: row.stale,
+                                    selected: row.selected, onSetEnabled: row.onSetEnabled)
                 }
             }
             .frame(width: cardWidth)
