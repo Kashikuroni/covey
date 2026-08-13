@@ -102,8 +102,6 @@ struct IssuePane: View {
 
     private var editor: some View {
         Group {
-            Text("in: \(collapseHome(root ?? ""))")
-                .font(.caption.monospaced()).foregroundStyle(tk.t3).lineLimit(1)
             TextField("Title", text: Binding(
                 get: { draft.title },
                 set: { v in update { $0.title = v } }))

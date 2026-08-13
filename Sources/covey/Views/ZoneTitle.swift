@@ -19,7 +19,7 @@ func panelLabelColor(_ role: PanelLabelRole, tk: Tokens) -> Color {
 func zoneTitle(_ title: String, badge: Int, active: Bool, tk: Tokens) -> some View {
     HStack(spacing: 4) {
         Text(title)
-            .font(.system(size: 10, weight: .semibold))
+            .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(panelLabelColor(.zone(active: active), tk: tk))
         Text("[\(badge)]")
             .font(.system(size: 10, weight: .semibold))

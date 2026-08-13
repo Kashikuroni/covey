@@ -178,6 +178,12 @@ final class IssueModelsTests: XCTestCase {
         XCTAssertEqual(issueCardUpdatedText(age: "21h"), "updated 21h")
     }
 
+    func testIssueCardHighlightRequiresSelectionAndInspectorFocus() {
+        XCTAssertTrue(issueCardIsHighlighted(selected: true, inspectorFocused: true))
+        XCTAssertFalse(issueCardIsHighlighted(selected: true, inspectorFocused: false))
+        XCTAssertFalse(issueCardIsHighlighted(selected: false, inspectorFocused: true))
+    }
+
     func testIssueDescriptionTrimsOrdinaryText() {
         XCTAssertEqual(issueDescription("  hello\nworld \n"), "hello\nworld")
         XCTAssertNil(issueDescription("   \n\n "))

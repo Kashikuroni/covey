@@ -14,7 +14,7 @@ struct InspectorView: View {
             } else {
                 VStack(spacing: 0) {
                     HStack {
-                        zoneTitle("Issue", badge: 3,
+                        zoneTitle("Issues", badge: 3,
                                   active: model.focus == .inspector, tk: tk)
                         Spacer()
                     }

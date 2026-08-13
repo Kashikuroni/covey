@@ -182,8 +182,6 @@ struct IssueBrowserPane: View {
 
     private var header: some View {
         HStack(spacing: 6) {
-            Text("in: \(collapseHome(root ?? ""))")
-                .font(.system(size: IssueFont.meta, design: .monospaced)).foregroundStyle(tk.t3).lineLimit(1)
             Spacer()
             if browser.revalidating {
                 ProgressView().controlSize(.mini)
@@ -255,7 +253,9 @@ struct IssueBrowserPane: View {
 
     private func row(_ issue: GhIssue) -> some View {
         IssueCardView(issue: issue,
-                      selected: issue.number == browser.selectedNumber,
+                      selected: issueCardIsHighlighted(
+                        selected: issue.number == browser.selectedNumber,
+                        inspectorFocused: model.focus == .inspector),
                       age: relativeAge(from: issue.updatedAt, to: browser.now()),
                       wip: wip(for: issue),
                       tk: tk,

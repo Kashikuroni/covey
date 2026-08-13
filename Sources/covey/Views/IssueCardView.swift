@@ -31,6 +31,10 @@ func issueCardUpdatedText(age: String) -> String {
     "updated \(age)"
 }
 
+func issueCardIsHighlighted(selected: Bool, inspectorFocused: Bool) -> Bool {
+    selected && inspectorFocused
+}
+
 /// A 1pt horizontal dashed guide above the session/WIP block.
 private struct DashedLine: Shape {
     func path(in rect: CGRect) -> Path {
@@ -144,7 +148,7 @@ struct IssueCardView: View {
             Text(issueCardUpdatedText(age: age))
         }
         .font(.system(size: IssueFont.cardMeta, design: .monospaced))
-        .foregroundStyle(tk.t4)
+        .foregroundStyle(tk.t2)
         .frame(maxWidth: .infinity)
     }
 
