@@ -179,12 +179,6 @@ func labelPillColor(hex: String, darkTheme: Bool) -> UInt32? {
     return blend(rgb, toward: foreground, labelThemeBlend)
 }
 
-/// Compatibility for the current dot-based card; removed with the pill layout.
-func labelChipColors(hex: String, darkTheme: Bool) -> (dot: UInt32, text: UInt32)? {
-    guard let color = labelPillColor(hex: hex, darkTheme: darkTheme) else { return nil }
-    return (dot: color, text: color)
-}
-
 /// The card's description block: the whole body, edge-trimmed, or nil when
 /// blank. (bodyPreview stays for first-line-only callers.)
 func issueDescription(_ body: String) -> String? {

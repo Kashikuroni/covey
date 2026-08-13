@@ -31,27 +31,19 @@ func issueCardUpdatedText(age: String) -> String {
     "updated \(age)"
 }
 
-/// A 1pt dashed guide line — SwiftUI has no dashed-border modifier.
+/// A 1pt horizontal dashed guide above the session/WIP block.
 private struct DashedLine: Shape {
-    var horizontal: Bool
     func path(in rect: CGRect) -> Path {
-        var p = Path()
-        if horizontal {
-            p.move(to: CGPoint(x: rect.minX, y: rect.midY))
-            p.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
-        } else {
-            p.move(to: CGPoint(x: rect.midX, y: rect.minY))
-            p.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
-        }
-        return p
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+        return path
     }
 }
 
-/// Issue row, variant 3a "rail + time": a fixed left rail (issue number top,
-/// relative age bottom, dashed divider) and a content column (title, optional
-/// description, labels + author, optional session/WIP block). Focus is a single
-/// accent ring; open/closed reads from the title color. Model-free — every
-/// signal is precomputed by the pane.
+/// Issue row with a compact header/description/labels/WIP/footer hierarchy.
+/// Focus is a single accent ring; open/closed reads from the title color.
+/// Model-free — every signal is precomputed by the pane.
 struct IssueCardView: View {
     let issue: GhIssue
     let selected: Bool
@@ -65,9 +57,23 @@ struct IssueCardView: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 13) {
-            rail
-            content
+        VStack(alignment: .leading, spacing: 8) {
+            header
+            if let description = issueDescription(issue.body) {
+                Text(description)
+                    .font(.system(size: IssueFont.cardDesc))
+                    .foregroundStyle(tk.t3)
+                    .lineLimit(4)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if !issue.labels.isEmpty {
+                labelRow
+            }
+            if !wip.isEmpty {
+                wipBlock
+            }
+            footer
         }
         .padding(EdgeInsets(top: 13, leading: 14, bottom: 13, trailing: 14))
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -81,78 +87,65 @@ struct IssueCardView: View {
         }
     }
 
-    // Left rail: number pinned top, age pinned bottom, dashed trailing divider.
-    private var rail: some View {
-        VStack(alignment: .leading, spacing: 0) {
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text("#\(issue.number)")
-                .font(mono(IssueFont.cardNum, .semibold)).foregroundStyle(tk.t3)
-            Spacer(minLength: 0)
-            Text(age)
-                .font(mono(IssueFont.cardTime)).foregroundStyle(tk.t4)
-        }
-        .padding(.trailing, 13)
-        .frame(width: 52, alignment: .leading)
-        .frame(minHeight: 44, maxHeight: .infinity)
-        .overlay(alignment: .trailing) {
-            DashedLine(horizontal: false)
-                .stroke(tk.bd2, style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
-                .frame(width: 1)
-        }
-    }
-
-    private var content: some View {
-        VStack(alignment: .leading, spacing: 8) {
+                .font(mono(IssueFont.cardNum, .semibold))
+                .foregroundStyle(tk.t3)
+                .fixedSize(horizontal: true, vertical: false)
             Text(issue.title)
                 .font(.system(size: IssueFont.cardTitle, weight: .semibold))
                 .foregroundStyle(issue.isOpen ? tk.t1 : tk.t3)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(1)
+                .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            if let desc = issueDescription(issue.body) {
-                Text(desc)
-                    .font(.system(size: IssueFont.cardDesc))
-                    .foregroundStyle(tk.t3)
-                    .lineLimit(4)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if !issue.labels.isEmpty || !issue.author.isEmpty {
-                labelRow
-            }
-            if !wip.isEmpty {
-                wipBlock
-            }
         }
+    }
+
+    private var labelRow: some View {
+        let plan = issueCardLabelPlan(issue.labels)
+        return HStack(spacing: 6) {
+            ForEach(plan.visible, id: \.name) { label in
+                labelPill(label)
+                    .layoutPriority(-1)
+            }
+            if let counter = plan.counter {
+                Text(counter)
+                    .foregroundStyle(tk.t4)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: IssueFont.cardLabel, design: .monospaced))
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    // At most 2 chips so the row never wraps into a cluttered stack; the rest
-    // collapse into a `shown/total` counter. Labels use a smaller type than the
-    // author so they read as secondary metadata.
-    private var labelRow: some View {
-        let shown = min(2, issue.labels.count)
-        return HStack(spacing: 13) {
-            HStack(spacing: 10) {
-                ForEach(issue.labels.prefix(shown), id: \.name) { label in
-                    let c = labelChipColors(hex: label.color, darkTheme: tk.isDark)
-                    HStack(spacing: 5) {
-                        Circle().frame(width: 6, height: 6)
-                            .foregroundStyle(c.map { Color(hex: $0.dot) } ?? tk.t3)
-                        Text(label.name)
-                            .lineLimit(1)
-                            .foregroundStyle(c.map { Color(hex: $0.text) } ?? tk.t2)
-                    }
-                }
-                if issue.labels.count > shown {
-                    Text("\(shown)/\(issue.labels.count)").foregroundStyle(tk.t4)
-                }
+    private func labelPill(_ label: GhLabel) -> some View {
+        let rgb = labelPillColor(hex: label.color, darkTheme: tk.isDark)
+        let color = rgb.map { Color(hex: $0) }
+        return Text(label.name)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .foregroundStyle(color ?? tk.t2)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(color?.opacity(0.12) ?? tk.surf2, in: Capsule())
+            .overlay {
+                Capsule().strokeBorder(color?.opacity(0.70) ?? tk.bd2)
             }
-            .font(.system(size: IssueFont.cardLabel, design: .monospaced))
-            Spacer(minLength: 4)
+    }
+
+    private var footer: some View {
+        HStack(spacing: 8) {
             if !issue.author.isEmpty {
-                Text("@\(issue.author)").foregroundStyle(tk.t4)
-                    .font(.system(size: IssueFont.cardMeta, design: .monospaced))
+                Text("@\(issue.author)")
             }
+            Spacer(minLength: 4)
+            Text(issueCardUpdatedText(age: age))
         }
+        .font(.system(size: IssueFont.cardMeta, design: .monospaced))
+        .foregroundStyle(tk.t4)
+        .frame(maxWidth: .infinity)
     }
 
     private var wipBlock: some View {
@@ -187,7 +180,7 @@ struct IssueCardView: View {
         .padding(.top, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .top) {
-            DashedLine(horizontal: true)
+            DashedLine()
                 .stroke(tk.bd2, style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
                 .frame(height: 1)
         }
