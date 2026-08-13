@@ -79,6 +79,9 @@ public final class AppModel {
     }
     public private(set) var connected = false
     public private(set) var themeRaw: String = "dark"
+    /// Active Claude Code provider id ("anthropic" | "glm" | …). Applied to
+    /// new sessions at spawn; running sessions keep the provider they started with.
+    public private(set) var providerId: String = "anthropic"
     public private(set) var splitPct: Int = 38
     public private(set) var usagePlacement: UsagePlacement = .right
     public private(set) var recents: [RecentSession] = []
@@ -224,6 +227,7 @@ public final class AppModel {
     public func start() async {
         persisted = store.load()
         themeRaw = persisted.theme ?? "dark"
+        providerId = persisted.provider ?? "anthropic"
         splitPct = persisted.splitPct ?? 38
         usagePlacement = persisted.usagePlacement.flatMap(UsagePlacement.init(rawValue:)) ?? .right
         recents = persisted.recents
@@ -677,9 +681,10 @@ public final class AppModel {
     public func setVimMode(_ on: Bool) { vimMode = on; persist() }
 
     var settingsValues: SettingsValues {
-        SettingsValues(theme: Theme(raw: themeRaw), vimMode: vimMode,
-                       showSessions: showSessions, showHeader: showHeader,
-                       showFooter: showFooter, usagePlacement: usagePlacement,
+        SettingsValues(theme: Theme(raw: themeRaw), providerId: providerId,
+                       vimMode: vimMode, showSessions: showSessions,
+                       showHeader: showHeader, showFooter: showFooter,
+                       usagePlacement: usagePlacement,
                        claudeUsageEnabled: claudeUsageEnabled,
                        codexUsageEnabled: codexUsageEnabled)
     }
@@ -882,6 +887,7 @@ public final class AppModel {
         let themeChanged = values.theme != old.theme
         let codexChanged = values.codexUsageEnabled != old.codexUsageEnabled
         themeRaw = values.theme.rawValue
+        providerId = values.providerId
         vimMode = values.vimMode
         showSessions = values.showSessions
         showHeader = values.showHeader
@@ -1302,6 +1308,7 @@ public final class AppModel {
 
     private func persist() {
         persisted.theme = themeRaw
+        persisted.provider = providerId
         persisted.splitPct = splitPct
         persisted.usagePlacement = usagePlacement.rawValue
         persisted.recents = recents

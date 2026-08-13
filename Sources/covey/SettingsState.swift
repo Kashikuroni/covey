@@ -2,6 +2,7 @@ import Foundation
 
 struct SettingsValues: Equatable {
     var theme: Theme
+    var providerId: String = "anthropic"
     var vimMode: Bool
     var showSessions: Bool
     var showHeader: Bool
