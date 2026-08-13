@@ -179,6 +179,10 @@ public struct PersistedState: Codable, Equatable {
     public var claudePlan: String?
     public var codexUsage: PersistedCodexUsage?
     public var codexPlan: String?
+    /// GLM's usage endpoint carries no plan/tier name, so unlike Claude/Codex
+    /// there is no `glmPlan` field.
+    public var glmUsageEnabled: Bool?
+    public var glmUsage: PersistedUsage?
 
     public init(
         theme: String? = nil, provider: String? = nil, splitPct: Int? = nil,
@@ -202,7 +206,9 @@ public struct PersistedState: Codable, Equatable {
         claudeUsage: PersistedUsage? = nil,
         claudePlan: String? = nil,
         codexUsage: PersistedCodexUsage? = nil,
-        codexPlan: String? = nil
+        codexPlan: String? = nil,
+        glmUsageEnabled: Bool? = nil,
+        glmUsage: PersistedUsage? = nil
     ) {
         self.theme = theme; self.provider = provider
         self.splitPct = splitPct; self.recents = recents
@@ -227,5 +233,7 @@ public struct PersistedState: Codable, Equatable {
         self.claudePlan = claudePlan
         self.codexUsage = codexUsage
         self.codexPlan = codexPlan
+        self.glmUsageEnabled = glmUsageEnabled
+        self.glmUsage = glmUsage
     }
 }

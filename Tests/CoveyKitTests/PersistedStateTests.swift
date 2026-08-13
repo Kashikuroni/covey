@@ -187,11 +187,23 @@ final class PersistedStateTests: XCTestCase {
         XCTAssertFalse(json.contains("claudePlan"))
         XCTAssertFalse(json.contains("codexUsage"))
         XCTAssertFalse(json.contains("codexPlan"))
+        XCTAssertFalse(json.contains("glmUsage"))
         // A state.json written before these fields existed still decodes.
         let old = #"{"recents":[],"order":[],"projectOrder":[],"projectNames":{},"#
                 + #""projectNotes":{},"notes":{},"drafts":{},"sessions":{}}"#
         let decoded = try JSONDecoder().decode(PersistedState.self, from: old.data(using: .utf8)!)
         XCTAssertNil(decoded.claudeUsageEnabled)
         XCTAssertNil(decoded.claudeUsage)
+        XCTAssertNil(decoded.glmUsageEnabled)
+        XCTAssertNil(decoded.glmUsage)
+    }
+
+    func testGlmUsageCacheFieldsRoundTrip() throws {
+        var st = PersistedState()
+        st.glmUsageEnabled = false
+        st.glmUsage = PersistedUsage(fiveHour: PersistedUsageWindow(utilization: 17, resetUnix: 5),
+                                     sevenDay: nil, sevenDaySonnet: nil)
+        let back = try JSONDecoder().decode(PersistedState.self, from: JSONEncoder().encode(st))
+        XCTAssertEqual(back, st)
     }
 }
