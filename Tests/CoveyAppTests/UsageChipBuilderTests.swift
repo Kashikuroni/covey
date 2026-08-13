@@ -54,4 +54,50 @@ final class UsageChipBuilderTests: XCTestCase {
     func testGlmChipNilWhenNoUsage() {
         XCTAssertNil(glmChip(usage: nil))
     }
+
+    func testLimitsRowsAlwaysContainClaudeCodexAndGlmInOrder() {
+        let rows = limitsRows(
+            usage: nil, plan: nil, error: nil,
+            codexUsage: nil, codexPlan: nil,
+            glmUsage: nil, glmError: nil,
+            claudeEnabled: true, codexEnabled: true, glmEnabled: true
+        )
+
+        XCTAssertEqual(rows.map(\.provider), [.claude, .codex, .glm])
+        XCTAssertEqual(rows.map(\.chip.name), ["Claude", "Codex", "GLM"])
+        XCTAssertEqual(rows.map(\.emptyMessage), [
+            "No usage data", "No usage data", "No usage data",
+        ])
+    }
+
+    func testLimitsRowsUseProviderErrorOnlyForItsEmptyRow() {
+        let rows = limitsRows(
+            usage: nil, plan: nil, error: "Claude offline",
+            codexUsage: nil, codexPlan: nil,
+            glmUsage: nil, glmError: "GLM key missing",
+            claudeEnabled: true, codexEnabled: false, glmEnabled: true
+        )
+
+        XCTAssertEqual(rows.map(\.emptyMessage), [
+            "Claude offline", "No usage data", "GLM key missing",
+        ])
+        XCTAssertEqual(rows.map(\.enabled), [true, false, true])
+    }
+
+    func testLimitsRowsKeepUsageAndMarkLaterErrorAsStale() {
+        let usage = Usage(fiveHour: UsageWindow(utilization: 17, resetUnix: 1),
+                          sevenDay: nil, sevenDaySonnet: nil)
+        let rows = limitsRows(
+            usage: usage, plan: "Max", error: "network",
+            codexUsage: nil, codexPlan: nil,
+            glmUsage: usage, glmError: "network",
+            claudeEnabled: true, codexEnabled: true, glmEnabled: true
+        )
+
+        XCTAssertEqual(rows[0].chip.windows.map(\.label), ["5h"])
+        XCTAssertTrue(rows[0].stale)
+        XCTAssertNil(rows[0].emptyMessage)
+        XCTAssertTrue(rows[2].stale)
+        XCTAssertNil(rows[2].emptyMessage)
+    }
 }

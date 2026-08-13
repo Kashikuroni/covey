@@ -73,7 +73,7 @@ struct ContentView: View {
             if model.inputMode == .limits {
                 LimitsOverlay(usage: model.usage, plan: model.plan, error: model.usageError,
                               codexUsage: model.codexUsage, codexPlan: model.codexPlan,
-                              glmUsage: model.glmUsage,
+                              glmUsage: model.glmUsage, glmError: model.glmUsageError,
                               claudeUsageEnabled: model.claudeUsageEnabled,
                               codexUsageEnabled: model.codexUsageEnabled,
                               glmUsageEnabled: model.glmUsageEnabled,

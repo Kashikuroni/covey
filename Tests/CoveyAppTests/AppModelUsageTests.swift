@@ -42,6 +42,8 @@ final class AppModelUsageTests: XCTestCase {
                                           sevenDay: nil, sevenDaySonnet: nil))
         let model = try makeUsageModel(daemon, fetch: { claudeAcc }, fetchGlm: { glmAcc })
         await model.start()
+        XCTAssertTrue(model.sessions.isEmpty,
+                      "GLM limits must not depend on an active session")
         let ok = await eventually {
             model.usage?.fiveHour?.utilization == 55 && model.glmUsage?.fiveHour?.utilization == 17
         }
