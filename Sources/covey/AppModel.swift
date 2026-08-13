@@ -694,6 +694,24 @@ public final class AppModel {
         modal = .settings
     }
 
+    /// The active provider profile (built-in or from config), or anthropic.
+    var activeProviderProfile: ProviderProfile {
+        ProviderRegistry.profile(id: providerId) ?? .anthropic
+    }
+
+    /// Stores (or, for an empty key, clears) a provider API key in the Keychain.
+    func setProviderKey(_ profile: ProviderProfile, _ key: String) {
+        guard let account = profile.keychainAccount else { return }
+        if key.isEmpty { ProviderKeychain.delete(account: account) }
+        else { ProviderKeychain.write(account: account, value: key) }
+    }
+
+    /// Whether the active provider's key is present (oauth providers need none).
+    func providerKeyIsSet(_ profile: ProviderProfile) -> Bool {
+        guard let account = profile.keychainAccount else { return true }
+        return ProviderKeychain.read(account: account) != nil
+    }
+
     func openCommandPalette() {
         guard modal == nil else { return }
         inputMode = .normal

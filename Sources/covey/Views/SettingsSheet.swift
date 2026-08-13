@@ -4,9 +4,43 @@ import CoveyKit
 struct SettingsSheet: View {
     let model: AppModel
     @State private var draft: SettingsDraft
+    @State private var showingKeySheet = false
     @FocusState private var keyboardFocused: Bool
 
     private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
+
+    private var profiles: [ProviderProfile] { ProviderRegistry.load() }
+    private var activeProfile: ProviderProfile {
+        profiles.first { $0.id == draft.values.providerId } ?? .anthropic
+    }
+    private var providerKeyLabel: String? {
+        guard activeProfile.needsKey else { return nil }
+        return model.providerKeyIsSet(activeProfile)
+            ? "\(activeProfile.label) API key set ✓"
+            : "Set \(activeProfile.label) API key…"
+    }
+
+    @ViewBuilder
+    private var providerKeyRow: some View {
+        if let label = providerKeyLabel {
+            Button {
+                draft.selectedRow = .providerKey
+                showingKeySheet = true
+                keyboardFocused = true
+            } label: {
+                HStack(spacing: 8) {
+                    Text(label)
+                        .font(.callout)
+                        .foregroundStyle(draft.selectedRow == .providerKey ? tk.accent : tk.t1)
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .focusable(false)
+            .settingsRow()
+        }
+    }
 
     init(model: AppModel) {
         self.model = model
@@ -23,6 +57,12 @@ struct SettingsSheet: View {
                           choices: [("Dark", Theme.dark), ("Light", Theme.light)],
                           selection: $draft.values.theme)
                 checkboxRow(.vimMode, label: "Vim mode", value: $draft.values.vimMode)
+            }
+            section("Claude Code") {
+                choiceRow(.provider, label: "Provider",
+                          choices: profiles.map { ($0.label, $0.id) },
+                          selection: $draft.values.providerId)
+                providerKeyRow
             }
             section("Layout") {
                 checkboxRow(.showSessions, label: "Show sessions",
@@ -52,6 +92,10 @@ struct SettingsSheet: View {
         .focused($keyboardFocused)
         .onAppear { keyboardFocused = true }
         .onKeyPress(phases: .down) { press in handle(press) }
+        .sheet(isPresented: $showingKeySheet) {
+            ProviderKeySheet(profile: activeProfile, model: model,
+                             isPresented: $showingKeySheet)
+        }
     }
 
     @ViewBuilder
@@ -157,6 +201,11 @@ struct SettingsSheet: View {
             return .handled
         }
         if press.key == .return {
+            // The key row opens the key prompt rather than saving.
+            if draft.selectedRow == .providerKey, activeProfile.needsKey {
+                showingKeySheet = true
+                return .handled
+            }
             if let action = draft.handle(.activate) { perform(action) }
             return .handled
         }
@@ -188,5 +237,42 @@ private struct SettingsRowStyle: ViewModifier {
 private extension View {
     func settingsRow() -> some View {
         modifier(SettingsRowStyle())
+    }
+}
+
+/// Secure prompt to set or clear the active provider's API key (Keychain).
+private struct ProviderKeySheet: View {
+    let profile: ProviderProfile
+    @Bindable var model: AppModel
+    @Binding var isPresented: Bool
+
+    @State private var key: String = ""
+    @FocusState private var focused: Bool
+    private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("\(profile.label) API key").font(.headline)
+            SecureField("", text: $key, prompt: Text("paste key"))
+                .textFieldStyle(.roundedBorder)
+                .focused($focused)
+            HStack(spacing: 8) {
+                if model.providerKeyIsSet(profile) {
+                    Button("Clear") { model.setProviderKey(profile, ""); isPresented = false }
+                        .buttonStyle(AyuButton(tk: tk, prominent: false))
+                }
+                Spacer()
+                Button("Cancel") { isPresented = false }
+                    .buttonStyle(AyuButton(tk: tk, prominent: false))
+                Button("Save") {
+                    model.setProviderKey(profile, key); isPresented = false
+                }
+                .buttonStyle(AyuButton(tk: tk, prominent: true))
+                .disabled(key.isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 380)
+        .onAppear { focused = true }
     }
 }
