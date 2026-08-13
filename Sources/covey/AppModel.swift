@@ -13,6 +13,12 @@ struct ProviderLaunch: Equatable {
     let providerId: String?
 }
 
+enum ProviderKeyStatus: Equatable {
+    case checking
+    case set
+    case missing
+}
+
 /// UI state machine. The daemon is the single source of truth about sessions:
 /// actions call the IPC client and the model mutates only when the daemon's
 /// events confirm the change. One instance owns the single `client.events`
@@ -209,13 +215,29 @@ public final class AppModel {
     private var usagePoller: Task<Void, Never>?
     private var glmUsagePoller: Task<Void, Never>?
     @ObservationIgnored private var codexServer: CodexAppServer?
+    private let readProviderKey: @Sendable (String) -> String?
+    private let writeProviderKey: @Sendable (String, String) -> Void
+    private let deleteProviderKey: @Sendable (String) -> Void
+    private(set) var providerKeyStatuses: [String: ProviderKeyStatus] = [:]
 
     public init(client: IPCClient,
                 makeClient: @escaping () throws -> IPCClient,
                 store: StateStore,
                 fetchAccount: @escaping () async -> Account = { Account() },
                 fetchGlmAccount: @escaping () async -> Account = { Account() },
-                usageInterval: TimeInterval = 60) {
+                usageInterval: TimeInterval = 60,
+                readProviderKey: (@Sendable (String) -> String?)? = nil,
+                writeProviderKey: (@Sendable (String, String) -> Void)? = nil,
+                deleteProviderKey: (@Sendable (String) -> Void)? = nil) {
+        self.readProviderKey = readProviderKey ?? {
+            ProviderKeychain.read(account: $0)
+        }
+        self.writeProviderKey = writeProviderKey ?? {
+            ProviderKeychain.write(account: $0, value: $1)
+        }
+        self.deleteProviderKey = deleteProviderKey ?? {
+            ProviderKeychain.delete(account: $0)
+        }
         // Created before any self-capturing closures below.
         issueBrowser = IssueBrowserModel(
             fetchIssues: { dir, state in await IssueService.list(dir: dir, state: state) },
@@ -738,17 +760,45 @@ public final class AppModel {
         modal = .settings
     }
 
-    /// Stores (or, for an empty key, clears) a provider API key in the Keychain.
-    func setProviderKey(_ profile: ProviderProfile, _ key: String) {
+    /// Stores (or clears) a provider key without blocking the main actor.
+    func setProviderKey(_ profile: ProviderProfile, _ key: String) async {
         guard let account = profile.keychainAccount else { return }
-        if key.isEmpty { ProviderKeychain.delete(account: account) }
-        else { ProviderKeychain.write(account: account, value: key) }
+        if key.isEmpty {
+            let delete = deleteProviderKey
+            await Task.detached(priority: .userInitiated) {
+                delete(account)
+            }.value
+            providerKeyStatuses[account] = .missing
+        } else {
+            let write = writeProviderKey
+            await Task.detached(priority: .userInitiated) {
+                write(account, key)
+            }.value
+            providerKeyStatuses[account] = .set
+        }
     }
 
-    /// Whether the active provider's key is present (oauth providers need none).
+    /// Cached key status safe to read while SwiftUI is building a view.
+    func providerKeyStatus(_ profile: ProviderProfile) -> ProviderKeyStatus {
+        guard let account = profile.keychainAccount else { return .set }
+        return providerKeyStatuses[account] ?? .checking
+    }
+
+    /// Compatibility for views migrating to the three-state status API.
     func providerKeyIsSet(_ profile: ProviderProfile) -> Bool {
-        guard let account = profile.keychainAccount else { return true }
-        return ProviderKeychain.read(account: account) != nil
+        providerKeyStatus(profile) == .set
+    }
+
+    /// Loads key presence without blocking the main actor or SwiftUI rendering.
+    func refreshProviderKeyStatuses(_ profiles: [ProviderProfile]) async {
+        let accounts = Set(profiles.compactMap(\.keychainAccount))
+        let reader = readProviderKey
+        let present = await Task.detached(priority: .userInitiated) {
+            Set(accounts.filter { reader($0) != nil })
+        }.value
+        for account in accounts {
+            providerKeyStatuses[account] = present.contains(account) ? .set : .missing
+        }
     }
 
     /// Resolves the env block to inject for provider `id` (reads the Keychain).

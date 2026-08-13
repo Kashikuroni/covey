@@ -255,14 +255,22 @@ private struct ProviderKeySheet: View {
                 .focused($focused)
             HStack(spacing: 8) {
                 if model.providerKeyIsSet(profile) {
-                    Button("Clear") { model.setProviderKey(profile, ""); isPresented = false }
+                    Button("Clear") {
+                        Task {
+                            await model.setProviderKey(profile, "")
+                            isPresented = false
+                        }
+                    }
                         .buttonStyle(AyuButton(tk: tk, prominent: false))
                 }
                 Spacer()
                 Button("Cancel") { isPresented = false }
                     .buttonStyle(AyuButton(tk: tk, prominent: false))
                 Button("Save") {
-                    model.setProviderKey(profile, key); isPresented = false
+                    Task {
+                        await model.setProviderKey(profile, key)
+                        isPresented = false
+                    }
                 }
                 .buttonStyle(AyuButton(tk: tk, prominent: true))
                 .disabled(key.isEmpty)
