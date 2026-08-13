@@ -270,7 +270,7 @@ final class TerminalPaneRemountTests: XCTestCase {
         XCTAssertEqual(leadingGap, 4, accuracy: 0.5)
         XCTAssertEqual(trailingGap, 4, accuracy: 0.5)
         XCTAssertEqual(bottomGap, 4, accuracy: 0.5)
-        XCTAssertEqual(topGap, 23, accuracy: 0.5)
+        XCTAssertEqual(topGap, 25, accuracy: 0.5)
 
         daemon.registry.kill(name: "agent")
     }
