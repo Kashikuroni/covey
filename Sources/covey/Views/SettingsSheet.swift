@@ -5,39 +5,37 @@ struct SettingsSheet: View {
     let model: AppModel
     @State private var draft: SettingsDraft
     @State private var showingKeySheet = false
+    @State private var keyProfile = ProviderProfile.glm
     @FocusState private var keyboardFocused: Bool
 
     private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
 
     private var profiles: [ProviderProfile] { ProviderRegistry.load() }
-    private var activeProfile: ProviderProfile { .glm }
-    private var providerKeyLabel: String? {
-        guard activeProfile.needsKey else { return nil }
-        return model.providerKeyIsSet(activeProfile)
-            ? "\(activeProfile.label) API key set ✓"
-            : "Set \(activeProfile.label) API key…"
+    private var credentialProfiles: [ProviderProfile] {
+        SessionProviderSelection.credentialProfiles(profiles)
     }
 
-    @ViewBuilder
-    private var providerKeyRow: some View {
-        if let label = providerKeyLabel {
-            Button {
-                draft.selectedRow = .providerKey
-                showingKeySheet = true
-                keyboardFocused = true
-            } label: {
-                HStack(spacing: 8) {
-                    Text(label)
-                        .font(.callout)
-                        .foregroundStyle(draft.selectedRow == .providerKey ? tk.accent : tk.t1)
-                    Spacer()
-                }
-                .contentShape(Rectangle())
+    private func providerKeyRow(_ profile: ProviderProfile) -> some View {
+        let label = model.providerKeyIsSet(profile)
+            ? "\(profile.label) API key set ✓"
+            : "Set \(profile.label) API key…"
+        return Button {
+            draft.selectedRow = .providerKey
+            keyProfile = profile
+            showingKeySheet = true
+            keyboardFocused = true
+        } label: {
+            HStack(spacing: 8) {
+                Text(label)
+                    .font(.callout)
+                    .foregroundStyle(draft.selectedRow == .providerKey ? tk.accent : tk.t1)
+                Spacer()
             }
-            .buttonStyle(.plain)
-            .focusable(false)
-            .settingsRow()
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .focusable(false)
+        .settingsRow()
     }
 
     init(model: AppModel) {
@@ -55,7 +53,9 @@ struct SettingsSheet: View {
                 checkboxRow(.vimMode, label: "Vim mode", value: $draft.values.vimMode)
             }
             section("Claude Code") {
-                providerKeyRow
+                ForEach(credentialProfiles) { profile in
+                    providerKeyRow(profile)
+                }
             }
             section("Layout") {
                 checkboxRow(.showSessions, label: "Show sessions",
@@ -88,7 +88,7 @@ struct SettingsSheet: View {
         .onAppear { keyboardFocused = true }
         .onKeyPress(phases: .down) { press in handle(press) }
         .sheet(isPresented: $showingKeySheet) {
-            ProviderKeySheet(profile: activeProfile, model: model,
+            ProviderKeySheet(profile: keyProfile, model: model,
                              isPresented: $showingKeySheet)
         }
     }
@@ -197,7 +197,9 @@ struct SettingsSheet: View {
         }
         if press.key == .return {
             // The key row opens the key prompt rather than saving.
-            if draft.selectedRow == .providerKey, activeProfile.needsKey {
+            if draft.selectedRow == .providerKey,
+               let profile = credentialProfiles.first {
+                keyProfile = profile
                 showingKeySheet = true
                 return .handled
             }

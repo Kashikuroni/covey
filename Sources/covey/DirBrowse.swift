@@ -41,11 +41,12 @@ enum DirBrowse {
 /// The visible field chain of the new-session form (port of the TUI's
 /// `field_sequence`): drives Enter-advance and focus.
 enum FormField: Hashable {
-    case name, dir, worktree, branch, base, agent, customAgent
+    case name, dir, worktree, branch, base, agent, customAgent, provider
 }
 
 func formFieldSequence(isRepo: Bool, showWorktreeToggle: Bool,
-                       showBase: Bool, customAgent: Bool) -> [FormField] {
+                       showBase: Bool, customAgent: Bool,
+                       showProvider: Bool) -> [FormField] {
     var fields: [FormField] = [.name, .dir]
     if isRepo {
         fields.append(.branch)
@@ -54,5 +55,6 @@ func formFieldSequence(isRepo: Bool, showWorktreeToggle: Bool,
     }
     fields.append(.agent)
     if customAgent { fields.append(.customAgent) }
+    if showProvider { fields.append(.provider) }
     return fields
 }
