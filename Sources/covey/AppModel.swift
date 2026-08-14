@@ -19,6 +19,11 @@ enum ProviderKeyStatus: Equatable {
     case missing
 }
 
+enum ProviderKeyMutationResult: Equatable {
+    case success
+    case failure(String)
+}
+
 /// UI state machine. The daemon is the single source of truth about sessions:
 /// actions call the IPC client and the model mutates only when the daemon's
 /// events confirm the change. One instance owns the single `client.events`
@@ -216,8 +221,8 @@ public final class AppModel {
     private var glmUsagePoller: Task<Void, Never>?
     @ObservationIgnored private var codexServer: CodexAppServer?
     private let readProviderKey: @Sendable (String) -> String?
-    private let writeProviderKey: @Sendable (String, String) -> Void
-    private let deleteProviderKey: @Sendable (String) -> Void
+    private let writeProviderKey: @Sendable (String, String) -> Bool
+    private let deleteProviderKey: @Sendable (String) -> Bool
     private(set) var providerKeyStatuses: [String: ProviderKeyStatus] = [:]
 
     public init(client: IPCClient,
@@ -227,8 +232,8 @@ public final class AppModel {
                 fetchGlmAccount: @escaping () async -> Account = { Account() },
                 usageInterval: TimeInterval = 60,
                 readProviderKey: (@Sendable (String) -> String?)? = nil,
-                writeProviderKey: (@Sendable (String, String) -> Void)? = nil,
-                deleteProviderKey: (@Sendable (String) -> Void)? = nil) {
+                writeProviderKey: (@Sendable (String, String) -> Bool)? = nil,
+                deleteProviderKey: (@Sendable (String) -> Bool)? = nil) {
         self.readProviderKey = readProviderKey ?? {
             ProviderKeychain.read(account: $0)
         }
@@ -760,21 +765,40 @@ public final class AppModel {
         modal = .settings
     }
 
-    /// Stores (or clears) a provider key without blocking the main actor.
-    func setProviderKey(_ profile: ProviderProfile, _ key: String) async {
-        guard let account = profile.keychainAccount else { return }
+    /// Stores (or clears) a provider key and verifies the final Keychain state
+    /// without blocking the main actor.
+    func setProviderKey(
+        _ profile: ProviderProfile,
+        _ key: String
+    ) async -> ProviderKeyMutationResult {
+        let failure = ProviderKeyMutationResult.failure(
+            "Couldn’t save API key. Check Keychain access and try again."
+        )
+        guard let account = profile.keychainAccount else { return failure }
+        let reader = readProviderKey
         if key.isEmpty {
             let delete = deleteProviderKey
-            await Task.detached(priority: .userInitiated) {
-                delete(account)
+            let verified = await Task.detached(priority: .userInitiated) {
+                guard delete(account) else { return false }
+                return reader(account) == nil
             }.value
+            guard verified else { return failure }
             providerKeyStatuses[account] = .missing
+            return .success
         } else {
             let write = writeProviderKey
-            await Task.detached(priority: .userInitiated) {
-                write(account, key)
+            let verified = await Task.detached(priority: .userInitiated) {
+                guard write(account, key) else { return false }
+                return reader(account) == key
             }.value
+            guard verified else { return failure }
             providerKeyStatuses[account] = .set
+            if profile.id == ProviderProfile.glm.id {
+                Task { [weak self] in
+                    await self?.tickGlmUsage()
+                }
+            }
+            return .success
         }
     }
 

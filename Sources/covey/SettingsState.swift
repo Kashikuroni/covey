@@ -14,8 +14,8 @@ struct SettingsValues: Equatable {
 
 enum SettingsRow: Int, CaseIterable, Equatable {
     case theme
-    case providerKey
     case vimMode
+    case providerKey
     case showSessions
     case showHeader
     case showFooter

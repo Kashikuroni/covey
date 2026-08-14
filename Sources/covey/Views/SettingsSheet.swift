@@ -12,6 +12,15 @@ func providerKeyLabel(profile: ProviderProfile, status: ProviderKeyStatus) -> St
     }
 }
 
+func providerKeyMutationError(_ result: ProviderKeyMutationResult) -> String? {
+    switch result {
+    case .success:
+        return nil
+    case let .failure(message):
+        return message
+    }
+}
+
 struct SettingsSheet: View {
     let model: AppModel
     @State private var draft: SettingsDraft
@@ -259,6 +268,7 @@ private struct ProviderKeySheet: View {
 
     @State private var key: String = ""
     @State private var saving = false
+    @State private var saveError: String?
     @FocusState private var focused: Bool
     private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
 
@@ -268,14 +278,15 @@ private struct ProviderKeySheet: View {
             SecureField("", text: $key, prompt: Text("paste key"))
                 .textFieldStyle(.roundedBorder)
                 .focused($focused)
+            if let saveError {
+                Text("! \(saveError)")
+                    .font(.caption)
+                    .foregroundStyle(tk.err)
+            }
             HStack(spacing: 8) {
                 if model.providerKeyStatus(profile) == .set {
                     Button("Clear") {
-                        saving = true
-                        Task {
-                            await model.setProviderKey(profile, "")
-                            isPresented = false
-                        }
+                        mutateKey("")
                     }
                     .buttonStyle(AyuButton(tk: tk, prominent: false))
                     .disabled(saving)
@@ -285,11 +296,7 @@ private struct ProviderKeySheet: View {
                     .buttonStyle(AyuButton(tk: tk, prominent: false))
                     .disabled(saving)
                 Button("Save") {
-                    saving = true
-                    Task {
-                        await model.setProviderKey(profile, key)
-                        isPresented = false
-                    }
+                    mutateKey(key)
                 }
                 .buttonStyle(AyuButton(tk: tk, prominent: true))
                 .disabled(key.isEmpty || saving)
@@ -298,5 +305,19 @@ private struct ProviderKeySheet: View {
         .padding(20)
         .frame(width: 380)
         .onAppear { focused = true }
+    }
+
+    private func mutateKey(_ value: String) {
+        saveError = nil
+        saving = true
+        Task {
+            let result = await model.setProviderKey(profile, value)
+            saving = false
+            if let error = providerKeyMutationError(result) {
+                saveError = error
+            } else {
+                isPresented = false
+            }
+        }
     }
 }

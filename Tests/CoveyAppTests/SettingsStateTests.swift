@@ -19,7 +19,7 @@ final class SettingsStateTests: XCTestCase {
     func testJKWalkEveryRowAndClamp() {
         var draft = SettingsDraft(values: values())
         let down: [SettingsRow] = [
-            .providerKey, .vimMode, .showSessions, .showHeader, .showFooter,
+            .vimMode, .providerKey, .showSessions, .showHeader, .showFooter,
             .usagePlacement, .claudeUsage, .codexUsage, .glmUsage,
         ]
         for expected in down {
@@ -31,7 +31,7 @@ final class SettingsStateTests: XCTestCase {
 
         let up: [SettingsRow] = [
             .codexUsage, .claudeUsage, .usagePlacement, .showFooter,
-            .showHeader, .showSessions, .vimMode, .providerKey, .theme,
+            .showHeader, .showSessions, .providerKey, .vimMode, .theme,
         ]
         for expected in up {
             XCTAssertNil(draft.handle(.moveUp))
@@ -92,7 +92,7 @@ final class SettingsStateTests: XCTestCase {
 
     func testRowsContainCredentialsButNoActiveProvider() {
         XCTAssertEqual(SettingsRow.allCases, [
-            .theme, .providerKey, .vimMode, .showSessions, .showHeader, .showFooter,
+            .theme, .vimMode, .providerKey, .showSessions, .showHeader, .showFooter,
             .usagePlacement, .claudeUsage, .codexUsage, .glmUsage,
         ])
     }

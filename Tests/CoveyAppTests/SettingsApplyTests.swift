@@ -5,12 +5,18 @@ import CoveyKit
 private final class ProviderKeyIOProbe: @unchecked Sendable {
     private let lock = NSLock()
     private var stored: [String: String]
+    private let writeSucceeds: Bool
+    private let deleteSucceeds: Bool
     private(set) var reads: [(account: String, onMainThread: Bool)] = []
     private(set) var writes: [(account: String, value: String, onMainThread: Bool)] = []
     private(set) var deletes: [(account: String, onMainThread: Bool)] = []
 
-    init(stored: [String: String] = [:]) {
+    init(stored: [String: String] = [:],
+         writeSucceeds: Bool = true,
+         deleteSucceeds: Bool = true) {
         self.stored = stored
+        self.writeSucceeds = writeSucceeds
+        self.deleteSucceeds = deleteSucceeds
     }
 
     func read(_ account: String) -> String? {
@@ -20,18 +26,43 @@ private final class ProviderKeyIOProbe: @unchecked Sendable {
         return stored[account]
     }
 
-    func write(_ account: String, _ value: String) {
+    func write(_ account: String, _ value: String) -> Bool {
         lock.lock()
         defer { lock.unlock() }
         writes.append((account, value, Thread.isMainThread))
+        guard writeSucceeds else { return false }
         stored[account] = value
+        return true
     }
 
-    func delete(_ account: String) {
+    func delete(_ account: String) -> Bool {
         lock.lock()
         defer { lock.unlock() }
         deletes.append((account, Thread.isMainThread))
+        guard deleteSucceeds else { return false }
         stored[account] = nil
+        return true
+    }
+}
+
+private actor AsyncGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func open() {
+        isOpen = true
+        let pending = waiters
+        waiters.removeAll()
+        for continuation in pending {
+            continuation.resume()
+        }
     }
 }
 
@@ -43,17 +74,26 @@ final class SettingsApplyTests: XCTestCase {
                        "Set GLM API key…")
     }
 
+    func testProviderKeyMutationErrorPresentation() {
+        XCTAssertEqual(
+            providerKeyMutationError(.failure("storage failed")),
+            "storage failed"
+        )
+        XCTAssertNil(providerKeyMutationError(.success))
+    }
+
     @MainActor
     private func makeSettingsModel(
         _ daemon: TestDaemon,
         store: StateStore,
+        fetchGlmAccount: @escaping () async -> Account = { Account() },
         readProviderKey: @escaping @Sendable (String) -> String? = {
             ProviderKeychain.read(account: $0)
         },
-        writeProviderKey: @escaping @Sendable (String, String) -> Void = {
+        writeProviderKey: @escaping @Sendable (String, String) -> Bool = {
             ProviderKeychain.write(account: $0, value: $1)
         },
-        deleteProviderKey: @escaping @Sendable (String) -> Void = {
+        deleteProviderKey: @escaping @Sendable (String) -> Bool = {
             ProviderKeychain.delete(account: $0)
         }
     ) throws -> AppModel {
@@ -64,6 +104,7 @@ final class SettingsApplyTests: XCTestCase {
             makeClient: { let c = IPCClient(path: daemon.path); try c.connect(); return c },
             store: store,
             fetchAccount: { Account() },
+            fetchGlmAccount: fetchGlmAccount,
             usageInterval: 60,
             readProviderKey: readProviderKey,
             writeProviderKey: writeProviderKey,
@@ -108,18 +149,187 @@ final class SettingsApplyTests: XCTestCase {
             writeProviderKey: { probe.write($0, $1) },
             deleteProviderKey: { probe.delete($0) })
 
-        await model.setProviderKey(.glm, "KEY")
+        let saveResult = await model.setProviderKey(.glm, "KEY")
+        XCTAssertEqual(saveResult, .success)
 
         XCTAssertEqual(model.providerKeyStatus(.glm), .set)
         XCTAssertEqual(probe.writes.map { $0.account }, ["covey.provider.glm"])
         XCTAssertEqual(probe.writes.map { $0.value }, ["KEY"])
         XCTAssertEqual(probe.writes.map { $0.onMainThread }, [false])
+        XCTAssertEqual(probe.reads.map { $0.account }, ["covey.provider.glm"])
+        XCTAssertEqual(probe.reads.map { $0.onMainThread }, [false])
 
-        await model.setProviderKey(.glm, "")
+        let clearResult = await model.setProviderKey(.glm, "")
+        XCTAssertEqual(clearResult, .success)
 
         XCTAssertEqual(model.providerKeyStatus(.glm), .missing)
         XCTAssertEqual(probe.deletes.map { $0.account }, ["covey.provider.glm"])
         XCTAssertEqual(probe.deletes.map { $0.onMainThread }, [false])
+        XCTAssertEqual(probe.reads.map { $0.account },
+                       ["covey.provider.glm", "covey.provider.glm"])
+        XCTAssertEqual(probe.reads.map { $0.onMainThread }, [false, false])
+    }
+
+    @MainActor
+    func testProviderKeySaveReportsWriterFailureWithoutSettingCache() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let store = StateStore(
+            path: "\(NSTemporaryDirectory())covey-settings-\(UUID().uuidString).json",
+            debounce: 0.05)
+        let probe = ProviderKeyIOProbe(writeSucceeds: false)
+        let model = try makeSettingsModel(
+            daemon,
+            store: store,
+            readProviderKey: { probe.read($0) },
+            writeProviderKey: { probe.write($0, $1) },
+            deleteProviderKey: { probe.delete($0) })
+
+        let result = await model.setProviderKey(.glm, "KEY")
+
+        XCTAssertEqual(
+            result,
+            .failure("Couldn’t save API key. Check Keychain access and try again."))
+        XCTAssertNotEqual(model.providerKeyStatus(.glm), .set)
+    }
+
+    @MainActor
+    func testFailedProviderKeyUpdatePreservesExistingKeyAndSetStatus() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let store = StateStore(
+            path: "\(NSTemporaryDirectory())covey-settings-\(UUID().uuidString).json",
+            debounce: 0.05)
+        let probe = ProviderKeyIOProbe(
+            stored: ["covey.provider.glm": "OLD"],
+            writeSucceeds: false
+        )
+        let model = try makeSettingsModel(
+            daemon,
+            store: store,
+            readProviderKey: { probe.read($0) },
+            writeProviderKey: { probe.write($0, $1) },
+            deleteProviderKey: { probe.delete($0) })
+        await model.refreshProviderKeyStatuses([.glm])
+
+        let result = await model.setProviderKey(.glm, "NEW")
+
+        XCTAssertEqual(
+            result,
+            .failure("Couldn’t save API key. Check Keychain access and try again."))
+        XCTAssertEqual(model.providerKeyStatus(.glm), .set)
+        XCTAssertEqual(probe.read("covey.provider.glm"), "OLD")
+    }
+
+    @MainActor
+    func testProviderKeySaveReportsReadBackMismatchWithoutSettingCache() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let store = StateStore(
+            path: "\(NSTemporaryDirectory())covey-settings-\(UUID().uuidString).json",
+            debounce: 0.05)
+        let model = try makeSettingsModel(
+            daemon,
+            store: store,
+            readProviderKey: { _ in nil },
+            writeProviderKey: { _, _ in true },
+            deleteProviderKey: { _ in true })
+
+        let result = await model.setProviderKey(.glm, "KEY")
+
+        XCTAssertEqual(
+            result,
+            .failure("Couldn’t save API key. Check Keychain access and try again."))
+        XCTAssertNotEqual(model.providerKeyStatus(.glm), .set)
+    }
+
+    @MainActor
+    func testProviderKeyClearReportsDeleteFailureAndKeepsSetStatus() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let store = StateStore(
+            path: "\(NSTemporaryDirectory())covey-settings-\(UUID().uuidString).json",
+            debounce: 0.05)
+        let probe = ProviderKeyIOProbe(
+            stored: ["covey.provider.glm": "KEY"],
+            deleteSucceeds: false
+        )
+        let model = try makeSettingsModel(
+            daemon,
+            store: store,
+            readProviderKey: { probe.read($0) },
+            writeProviderKey: { probe.write($0, $1) },
+            deleteProviderKey: { probe.delete($0) })
+        await model.refreshProviderKeyStatuses([.glm])
+
+        let result = await model.setProviderKey(.glm, "")
+
+        XCTAssertEqual(
+            result,
+            .failure("Couldn’t save API key. Check Keychain access and try again."))
+        XCTAssertEqual(model.providerKeyStatus(.glm), .set)
+        XCTAssertEqual(probe.read("covey.provider.glm"), "KEY")
+    }
+
+    @MainActor
+    func testProviderKeyClearReportsReadBackStillPresentAndKeepsSetStatus() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let store = StateStore(
+            path: "\(NSTemporaryDirectory())covey-settings-\(UUID().uuidString).json",
+            debounce: 0.05)
+        let probe = ProviderKeyIOProbe(stored: ["covey.provider.glm": "KEY"])
+        let model = try makeSettingsModel(
+            daemon,
+            store: store,
+            readProviderKey: { probe.read($0) },
+            writeProviderKey: { probe.write($0, $1) },
+            deleteProviderKey: { _ in true })
+        await model.refreshProviderKeyStatuses([.glm])
+
+        let result = await model.setProviderKey(.glm, "")
+
+        XCTAssertEqual(
+            result,
+            .failure("Couldn’t save API key. Check Keychain access and try again."))
+        XCTAssertEqual(model.providerKeyStatus(.glm), .set)
+        XCTAssertEqual(probe.read("covey.provider.glm"), "KEY")
+    }
+
+    @MainActor
+    func testSuccessfulGlmKeySaveRefreshesLimitsImmediately() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let store = StateStore(
+            path: "\(NSTemporaryDirectory())covey-settings-\(UUID().uuidString).json",
+            debounce: 0.05)
+        let probe = ProviderKeyIOProbe()
+        let fetchGate = AsyncGate()
+        let glmAccount = Account(usage: Usage(
+            fiveHour: UsageWindow(utilization: 23, resetUnix: nil),
+            sevenDay: nil,
+            sevenDaySonnet: nil
+        ))
+        let model = try makeSettingsModel(
+            daemon,
+            store: store,
+            fetchGlmAccount: {
+                await fetchGate.wait()
+                return glmAccount
+            },
+            readProviderKey: { probe.read($0) },
+            writeProviderKey: { probe.write($0, $1) },
+            deleteProviderKey: { probe.delete($0) })
+
+        var result: ProviderKeyMutationResult?
+        let save = Task { @MainActor in
+            result = await model.setProviderKey(.glm, "KEY")
+        }
+
+        let saveReturned = await eventually(timeout: 0.2) { result != nil }
+        XCTAssertTrue(saveReturned, "saving the key must not wait for the usage network request")
+        XCTAssertEqual(result, .success)
+
+        await fetchGate.open()
+        await save.value
+        let refreshed = await eventually {
+            model.glmUsage?.fiveHour?.utilization == 23
+        }
+        XCTAssertTrue(refreshed)
     }
 
     @MainActor
