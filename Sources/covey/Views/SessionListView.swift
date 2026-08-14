@@ -194,16 +194,14 @@ private struct SessionCardView: View {
         }
         .padding(EdgeInsets(top: 7, leading: 11, bottom: 8, trailing: 11))
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(cardBackground,
-                    in: RoundedRectangle(cornerRadius: Tokens.r))
+        .background {
+            RoundedRectangle(cornerRadius: Tokens.r)
+                .fill(selected ? cardBackground : .clear)
+                .animation(.easeOut(duration: 0.2), value: selected)
+        }
         .overlay(
             RoundedRectangle(cornerRadius: Tokens.r)
                 .strokeBorder(cardBackground, lineWidth: 1)
         )
-        .overlay {
-            if selected {
-                SessionFocusBorder(color: tk.accent)
-            }
-        }
     }
 }

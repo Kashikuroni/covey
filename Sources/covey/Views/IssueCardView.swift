@@ -46,7 +46,7 @@ private struct DashedLine: Shape {
 }
 
 /// Issue row with a compact header/description/labels/WIP/footer hierarchy.
-/// Focus is a single accent ring; open/closed reads from the title color.
+/// Focus restores the card surface; open/closed reads from the title color.
 /// Model-free — every signal is precomputed by the pane.
 struct IssueCardView: View {
     let issue: GhIssue
@@ -81,14 +81,12 @@ struct IssueCardView: View {
         }
         .padding(EdgeInsets(top: 13, leading: 14, bottom: 13, trailing: 14))
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tk.card, in: RoundedRectangle(cornerRadius: Tokens.rLg))
-        .overlay(RoundedRectangle(cornerRadius: Tokens.rLg).strokeBorder(tk.bd))
-        .overlay {
-            if selected {
-                RoundedRectangle(cornerRadius: Tokens.rLg)
-                    .strokeBorder(tk.accent.opacity(0.55), lineWidth: 2)
-            }
+        .background {
+            RoundedRectangle(cornerRadius: Tokens.rLg)
+                .fill(selected ? tk.card : .clear)
+                .animation(.easeOut(duration: 0.2), value: selected)
         }
+        .overlay(RoundedRectangle(cornerRadius: Tokens.rLg).strokeBorder(tk.card))
     }
 
     private var header: some View {
