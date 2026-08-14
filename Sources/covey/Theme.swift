@@ -5,11 +5,11 @@ enum Theme: String {
 
     init(raw: String) { self = Theme(rawValue: raw) ?? .dark }
 
-    /// ayu editor.bg: Mirage lift / Light lift.
+    /// Native terminal fill; must match Tokens.termBg for each theme.
     var background: NSColor {
         switch self {
-        case .dark:  return NSColor(hex: 0x242936)
-        case .light: return NSColor(hex: 0xFCFCFC)
+        case .dark:  return NSColor(hex: 0x181C26)
+        case .light: return NSColor(hex: 0xEBEEF0)
         }
     }
     /// ayu editor.fg.

@@ -4,9 +4,10 @@ import SwiftUI
 
 final class TokensTests: XCTestCase {
     func testDarkPortMatchesAyuMirage() {
-        XCTAssertEqual(Tokens.dark.bg, Color(hex: 0x181C26))
-        XCTAssertEqual(Tokens.dark.surface, Color(hex: 0x1F2430))
+        XCTAssertEqual(Tokens.dark.bg, Color(hex: 0x1F2430))
+        XCTAssertEqual(Tokens.dark.surface, Color(hex: 0x181C26))
         XCTAssertEqual(Tokens.dark.card, Color(hex: 0x242936))
+        XCTAssertEqual(Tokens.dark.termBg, Color(hex: 0x181C26))
         XCTAssertEqual(Tokens.dark.t1, Color(hex: 0xCCCAC2))
         XCTAssertEqual(Tokens.dark.run, Color(hex: 0xFFA659))
         XCTAssertEqual(Tokens.dark.wait, Color(hex: 0xFFCD66))
@@ -14,8 +15,10 @@ final class TokensTests: XCTestCase {
     }
 
     func testLightPortMatchesAyuLight() {
-        XCTAssertEqual(Tokens.light.bg, Color(hex: 0xEBEEF0))
+        XCTAssertEqual(Tokens.light.bg, Color(hex: 0xF8F9FA))
+        XCTAssertEqual(Tokens.light.surface, Color(hex: 0xEBEEF0))
         XCTAssertEqual(Tokens.light.card, Color(hex: 0xFCFCFC))
+        XCTAssertEqual(Tokens.light.termBg, Color(hex: 0xEBEEF0))
         XCTAssertEqual(Tokens.light.run, Color(hex: 0xFA8532))
         XCTAssertEqual(Tokens.light.accent, Color(hex: 0xF29718))
     }

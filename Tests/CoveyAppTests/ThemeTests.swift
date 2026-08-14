@@ -3,6 +3,11 @@ import AppKit
 @testable import covey
 
 final class ThemeTests: XCTestCase {
+    func testTerminalBackgroundMatchesUnifiedPanelPalette() {
+        XCTAssertEqual(Theme.dark.background, NSColor(hex: 0x181C26))
+        XCTAssertEqual(Theme.light.background, NSColor(hex: 0xEBEEF0))
+    }
+
     func testAnsiHasSixteenColors() {
         XCTAssertEqual(Theme.dark.ansi.count, 16)
         XCTAssertEqual(Theme.light.ansi.count, 16)

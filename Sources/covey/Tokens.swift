@@ -69,11 +69,11 @@ struct Tokens {
     }
 
     static let dark = Tokens(
-        bg: Color(hex: 0x181C26), surface: Color(hex: 0x1F2430),
+        bg: Color(hex: 0x1F2430), surface: Color(hex: 0x181C26),
         surf2: Color(hex: 0x242936), surf3: Color(hex: 0x282E3B),
         surf4: Color(hex: 0x6E7C8F).opacity(0.4),
         card: Color(hex: 0x242936), cardHover: Color(hex: 0x282E3B),
-        termBg: Color(hex: 0x242936),
+        termBg: Color(hex: 0x181C26),
         bd: Color(hex: 0x171B24),
         bd2: Color(hex: 0x6E7C8F).opacity(0.25),
         bd3: Color(hex: 0x6E7C8F).opacity(0.45),
@@ -90,11 +90,11 @@ struct Tokens {
         isDark: true)
 
     static let light = Tokens(
-        bg: Color(hex: 0xEBEEF0), surface: Color(hex: 0xF8F9FA),
+        bg: Color(hex: 0xF8F9FA), surface: Color(hex: 0xEBEEF0),
         surf2: Color(hex: 0xFCFCFC), surf3: Color(hex: 0xFFFFFF),
         surf4: Color(hex: 0xADAEB1).opacity(0.5),
         card: Color(hex: 0xFCFCFC), cardHover: Color(hex: 0xFFFFFF),
-        termBg: Color(hex: 0xFCFCFC),
+        termBg: Color(hex: 0xEBEEF0),
         bd: Color(hex: 0x6B7D8F).opacity(0.12),
         bd2: Color(hex: 0x6B7D8F).opacity(0.20),
         bd3: Color(hex: 0x6B7D8F).opacity(0.32),
