@@ -5,8 +5,8 @@ import CoveydCore
 
 final class AppModelTests: XCTestCase {
     func testResolveProviderLaunchForClaudeGlm() {
-        ProviderKeychain.write(account: "covey.provider.glm", value: "TESTKEY")
-        defer { ProviderKeychain.delete(account: "covey.provider.glm") }
+        XCTAssertTrue(ProviderKeychain.write(account: "covey.provider.glm", value: "TESTKEY"))
+        defer { _ = ProviderKeychain.delete(account: "covey.provider.glm") }
 
         let (launch, error) = AppModel.resolveProviderLaunch(
             agent: "claude", selectedProviderId: "glm"
@@ -42,8 +42,8 @@ final class AppModelTests: XCTestCase {
     }
 
     func testResolveProviderEnvGlmWithKey() {
-        ProviderKeychain.write(account: "covey.provider.glm", value: "TESTKEY")
-        defer { ProviderKeychain.delete(account: "covey.provider.glm") }
+        XCTAssertTrue(ProviderKeychain.write(account: "covey.provider.glm", value: "TESTKEY"))
+        defer { _ = ProviderKeychain.delete(account: "covey.provider.glm") }
         let (env, err) = AppModel.resolveProviderEnv("glm")
         XCTAssertNil(err)
         XCTAssertEqual(env?["ANTHROPIC_BASE_URL"], "https://api.z.ai/api/anthropic")
@@ -51,7 +51,7 @@ final class AppModelTests: XCTestCase {
     }
 
     func testResolveProviderEnvGlmWithoutKey() {
-        ProviderKeychain.delete(account: "covey.provider.glm")   // ensure absent
+        _ = ProviderKeychain.delete(account: "covey.provider.glm")   // ensure absent
         let (env, err) = AppModel.resolveProviderEnv("glm")
         XCTAssertNil(env)
         XCTAssertNotNil(err)
