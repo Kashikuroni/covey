@@ -20,4 +20,18 @@ final class PanelTextStyleTests: XCTestCase {
 
         XCTAssertEqual(panelLabelColor(.project, tk: tk), tk.t1)
     }
+
+    func testZoneShortcutNumbersMatchDirectFocusOrder() {
+        let expected: [(FocusZone, Int)] = [
+            (.session, 1),
+            (.agent, 2),
+            (.issues, 3),
+            (.terminalSplit, 4),
+            (.trace, 5),
+        ]
+
+        for (zone, number) in expected {
+            XCTAssertEqual(zoneShortcutNumber(zone), number, "\(zone)")
+        }
+    }
 }

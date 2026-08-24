@@ -897,7 +897,7 @@ public final class AppModel {
     }
 
     func restoreCommandPaletteTerminalFocus() {
-        guard modal == nil, focus == .terminal else { return }
+        guard modal == nil, inputMode != .limits, focus == .terminal else { return }
         sendTerminalCommand(.focus)
     }
 
@@ -940,7 +940,8 @@ public final class AppModel {
                 $0.agent.split(separator: " ").first == "claude"
             },
             canMoveSessionUp: index.map { $0 > 0 } ?? false,
-            canMoveSessionDown: canMoveDown)
+            canMoveSessionDown: canMoveDown,
+            terminalFocused: focus == .terminal && inputMode == .normal)
     }
 
     func perform(_ command: AppCommand) {
@@ -1040,6 +1041,7 @@ public final class AppModel {
             usagePlacement = usagePlacement.next
             persist()
         case .showLimitsDetail:
+            if focus == .terminal { sendTerminalCommand(.blur) }
             inputMode = .limits
             limitsSelectedProvider = .claude
         case .focusSessionList:
@@ -1231,7 +1233,9 @@ public final class AppModel {
             setFocus(.sessions)
             sendTerminalCommand(.blur)
         case .closeOverlay:
+            let restoreTerminalFocus = inputMode == .limits && focus == .terminal
             inputMode = .normal
+            if restoreTerminalFocus { sendTerminalCommand(.focus) }
         case .enterSelectMode:
             inputMode = .selectSession
         case .resizeSplit(let delta):
@@ -1628,7 +1632,7 @@ public final class AppModel {
             sessions.sort { $0.created < $1.created }
             // A companion born for the selected session: show it and hand it
             // the keyboard (terminal split command flow).
-            if session.companionOf == selected {
+            if let selected, session.companionOf == selected {
                 Task {
                     await attachPane(session.name)
                     focusPane(session.name)

@@ -30,6 +30,24 @@ final class CommandCatalogTests: XCTestCase {
         XCTAssertEqual(keys.count, Set(keys).count)
     }
 
+    func testIssueSixTerminalAndLimitsShortcuts() throws {
+        let expected: [(AppCommand, Character, EventModifiers, String)] = [
+            (.splitTerminalVertically, "d", .command, "⌘D"),
+            (.splitTerminalHorizontally, "d", [.command, .shift], "⌘⇧D"),
+            (.closeTerminalSplit, "w", .command, "⌘W"),
+            (.showLimitsDetail, "l", .command, "⌘L"),
+        ]
+
+        for (command, key, modifiers, display) in expected {
+            let shortcut = try XCTUnwrap(CommandCatalog.descriptor(for: command).shortcut)
+            XCTAssertEqual(shortcut.key, key, "\(command)")
+            XCTAssertEqual(shortcut.modifiers, modifiers, "\(command)")
+            XCTAssertEqual(shortcut.display, display, "\(command)")
+        }
+
+        XCTAssertNil(CommandCatalog.descriptor(for: .killSession).shortcut)
+    }
+
     func testFormerLeaderCommandsRemainInCatalog() {
         let expected: Set<AppCommand> = [
             .showLimitsDetail, .createGitHubIssue, .openIssueList, .promoteWorktree,

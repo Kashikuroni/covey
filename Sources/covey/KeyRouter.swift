@@ -65,6 +65,21 @@ enum KeyRouter {
         guard !context.sheetOpen else { return nil }
         let ch = input.char.map(latinize)
 
+        // Transient overlays own the keyboard even when they were opened
+        // while a native terminal view held focus.
+        if context.vimMode, context.mode == .help {
+            return .closeOverlay
+        }
+        if context.vimMode, context.mode == .limits {
+            switch ch {
+            case "j": return .limitsSelectNext
+            case "k": return .limitsSelectPrev
+            case "h": return .limitsDisableSelected
+            case "l": return .limitsEnableSelected
+            default: return .closeOverlay
+            }
+        }
+
         if context.focus == .terminal {
             if input.isControl, ch == "q" { return .exitTerminal }
             if input.isControl, ch == "\\" { return .splitFocusToggle }
@@ -105,19 +120,8 @@ enum KeyRouter {
                 return .selectByNumber(n)
             }
             return nil   // anything else is ignored; the mode stays
-        case .help:
-            return .closeOverlay
-        case .limits:
-            // j/k move the highlighted provider, h/l disable/enable it —
-            // vim's "collapse/expand" pairing. Any other key still closes,
-            // matching .help's "any key closes" behavior.
-            switch ch {
-            case "j": return .limitsSelectNext
-            case "k": return .limitsSelectPrev
-            case "h": return .limitsDisableSelected
-            case "l": return .limitsEnableSelected
-            default: return .closeOverlay
-            }
+        case .help, .limits:
+            return nil // handled before native terminal focus above
         }
     }
 

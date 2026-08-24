@@ -99,19 +99,10 @@ struct IssueBrowserPane: View {
     // MARK: - detail
 
     private func detailScreen(_ issue: GhIssue) -> some View {
-        let hasSession = sessionForIssue(issue) != nil || recentForIssue(issue) != nil
         return VStack(alignment: .leading, spacing: 6) {
             bindingRow(issue)
             IssueDetailView(issue: issue, tk: tk)
             if let prompt = browser.prompt { promptCard(prompt) }
-            HStack(spacing: 10) {
-                KbdBadge(key: "e", label: "edit", tk: tk)
-                KbdBadge(key: "s", label: hasSession ? "open" : "session", tk: tk)
-                KbdBadge(key: "c", label: issue.isOpen ? "close" : "reopen", tk: tk)
-                KbdBadge(key: "x", label: "delete", tk: tk)
-                KbdBadge(key: "b", label: "browser", tk: tk)
-                KbdBadge(key: "esc", label: "list", tk: tk)
-            }
         }
         .padding(8)
         .focusable()
@@ -174,7 +165,6 @@ struct IssueBrowserPane: View {
             listBody
             if let prompt = browser.prompt { promptCard(prompt) }   // inline close/delete prompt
             Spacer(minLength: 0)
-            footerHints
         }
         .padding(.horizontal, 8)
         .padding(.bottom, 8)
@@ -430,12 +420,4 @@ struct IssueBrowserPane: View {
         }
     }
 
-    private var footerHints: some View {
-        HStack(spacing: 10) {
-            KbdBadge(key: "enter", label: "view", tk: tk)
-            KbdBadge(key: "n", label: "new", tk: tk)
-            KbdBadge(key: "s", label: "session", tk: tk)
-            KbdBadge(key: "/", label: "search", tk: tk)
-        }
-    }
 }

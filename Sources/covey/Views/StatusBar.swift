@@ -6,11 +6,64 @@ private func withPalette(_ hints: [(String, String)]) -> [(String, String)] {
     hints + [commandPaletteHint]
 }
 
+enum IssueStatusBarSessionState: Equatable {
+    case none
+    case recent
+    case live
+}
+
+func issueStatusBarHintPairs(issueScreen: AppModel.IssueScreen,
+                             browserScreen: IssueBrowserModel.Screen,
+                             sessionState: IssueStatusBarSessionState = .none) -> [(String, String)] {
+    if issueScreen == .composer {
+        return withPalette([
+            ("⌘ M", "assign"), ("⌘ O", "browser"), ("enter", "create"),
+            ("esc", "list"), ("⌃h/⌃l", "zones"),
+        ])
+    }
+    let sessionHints: [(String, String)] = switch sessionState {
+    case .none: [("s", "session")]
+    case .recent: [("s", "open")]
+    case .live: [("s", "open"), ("g", "session ↗")]
+    }
+    switch browserScreen {
+    case .list:
+        return withPalette([("enter", "view"), ("n", "new")]
+            + sessionHints + [
+            ("o", "state"), ("r", "refresh"), ("/", "search"),
+            ("e/c/x", "edit/close/del"),
+        ])
+    case .detail:
+        return withPalette([("e", "edit")] + sessionHints + [
+            ("c", "close/reopen"), ("x", "delete"), ("b", "browser"),
+            ("esc", "list"),
+        ])
+    case .edit:
+        return withPalette([("enter", "save"), ("esc", "cancel")])
+    }
+}
+
 struct StatusBar: View {
     let model: AppModel
     @FocusState private var filterFocused: Bool
 
     private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
+    private var issueSessionState: IssueStatusBarSessionState {
+        guard model.issueScreen == .browser,
+              let root = model.sessionRootOfSelected(),
+              let issue = model.issueBrowser.selectedIssue() else { return .none }
+        let live = model.sessions.contains {
+            sessionRoot($0) == root
+                && (model.issueNumber(forSession: $0.name) == issue.number
+                    || sessionNameMatchesIssue($0.name, number: issue.number))
+        }
+        if live { return .live }
+        let recent = model.visibleRecents().contains {
+            model.issueNumber(forSession: $0.name) == issue.number
+                || sessionNameMatchesIssue($0.name, number: issue.number)
+        }
+        return recent ? .recent : .none
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -72,34 +125,14 @@ struct StatusBar: View {
             return withPalette([("⌃q", "back to list")])
         }
         if model.focus == .inspector {
-            // App-level hints only; the editor's own footer carries the
-            // per-mode vim hints. While typing, most app keys are dead —
-            // do not lie about them.
+            // While typing, most app keys are dead — do not lie about them.
             if model.inspectorVimBadge == "INSERT" || model.inspectorEditing {
                 return withPalette([("esc", "leave insert")])
             }
             if model.inspectorMode == .issues {
-                if model.issueScreen == .composer {
-                    return withPalette([
-                        ("⌘ M", "assign"), ("⌘ O", "browser"), ("enter", "create"),
-                        ("esc", "issues"), ("⌃h/⌃l", "zones"),
-                    ])
-                }
-                switch model.issueBrowser.screen {
-                case .list:
-                    return withPalette([
-                        ("enter", "view"), ("s", "session"), ("n", "new"),
-                        ("o", "state"), ("/", "search"), ("e/c/x", "edit/close/del"),
-                    ])
-                case .detail:
-                    return withPalette([
-                        ("e", "edit"), ("s", "session"), ("g", "session ↗"),
-                        ("c", "close/reopen"), ("x", "delete"), ("b", "browser"),
-                        ("esc", "list"),
-                    ])
-                case .edit:
-                    return withPalette([("enter", "save"), ("esc", "cancel")])
-                }
+                return issueStatusBarHintPairs(issueScreen: model.issueScreen,
+                                               browserScreen: model.issueBrowser.screen,
+                                               sessionState: issueSessionState)
             }
             return withPalette([("⌃h/⌃l", "zones")])
         }

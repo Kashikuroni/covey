@@ -95,6 +95,11 @@ struct CoveyApp: App {
                 CatalogCommandButton(.killSession, model: model)
                 CatalogCommandButton(.renameSession, model: model)
             }
+            CommandMenu("Terminal") {
+                CatalogCommandButton(.splitTerminalVertically, model: model)
+                CatalogCommandButton(.splitTerminalHorizontally, model: model)
+                CatalogCommandButton(.closeTerminalSplit, model: model)
+            }
             CommandMenu("View") {
                 CatalogCommandToggle(.toggleSessionsPanel, model: model,
                                      isOn: model?.showSessions ?? true)
@@ -104,6 +109,8 @@ struct CoveyApp: App {
                                      isOn: model?.showFooter ?? true)
                 CatalogCommandToggle(.toggleInspector, model: model,
                                      isOn: model?.showInspector ?? false)
+                Divider()
+                CatalogCommandButton(.showLimitsDetail, model: model)
                 Divider()
                 CatalogCommandButton(.focusSessionList, model: model)
                 CatalogCommandButton(.focusAgent, model: model)

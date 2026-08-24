@@ -57,8 +57,7 @@ struct IssueDetailView: View {
             }
         }
         // Short content must not float to the pane's center: the detail
-        // block owns all available space, pinned to the top (and pushes the
-        // pane's hint row to the bottom, like the pre-split-scroll layout).
+        // block owns all available space, pinned to the top.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
