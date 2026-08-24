@@ -117,7 +117,7 @@ struct TracePane: View {
 
     private var header: some View {
         HStack {
-            zoneTitle("Trace", badge: 6, active: model.focus == .inspector, tk: tk)
+            zoneTitle("Trace", zone: .trace, active: model.focus == .inspector, tk: tk)
             Spacer()
             Text("Ayu \(tk.isDark ? "Dark" : "Light") · \(TraceRow.formatBytes(model.traceStoreBytes))")
                 .font(.system(size: 11, design: .monospaced)).foregroundStyle(tk.t4)

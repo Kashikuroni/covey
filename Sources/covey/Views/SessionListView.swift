@@ -10,7 +10,7 @@ struct SessionListView: View {
         VStack(spacing: 0) {
             // Zone tab matching the terminal panes' Agent/Terminal headers.
             HStack {
-                zoneTitle("Session", badge: 1,
+                zoneTitle("Session", zone: .session,
                           active: model.focus == .sessions, tk: tk)
                 Spacer()
             }

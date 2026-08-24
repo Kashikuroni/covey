@@ -18,7 +18,7 @@ struct InspectorView: View {
             } else {
                 VStack(spacing: 0) {
                     HStack {
-                        zoneTitle("Issues", badge: 3,
+                        zoneTitle("Issues", zone: .issues,
                                   active: model.focus == .inspector, tk: tk)
                         Spacer()
                         if let filter = issueListHeaderFilterLabel(model.issueBrowser.stateFilter) {
