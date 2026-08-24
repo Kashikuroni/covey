@@ -48,6 +48,20 @@ final class SplitTests: XCTestCase {
         model.apply(.splitFocusToggle)
         XCTAssertEqual(model.focusedPane, "agent+sh")
 
+        // A transient overlay owns the keyboard even though terminal focus is
+        // retained logically so it can be restored when the overlay closes.
+        model.perform(.showLimitsDetail)
+        XCTAssertEqual(model.commandAvailability(.closeTerminalSplit),
+                       .disabled(reason: "Terminal is not focused"))
+        model.perform(.closeTerminalSplit)
+        XCTAssertEqual(model.inputMode, .limits)
+        let closedBehindLimits = await eventually(timeout: 0.6) {
+            model.companion(of: "agent") == nil
+        }
+        XCTAssertFalse(closedBehindLimits)
+        model.apply(.closeOverlay)
+        XCTAssertEqual(model.commandAvailability(.closeTerminalSplit), .enabled)
+
         // Close: the companion dies, the split collapses, focus returns.
         model.perform(.closeTerminalSplit)
         let closed = await eventually { model.companion(of: "agent") == nil }

@@ -1,5 +1,27 @@
 import SwiftUI
 
+enum CommandWHandling: Equatable {
+    case consume
+    case perform(AppCommand)
+}
+
+func commandWHandling(focus: AppModel.Focus,
+                      inputMode: InputMode,
+                      modalPresented: Bool = false) -> CommandWHandling {
+    guard !modalPresented else { return .consume }
+    guard inputMode == .normal else { return .consume }
+    return focus == .terminal ? .perform(.closeTerminalSplit) : .consume
+}
+
+func isCommandW(_ event: NSEvent) -> Bool {
+    event.modifierFlags.intersection([.command, .shift, .option, .control, .function]) == .command
+        && event.keyCode == 13 // kVK_ANSI_W — independent of the active layout
+}
+
+func shouldRestoreCommandPaletteResponder(inputMode: InputMode) -> Bool {
+    inputMode != .limits
+}
+
 struct ContentView: View {
     @Bindable var model: AppModel
     @State private var keyMonitor: Any?
@@ -103,7 +125,8 @@ struct ContentView: View {
                 let responder = palettePreviousResponder
                 palettePreviousResponder = nil
                 DispatchQueue.main.async {
-                    if model.modal == nil,
+                    if shouldRestoreCommandPaletteResponder(inputMode: model.inputMode),
+                       model.modal == nil,
                        let window = NSApp.keyWindow,
                        let responder {
                         _ = window.makeFirstResponder(responder)
@@ -114,14 +137,19 @@ struct ContentView: View {
         }
         .onAppear {
             keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                // ⌘W: kill sheet for the selected session (File→Close would
-                // shadow a menu ⌘W — AppKit picks the first key equivalent).
-                if event.modifierFlags.intersection([.command, .shift, .option, .control]) == .command,
-                   event.charactersIgnoringModifiers == "w" {
+                // Reserve physical ⌘W for Covey before AppKit can choose
+                // File→Close: close a terminal split, consume it everywhere else.
+                if isCommandW(event) {
                     if model.commandPalettePresented { return nil }
-                    guard model.modal == nil else { return event }
-                    model.perform(.killSession)
-                    return nil
+                    switch commandWHandling(focus: model.focus,
+                                            inputMode: model.inputMode,
+                                            modalPresented: model.modal != nil) {
+                    case .consume:
+                        return nil
+                    case .perform(let command):
+                        model.perform(command)
+                        return nil
+                    }
                 }
                 // ⌘-anything else belongs to the menu system.
                 guard !event.modifierFlags.contains(.command) else { return event }

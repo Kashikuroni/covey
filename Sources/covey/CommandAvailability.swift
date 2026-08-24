@@ -18,6 +18,7 @@ struct CommandContext: Equatable {
     var hasClaudeSessions = false
     var canMoveSessionUp = false
     var canMoveSessionDown = false
+    var terminalFocused = false
 }
 
 enum CommandRules {
@@ -107,7 +108,17 @@ enum CommandRules {
             return context.hasSelectedSession
                 ? .enabled : .disabled(reason: "No session selected")
 
-        case .closeTerminalSplit, .focusTerminalSplit:
+        case .closeTerminalSplit:
+            guard context.hasSelectedSession else {
+                return .disabled(reason: "No session selected")
+            }
+            guard context.hasTerminalSplit else {
+                return .disabled(reason: "No terminal split")
+            }
+            return context.terminalFocused
+                ? .enabled : .disabled(reason: "Terminal is not focused")
+
+        case .focusTerminalSplit:
             guard context.hasSelectedSession else {
                 return .disabled(reason: "No session selected")
             }

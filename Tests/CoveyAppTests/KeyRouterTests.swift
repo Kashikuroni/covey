@@ -170,4 +170,11 @@ final class KeyRouterTests: XCTestCase {
         // Anything else still closes the popover.
         XCTAssertEqual(KeyRouter.route(key("q"), context: limits), .closeOverlay)
     }
+
+    func testLimitsModeOwnsKeysWhenTerminalWasFocused() {
+        let limits = ctx(mode: .limits, focus: .terminal)
+
+        XCTAssertEqual(KeyRouter.route(key("j"), context: limits), .limitsSelectNext)
+        XCTAssertEqual(KeyRouter.route(key("q"), context: limits), .closeOverlay)
+    }
 }
