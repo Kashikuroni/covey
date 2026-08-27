@@ -73,15 +73,12 @@ func glmChip(usage: Usage?) -> AgentUsageChip? {
     return AgentUsageChip(name: "GLM", plan: nil, windows: [LabeledWindow(label: "5h", window: window)])
 }
 
-/// The Codex window to treat as "current session" in the compact header:
-/// the window labeled `7d`, falling back to `secondary` then `primary` —
-/// tolerant of the same missing-duration cases `codexChip` already is.
+/// The most-used Codex window across every rate-limit bucket. The compact
+/// header has one Codex slot, so it surfaces whichever limit is closest.
 func codexHeaderWindow(_ snapshot: CodexRateLimitsSnapshot?) -> UsageWindow? {
-    guard let snapshot else { return nil }
-    if let sevenDay = snapshot.windows.first(where: { $0.label == "7d" }) {
-        return sevenDay.window
-    }
-    return (snapshot.secondary ?? snapshot.primary)?.window
+    snapshot?.windows.max {
+        $0.window.utilization < $1.window.utilization
+    }?.window
 }
 
 /// One compact top-bar segment: a provider label with its threshold-colored

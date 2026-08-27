@@ -43,6 +43,44 @@ final class CodexUsageTests: XCTestCase {
         XCTAssertEqual(snap?.windows.count, 2)
     }
 
+    func testParseRateLimitsByLimitIDKeepsEveryBucket() {
+        let json: [String: Any] = [
+            "rateLimits": [
+                "limitId": "codex",
+                "limitName": NSNull(),
+                "planType": "prolite",
+                "primary": ["usedPercent": 7, "windowDurationMins": 10080, "resetsAt": 1_700_000],
+                "secondary": NSNull(),
+                "rateLimitReachedType": NSNull(),
+            ],
+            "rateLimitsByLimitId": [
+                "codex": [
+                    "limitId": "codex",
+                    "limitName": NSNull(),
+                    "planType": "prolite",
+                    "primary": ["usedPercent": 7, "windowDurationMins": 10080, "resetsAt": 1_700_000],
+                    "secondary": NSNull(),
+                    "rateLimitReachedType": NSNull(),
+                ],
+                "codex_bengalfox": [
+                    "limitId": "codex_bengalfox",
+                    "limitName": "GPT-5.3-Codex-Spark",
+                    "planType": "prolite",
+                    "primary": ["usedPercent": 18, "windowDurationMins": 300, "resetsAt": 1_008_000],
+                    "secondary": ["usedPercent": 4, "windowDurationMins": 10080, "resetsAt": 1_600_000],
+                    "rateLimitReachedType": NSNull(),
+                ],
+            ],
+            "rateLimitResetCredits": NSNull(),
+        ]
+
+        let snap = parseCodexRateLimits(json)
+
+        XCTAssertEqual(snap?.buckets.keys.sorted(), ["codex", "codex_bengalfox"])
+        XCTAssertEqual(snap?.windows.map(\.label), ["7d", "Spark 5h", "Spark 7d"])
+        XCTAssertEqual(snap?.windows.map(\.window.utilization), [7, 18, 4])
+    }
+
     func testParseRateLimitsBucketWithoutWrapper() {
         let json: [String: Any] = ["primary": ["usedPercent": 5.0, "windowDurationMins": 300]]
         let snap = parseCodexRateLimits(json)
@@ -66,6 +104,35 @@ final class CodexUsageTests: XCTestCase {
         let merged = mergeCodex(into: base, update: update)
         XCTAssertEqual(merged.primary?.window.utilization, 85)
         XCTAssertEqual(merged.secondary?.window.utilization, 40)  // untouched
+    }
+
+    func testMergeSparseUpdateChangesOnlyMatchingBucket() {
+        let base = CodexRateLimitsSnapshot(buckets: [
+            "codex": CodexRateLimitBucket(
+                id: "codex", name: nil,
+                primary: LabeledWindow(label: "7d",
+                                       window: UsageWindow(utilization: 7, resetUnix: 1)),
+                secondary: nil),
+            "codex_bengalfox": CodexRateLimitBucket(
+                id: "codex_bengalfox", name: "GPT-5.3-Codex-Spark",
+                primary: LabeledWindow(label: "5h",
+                                       window: UsageWindow(utilization: 18, resetUnix: 2)),
+                secondary: LabeledWindow(label: "7d",
+                                         window: UsageWindow(utilization: 4, resetUnix: 3))),
+        ])
+        let update = CodexRateLimitsSnapshot(buckets: [
+            "codex_bengalfox": CodexRateLimitBucket(
+                id: "codex_bengalfox", name: "GPT-5.3-Codex-Spark",
+                primary: LabeledWindow(label: "5h",
+                                       window: UsageWindow(utilization: 85, resetUnix: 4)),
+                secondary: nil),
+        ])
+
+        let merged = mergeCodex(into: base, update: update)
+
+        XCTAssertEqual(merged.buckets["codex"]?.primary?.window.utilization, 7)
+        XCTAssertEqual(merged.buckets["codex_bengalfox"]?.primary?.window.utilization, 85)
+        XCTAssertEqual(merged.buckets["codex_bengalfox"]?.secondary?.window.utilization, 4)
     }
 
     func testMergeIntoNilReturnsUpdate() {

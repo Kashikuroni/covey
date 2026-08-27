@@ -113,18 +113,36 @@ public struct PersistedUsage: Codable, Equatable {
     }
 }
 
-/// Persistence mirror of Codex's `CodexRateLimitsSnapshot`. The label is
-/// stored alongside each window because Codex windows carry a label
-/// ("5h"/"7d"/"primary"/"secondary") that isn't fixed like Claude's.
+/// Persistence mirror of one Codex rate-limit bucket.
+public struct PersistedCodexRateLimitBucket: Codable, Equatable {
+    public var name: String?
+    public var primaryLabel: String?
+    public var primary: PersistedUsageWindow?
+    public var secondaryLabel: String?
+    public var secondary: PersistedUsageWindow?
+    public init(name: String? = nil,
+                primaryLabel: String? = nil, primary: PersistedUsageWindow? = nil,
+                secondaryLabel: String? = nil, secondary: PersistedUsageWindow? = nil) {
+        self.name = name
+        self.primaryLabel = primaryLabel; self.primary = primary
+        self.secondaryLabel = secondaryLabel; self.secondary = secondary
+    }
+}
+
+/// Persistence mirror of Codex's `CodexRateLimitsSnapshot`. Legacy window
+/// fields stay readable while `buckets` preserves the current multi-limit API.
 public struct PersistedCodexUsage: Codable, Equatable {
     public var primaryLabel: String?
     public var primary: PersistedUsageWindow?
     public var secondaryLabel: String?
     public var secondary: PersistedUsageWindow?
+    public var buckets: [String: PersistedCodexRateLimitBucket]?
     public init(primaryLabel: String? = nil, primary: PersistedUsageWindow? = nil,
-                secondaryLabel: String? = nil, secondary: PersistedUsageWindow? = nil) {
+                secondaryLabel: String? = nil, secondary: PersistedUsageWindow? = nil,
+                buckets: [String: PersistedCodexRateLimitBucket]? = nil) {
         self.primaryLabel = primaryLabel; self.primary = primary
         self.secondaryLabel = secondaryLabel; self.secondary = secondary
+        self.buckets = buckets
     }
 }
 

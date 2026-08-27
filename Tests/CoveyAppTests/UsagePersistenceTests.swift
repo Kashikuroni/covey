@@ -26,6 +26,24 @@ final class UsagePersistenceTests: XCTestCase {
         XCTAssertEqual(PersistedCodexUsage(snap).live, snap)
     }
 
+    func testPersistedCodexUsageRoundTripsEveryBucket() {
+        let snap = CodexRateLimitsSnapshot(buckets: [
+            "codex": CodexRateLimitBucket(
+                id: "codex", name: nil,
+                primary: LabeledWindow(label: "7d",
+                                       window: UsageWindow(utilization: 7, resetUnix: 1)),
+                secondary: nil),
+            "codex_bengalfox": CodexRateLimitBucket(
+                id: "codex_bengalfox", name: "GPT-5.3-Codex-Spark",
+                primary: LabeledWindow(label: "5h",
+                                       window: UsageWindow(utilization: 18, resetUnix: 2)),
+                secondary: LabeledWindow(label: "7d",
+                                         window: UsageWindow(utilization: 4, resetUnix: 3))),
+        ])
+
+        XCTAssertEqual(PersistedCodexUsage(snap).live, snap)
+    }
+
     func testPersistedCodexUsagePrimaryOnlyRoundTrip() {
         let snap = CodexRateLimitsSnapshot(
             primary: LabeledWindow(label: "primary", window: UsageWindow(utilization: 9, resetUnix: nil)),

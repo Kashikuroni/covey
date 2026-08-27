@@ -14,12 +14,57 @@ struct CodexAccount: Equatable {
     var planType: String?
 }
 
-/// Latest Codex rate-limit snapshot. Keyed by slot (primary/secondary) so a
-/// partial `updated` event merges unambiguously regardless of display label.
-struct CodexRateLimitsSnapshot: Equatable {
+/// One Codex rate-limit bucket. Keyed by upstream limit ID so partial
+/// `updated` events merge unambiguously regardless of display label.
+struct CodexRateLimitBucket: Equatable {
+    let id: String
+    let name: String?
     var primary: LabeledWindow?
     var secondary: LabeledWindow?
-    var windows: [LabeledWindow] { [primary, secondary].compactMap { $0 } }
+
+    private var windowPrefix: String? {
+        guard id != "codex" else { return nil }
+        guard let name, !name.isEmpty else { return id }
+        if name.localizedCaseInsensitiveContains("spark") { return "Spark" }
+        return name
+    }
+
+    var windows: [LabeledWindow] {
+        [primary, secondary].compactMap { labeled in
+            guard let labeled else { return nil }
+            guard let windowPrefix else { return labeled }
+            return LabeledWindow(label: "\(windowPrefix) \(labeled.label)",
+                                 window: labeled.window)
+        }
+    }
+}
+
+struct CodexRateLimitsSnapshot: Equatable {
+    var buckets: [String: CodexRateLimitBucket]
+
+    init(buckets: [String: CodexRateLimitBucket]) {
+        self.buckets = buckets
+    }
+
+    init(primary: LabeledWindow?, secondary: LabeledWindow?) {
+        buckets = ["codex": CodexRateLimitBucket(id: "codex", name: nil,
+                                                   primary: primary, secondary: secondary)]
+    }
+
+    private var legacyBucket: CodexRateLimitBucket? {
+        buckets["codex"] ?? buckets.sorted { $0.key < $1.key }.first?.value
+    }
+
+    var primary: LabeledWindow? { legacyBucket?.primary }
+    var secondary: LabeledWindow? { legacyBucket?.secondary }
+
+    var windows: [LabeledWindow] {
+        buckets.values.sorted {
+            if $0.id == "codex" { return true }
+            if $1.id == "codex" { return false }
+            return $0.id < $1.id
+        }.flatMap(\.windows)
+    }
 }
 
 /// Compact label from a window duration: 300→"5h", 10080→"7d", 90→"90m".
@@ -65,15 +110,35 @@ private func parseWindow(_ dict: [String: Any], fallbackLabel: String) -> Labele
                          window: UsageWindow(utilization: used, resetUnix: reset))
 }
 
-/// Accepts either a `{"rateLimits": {...}}` wrapper or the bucket directly.
-func parseCodexRateLimits(_ json: [String: Any]) -> CodexRateLimitsSnapshot? {
-    let bucket = (json["rateLimits"] as? [String: Any]) ?? json
-    let primary = (bucket["primary"] as? [String: Any])
+private func parseBucket(_ dict: [String: Any], fallbackID: String) -> CodexRateLimitBucket? {
+    let primary = (dict["primary"] as? [String: Any])
         .flatMap { parseWindow($0, fallbackLabel: "primary") }
-    let secondary = (bucket["secondary"] as? [String: Any])
+    let secondary = (dict["secondary"] as? [String: Any])
         .flatMap { parseWindow($0, fallbackLabel: "secondary") }
     guard primary != nil || secondary != nil else { return nil }
-    return CodexRateLimitsSnapshot(primary: primary, secondary: secondary)
+    let id = str(dict, ["limitId", "limit_id"]) ?? fallbackID
+    return CodexRateLimitBucket(id: id,
+                                name: str(dict, ["limitName", "limit_name"]),
+                                primary: primary,
+                                secondary: secondary)
+}
+
+/// Accepts the current multi-bucket response, the legacy `rateLimits` wrapper,
+/// or a bucket directly.
+func parseCodexRateLimits(_ json: [String: Any]) -> CodexRateLimitsSnapshot? {
+    if let byID = json["rateLimitsByLimitId"] as? [String: Any] {
+        var buckets: [String: CodexRateLimitBucket] = [:]
+        for (fallbackID, value) in byID {
+            guard let dict = value as? [String: Any],
+                  let bucket = parseBucket(dict, fallbackID: fallbackID) else { continue }
+            buckets[bucket.id] = bucket
+        }
+        if !buckets.isEmpty { return CodexRateLimitsSnapshot(buckets: buckets) }
+    }
+
+    let bucket = (json["rateLimits"] as? [String: Any]) ?? json
+    guard let parsed = parseBucket(bucket, fallbackID: "codex") else { return nil }
+    return CodexRateLimitsSnapshot(buckets: [parsed.id: parsed])
 }
 
 /// Partial `updated` merges into the last full snapshot: a nil slot in the
@@ -81,6 +146,17 @@ func parseCodexRateLimits(_ json: [String: Any]) -> CodexRateLimitsSnapshot? {
 func mergeCodex(into base: CodexRateLimitsSnapshot?,
                 update: CodexRateLimitsSnapshot) -> CodexRateLimitsSnapshot {
     guard let base else { return update }
-    return CodexRateLimitsSnapshot(primary: update.primary ?? base.primary,
-                                   secondary: update.secondary ?? base.secondary)
+    var buckets = base.buckets
+    for (id, updateBucket) in update.buckets {
+        guard let baseBucket = buckets[id] else {
+            buckets[id] = updateBucket
+            continue
+        }
+        buckets[id] = CodexRateLimitBucket(
+            id: id,
+            name: updateBucket.name ?? baseBucket.name,
+            primary: updateBucket.primary ?? baseBucket.primary,
+            secondary: updateBucket.secondary ?? baseBucket.secondary)
+    }
+    return CodexRateLimitsSnapshot(buckets: buckets)
 }

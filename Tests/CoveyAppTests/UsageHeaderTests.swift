@@ -10,25 +10,43 @@ final class UsageHeaderTests: XCTestCase {
         XCTAssertEqual(levelColor(.err, tk: tk), tk.err)
     }
 
-    func testCodexHeaderWindowPrefersSevenDayLabel() {
+    func testCodexHeaderWindowUsesHighestUtilizationWithinLegacyBucket() {
         let snap = CodexRateLimitsSnapshot(
             primary: LabeledWindow(label: "5h", window: UsageWindow(utilization: 8, resetUnix: 1)),
             secondary: LabeledWindow(label: "7d", window: UsageWindow(utilization: 22, resetUnix: 2)))
         XCTAssertEqual(codexHeaderWindow(snap)?.utilization, 22)
     }
 
-    func testCodexHeaderWindowFallsBackToSecondaryThenPrimary() {
+    func testCodexHeaderWindowUsesHighestUtilizationAcrossBuckets() {
+        let snap = CodexRateLimitsSnapshot(buckets: [
+            "codex": CodexRateLimitBucket(
+                id: "codex", name: nil,
+                primary: LabeledWindow(label: "7d",
+                                       window: UsageWindow(utilization: 7, resetUnix: 1)),
+                secondary: nil),
+            "codex_bengalfox": CodexRateLimitBucket(
+                id: "codex_bengalfox", name: "GPT-5.3-Codex-Spark",
+                primary: LabeledWindow(label: "5h",
+                                       window: UsageWindow(utilization: 38, resetUnix: 2)),
+                secondary: LabeledWindow(label: "7d",
+                                         window: UsageWindow(utilization: 4, resetUnix: 3))),
+        ])
+
+        XCTAssertEqual(codexHeaderWindow(snap)?.utilization, 38)
+    }
+
+    func testCodexHeaderWindowHandlesArbitraryLabelsAndMissingWindows() {
         let mislabeled = CodexRateLimitsSnapshot(
             primary: LabeledWindow(label: "primary", window: UsageWindow(utilization: 9, resetUnix: nil)),
             secondary: LabeledWindow(label: "secondary", window: UsageWindow(utilization: 30, resetUnix: nil)))
         XCTAssertEqual(codexHeaderWindow(mislabeled)?.utilization, 30,
-                       "no 7d label -> falls back to secondary")
+                       "labels do not affect utilization comparison")
 
         let primaryOnly = CodexRateLimitsSnapshot(
             primary: LabeledWindow(label: "primary", window: UsageWindow(utilization: 9, resetUnix: nil)),
             secondary: nil)
         XCTAssertEqual(codexHeaderWindow(primaryOnly)?.utilization, 9,
-                       "no secondary -> falls back to primary")
+                       "a single available window is selected")
     }
 
     func testCodexHeaderWindowNilWhenEmpty() {
