@@ -32,9 +32,6 @@ struct Tokens {
     static let gutter: CGFloat = 8
     /// Inset of the panel cards from the window edges.
     static let edge: CGFloat = 8
-    /// How opaque the `bg` tint over the window backdrop is. Lower shows more
-    /// of the desktop through the gutters, at the cost of contrast.
-    static let backdropTint: Double = 0.9
     /// Space above a zone header's label. More than below it: the card's
     /// rounded top corners crowd the text optically, so an even inset reads
     /// as if the label were riding too high.
@@ -109,6 +106,19 @@ struct Tokens {
         claudeBrand: Color(hex: 0x828E9F), codexBrand: Color(hex: 0x828E9F),
         glmBrand: Color(hex: 0x828E9F),
         isDark: false)
+}
+
+/// Subtle left-to-right window background derived from the active palette.
+struct AppBackgroundStyle {
+    let leadingColor: Color
+    let trailingColor: Color
+    let startPoint: UnitPoint = .leading
+    let endPoint: UnitPoint = .trailing
+
+    init(tokens: Tokens) {
+        leadingColor = tokens.surf3
+        trailingColor = tokens.surf2
+    }
 }
 
 extension Color {

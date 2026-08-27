@@ -30,6 +30,20 @@ final class TokensTests: XCTestCase {
         XCTAssertEqual(Tokens.light.glmBrand, Tokens.light.codexBrand)
     }
 
+    func testAppBackgroundGradientUsesLighterAdjacentSurfacesFromLeftToRight() {
+        let dark = AppBackgroundStyle(tokens: .dark)
+        XCTAssertEqual(dark.leadingColor, Color(hex: 0x282E3B))
+        XCTAssertEqual(dark.trailingColor, Color(hex: 0x242936))
+        XCTAssertEqual(dark.startPoint, .leading)
+        XCTAssertEqual(dark.endPoint, .trailing)
+
+        let light = AppBackgroundStyle(tokens: .light)
+        XCTAssertEqual(light.leadingColor, Color(hex: 0xFFFFFF))
+        XCTAssertEqual(light.trailingColor, Color(hex: 0xFCFCFC))
+        XCTAssertEqual(light.startPoint, .leading)
+        XCTAssertEqual(light.endPoint, .trailing)
+    }
+
     func testThemeSelectionAndConstants() {
         XCTAssertEqual(Tokens(Theme(raw: "dark")).bg, Tokens.dark.bg)
         XCTAssertEqual(Tokens(Theme(raw: "light")).bg, Tokens.light.bg)

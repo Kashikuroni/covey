@@ -29,6 +29,7 @@ struct ContentView: View {
     @State private var palettePreviousResponder: NSResponder?
 
     private var tokens: Tokens { Tokens(Theme(raw: model.themeRaw)) }
+    private var backgroundStyle: AppBackgroundStyle { AppBackgroundStyle(tokens: tokens) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -41,8 +42,9 @@ struct ContentView: View {
             }
         }
         .background {
-            WindowBackdrop()
-                .overlay(tokens.bg.opacity(Tokens.backdropTint))
+            LinearGradient(colors: [backgroundStyle.leadingColor, backgroundStyle.trailingColor],
+                           startPoint: backgroundStyle.startPoint,
+                           endPoint: backgroundStyle.endPoint)
                 .ignoresSafeArea()
         }
         // The window uses fullSizeContentView: pull the topbar up into the

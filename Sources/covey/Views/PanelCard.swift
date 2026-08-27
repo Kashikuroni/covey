@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// A workspace zone drawn as a rounded card floating on the window backdrop.
+/// A workspace zone drawn as a rounded card floating on the window background.
 ///
 /// Zones apply this themselves rather than the workspace applying it for them:
 /// a split zone draws one card per pane, and only the zone knows it is split.
@@ -16,7 +16,7 @@ struct PanelCard: ViewModifier {
             .clipShape(RoundedRectangle(cornerRadius: Tokens.rLg, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: Tokens.rLg, style: .continuous)
-                    .strokeBorder(tk.bd2, lineWidth: 1)
+                    .strokeBorder(surface, lineWidth: 1)
             )
             .shadow(color: tk.shadowColor, radius: Tokens.shadowRadius, y: Tokens.shadowY)
     }
