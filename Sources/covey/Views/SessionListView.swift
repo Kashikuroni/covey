@@ -32,47 +32,45 @@ struct SessionListView: View {
         return List {
             ForEach(groups, id: \.dir) { group in
                 let rows = group.sessions.filter { fuzzyMatch(model.filter, $0.name) }
+                let showGroup = !rows.isEmpty || (group.sessions.isEmpty && !filtering)
+
+                if showGroup {
+                    projectHeader(group: group)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 0,
+                                                  bottom: 0, trailing: 0))
+                }
+
                 if !rows.isEmpty {
-                    Section {
-                        ForEach(rows, id: \.name) { session in
-                            SessionCardView(model: model, session: session, tk: tk)
-                                .onTapGesture { Task { await model.select(session.name) } }
-                                .listRowBackground(Color.clear)
-                                .listRowSeparator(.hidden)
-                                // The List's private table pads rows by a
-                                // fixed 8pt per side that no SwiftUI
-                                // modifier removes (probed on macOS 26).
-                                // Make 8pt the uniform gap instead:
-                                // horizontal 0 (table's own 8), vertical
-                                // 4 + 4 between cards.
-                                .listRowInsets(EdgeInsets(top: 4, leading: 0,
-                                                          bottom: 4, trailing: 0))
-                                .contextMenu {
-                                    Button("Rename…") { model.modal = .rename(session.name) }
-                                    Button("Kill…", role: .destructive) { model.modal = .kill(session.name) }
-                                }
-                        }
-                        .onMove { from, to in
-                            guard !filtering else { return }
-                            model.moveSession(inDir: group.dir, from: from, to: to)
-                        }
-                    } header: {
-                        projectHeader(group: group, rows: rows)
-                            .listRowSeparator(.hidden)
-                    }
-                    .listSectionSeparator(.hidden)
-                } else if group.sessions.isEmpty, !filtering {
-                    Section {
-                        ghostRow(dir: group.dir)
+                    ForEach(rows, id: \.name) { session in
+                        SessionCardView(model: model, session: session, tk: tk)
+                            .onTapGesture { Task { await model.select(session.name) } }
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
+                            // The List's private table pads rows by a
+                            // fixed 8pt per side that no SwiftUI
+                            // modifier removes (probed on macOS 26).
+                            // Make 8pt the uniform gap instead:
+                            // horizontal 0 (table's own 8), vertical
+                            // 4 + 4 between cards.
                             .listRowInsets(EdgeInsets(top: 4, leading: 0,
                                                       bottom: 4, trailing: 0))
-                    } header: {
-                        projectHeader(group: group, rows: [])
-                            .listRowSeparator(.hidden)
+                            .contextMenu {
+                                Button("Rename…") { model.modal = .rename(session.name) }
+                                Button("Kill…", role: .destructive) { model.modal = .kill(session.name) }
+                            }
                     }
-                    .listSectionSeparator(.hidden)
+                    .onMove { from, to in
+                        guard !filtering else { return }
+                        model.moveSession(inDir: group.dir, from: from, to: to)
+                    }
+                } else if group.sessions.isEmpty, !filtering {
+                    ghostRow(dir: group.dir)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 4, leading: 0,
+                                                  bottom: 4, trailing: 0))
                 }
             }
         }
@@ -81,16 +79,13 @@ struct SessionListView: View {
         .background(tk.surface)
     }
 
-    private func projectHeader(group: (dir: String, sessions: [Session]),
-                               rows: [Session]) -> some View {
-        let running = rows.filter { model.statusByName[$0.name] == .running }.count
-        return HStack(spacing: 6) {
+    private func projectHeader(group: (dir: String, sessions: [Session])) -> some View {
+        HStack(spacing: 6) {
             Text(model.displayName(forDir: group.dir).uppercased())
                 .font(.system(size: 11, weight: .semibold))
                 .kerning(0.8)
                 .foregroundStyle(panelLabelColor(.project, tk: tk))
             Spacer()
-            Text("\(running)/\(rows.count)").font(mono(11)).foregroundStyle(tk.t4)
         }
     }
 
