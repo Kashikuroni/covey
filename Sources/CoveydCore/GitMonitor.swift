@@ -1,7 +1,7 @@
 import Foundation
 import CoveyKit
 
-/// Polls each live session's git info (branch + shortstat) and reports
+/// Polls each live session's layered git info and reports
 /// changes. Slower cadence than the status poller — git shells out per dir.
 public final class GitMonitor {
     public var onGitChanged: ((String, GitInfo?) -> Void)?

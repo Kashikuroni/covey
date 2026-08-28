@@ -223,26 +223,53 @@ public enum GitOps {
             .filter { !$0.isEmpty && $0 != current }
     }
 
-    /// Branch + working-tree shortstat, or nil outside a repo (git.rs read()).
+    /// Branch plus independent unstaged, staged, and untracked state.
     public static func readGitInfo(_ dir: String) -> GitInfo? {
         guard repoRoot(dir) != nil else { return nil }
         guard let branch = currentBranch(dir)
             ?? (try? run(dir, ["rev-parse", "--short", "HEAD"], readOnly: true))
         else { return nil }
-        let stat = (try? run(dir, ["diff", "--shortstat"], readOnly: true)) ?? ""
-        let (added, removed) = parseShortstat(stat)
-        return GitInfo(branch: branch, added: UInt32(added), removed: UInt32(removed))
+        let unstaged = parseNumstat(
+            (try? run(dir, ["diff", "--numstat", "-z"], readOnly: true)) ?? ""
+        )
+        let staged = parseNumstat(
+            (try? run(dir, ["diff", "--cached", "--numstat", "-z"], readOnly: true)) ?? ""
+        )
+        let untrackedOutput = (
+            try? run(dir, ["ls-files", "--others", "--exclude-standard", "-z"],
+                     readOnly: true)
+        ) ?? ""
+        let untracked = UInt32(clamping: untrackedOutput.split(
+            separator: "\0", omittingEmptySubsequences: true
+        ).count)
+        return GitInfo(
+            branch: branch, unstaged: unstaged, staged: staged, untracked: untracked
+        )
     }
 
-    public static func parseShortstat(_ s: String) -> (added: Int, removed: Int) {
-        var added = 0, removed = 0
-        for part in s.split(separator: ",") {
-            let p = part.trimmingCharacters(in: .whitespaces)
-            guard let n = p.split(separator: " ").first.flatMap({ Int($0) }) else { continue }
-            if p.contains("insertion") { added = n }
-            else if p.contains("deletion") { removed = n }
+    static func parseNumstat(_ output: String) -> GitDiffSummary {
+        let limit = UInt64(UInt32.max)
+        var files: UInt64 = 0
+        var added: UInt64 = 0
+        var removed: UInt64 = 0
+
+        func add(_ value: UInt64, to total: inout UInt64) {
+            total += min(value, limit - total)
         }
-        return (added, removed)
+
+        for record in output.split(separator: "\0", omittingEmptySubsequences: true) {
+            let fields = record.split(
+                separator: "\t", maxSplits: 2, omittingEmptySubsequences: false
+            )
+            guard fields.count == 3 else { continue }
+            add(1, to: &files)
+            if let count = UInt64(fields[0]) { add(count, to: &added) }
+            if let count = UInt64(fields[1]) { add(count, to: &removed) }
+        }
+
+        return GitDiffSummary(
+            files: UInt32(files), added: UInt32(added), removed: UInt32(removed)
+        )
     }
 
     /// Resolves the first word of `cmd` on PATH via `command -v`. The word is
