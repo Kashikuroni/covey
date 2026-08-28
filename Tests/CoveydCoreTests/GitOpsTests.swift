@@ -185,6 +185,93 @@ final class GitOpsTests: XCTestCase {
         XCTAssertThrowsError(try GitOps.deleteBranch(repo: repo, branch: "unmerged"))
     }
 
+    func testProtectedBranchesCannotBeDeletedInSafeOrForceMode() throws {
+        for branch in ["master", "develop", "dev"] {
+            try sh("git -C '\(repo)' branch '\(branch)'")
+        }
+        for branch in ["main", "master", "develop", "dev"] {
+            for force in [false, true] {
+                XCTAssertThrowsError(
+                    try GitOps.deleteBranch(repo: repo, branch: branch, force: force)
+                ) { error in
+                    XCTAssertTrue("\(error)".contains("protected"))
+                }
+                XCTAssertTrue(GitOps.branchExists(repo, branch))
+            }
+        }
+    }
+
+    func testForceModeDeletesCleanUnmergedLocalBranch() throws {
+        try sh("git -C '\(repo)' checkout -q -b feat && echo work > '\(repo)/work.txt' && git -C '\(repo)' add work.txt && git -C '\(repo)' -c user.email=t@t -c user.name=t commit -q -m work && git -C '\(repo)' checkout -q main")
+
+        XCTAssertThrowsError(
+            try GitOps.deleteBranch(repo: repo, branch: "feat", force: false)
+        )
+        XCTAssertTrue(GitOps.branchExists(repo, "feat"))
+
+        try GitOps.deleteBranch(repo: repo, branch: "feat", force: true)
+        XCTAssertFalse(GitOps.branchExists(repo, "feat"))
+    }
+
+    func testSwitchAndDeleteChecksOutDestinationThenDeletesExpectedBranch() throws {
+        try sh("git -C '\(repo)' checkout -q -b feat && echo work > '\(repo)/work.txt' && git -C '\(repo)' add work.txt && git -C '\(repo)' -c user.email=t@t -c user.name=t commit -q -m work")
+
+        try GitOps.switchAndDeleteBranch(
+            repo: repo, expectedBranch: "feat", checkoutBranch: "main"
+        )
+
+        XCTAssertEqual(GitOps.currentBranch(repo), "main")
+        XCTAssertFalse(GitOps.branchExists(repo, "feat"))
+    }
+
+    func testSwitchAndDeleteSupportsRetryAfterCheckout() throws {
+        try sh("git -C '\(repo)' branch feat")
+
+        try GitOps.switchAndDeleteBranch(
+            repo: repo, expectedBranch: "feat", checkoutBranch: "main"
+        )
+
+        XCTAssertEqual(GitOps.currentBranch(repo), "main")
+        XCTAssertFalse(GitOps.branchExists(repo, "feat"))
+    }
+
+    func testSwitchAndDeleteRejectsDirtyAndMissingDestination() throws {
+        try sh("git -C '\(repo)' branch feat")
+        try "dirty".write(
+            toFile: "\(repo)/dirty.txt", atomically: true, encoding: .utf8
+        )
+        XCTAssertThrowsError(try GitOps.switchAndDeleteBranch(
+            repo: repo, expectedBranch: "feat", checkoutBranch: "main"
+        ))
+        try FileManager.default.removeItem(atPath: "\(repo)/dirty.txt")
+        XCTAssertThrowsError(try GitOps.switchAndDeleteBranch(
+            repo: repo, expectedBranch: "feat", checkoutBranch: "missing"
+        ))
+    }
+
+    func testSwitchAndDeleteRejectsStaleCurrentBranch() throws {
+        try sh("git -C '\(repo)' branch feat")
+        try sh("git -C '\(repo)' checkout -q -b other")
+
+        XCTAssertThrowsError(try GitOps.switchAndDeleteBranch(
+            repo: repo, expectedBranch: "feat", checkoutBranch: "main"
+        ))
+        XCTAssertEqual(GitOps.currentBranch(repo), "other")
+        XCTAssertTrue(GitOps.branchExists(repo, "feat"))
+    }
+
+    func testSwitchAndDeleteRejectsDestinationInAnotherWorktree() throws {
+        try sh("git -C '\(repo)' checkout -q -b feat")
+        let other = "\(repo)/.worktrees/other"
+        try sh("git -C '\(repo)' worktree add -q -b other '\(other)' main")
+
+        XCTAssertThrowsError(try GitOps.switchAndDeleteBranch(
+            repo: repo, expectedBranch: "feat", checkoutBranch: "other"
+        ))
+        XCTAssertEqual(GitOps.currentBranch(repo), "feat")
+        XCTAssertTrue(GitOps.branchExists(repo, "feat"))
+    }
+
     func testListMergedBranches() throws {
         try sh("git -C '\(repo)' branch merged-b")
         let merged = GitOps.listMergedBranches(repo)

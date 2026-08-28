@@ -208,8 +208,61 @@ public enum GitOps {
         if dirty { try stashPop(repo) }
     }
 
-    public static func deleteBranch(repo: String, branch: String) throws {
-        try run(repo, ["branch", "-d", branch])
+    private static func requireDeletableBranch(_ branch: String) throws {
+        if protectedBranches.contains(branch) {
+            throw GitError("branch '\(branch)' is protected")
+        }
+    }
+
+    public static func deleteBranch(repo: String, branch: String,
+                                    force: Bool = false) throws {
+        try requireDeletableBranch(branch)
+        try run(repo, ["branch", force ? "-D" : "-d", branch])
+        let refs = try run(
+            repo, ["for-each-ref", "--format=%(refname:short)", "refs/heads"],
+            readOnly: true
+        )
+        let remaining = refs.split(separator: "\n").map(String.init)
+        guard !remaining.contains(branch) else {
+            throw GitError("branch '\(branch)' still exists after deletion")
+        }
+    }
+
+    public static func switchAndDeleteBranch(
+        repo: String, expectedBranch: String, checkoutBranch: String
+    ) throws {
+        try requireDeletableBranch(expectedBranch)
+        guard expectedBranch != checkoutBranch else {
+            throw GitError("choose a different branch before deletion")
+        }
+        guard branchExists(repo, expectedBranch) else {
+            throw GitError("branch '\(expectedBranch)' does not exist")
+        }
+        guard branchExists(repo, checkoutBranch) else {
+            throw GitError("branch '\(checkoutBranch)' does not exist")
+        }
+        guard !isDirty(repo) else {
+            throw GitError("working tree has uncommitted changes")
+        }
+        guard let current = currentBranch(repo),
+              current == expectedBranch || current == checkoutBranch else {
+            throw GitError("current branch changed; expected '\(expectedBranch)'")
+        }
+        if let path = worktreeForBranch(repo, checkoutBranch),
+           !sameDirectory(path, repo) {
+            throw GitError(
+                "branch '\(checkoutBranch)' is checked out in another worktree"
+            )
+        }
+        if current == expectedBranch {
+            try checkout(repo: repo, branch: checkoutBranch)
+        }
+        try deleteBranch(repo: repo, branch: expectedBranch, force: true)
+    }
+
+    private static func sameDirectory(_ lhs: String, _ rhs: String) -> Bool {
+        URL(fileURLWithPath: lhs).resolvingSymlinksInPath().path
+            == URL(fileURLWithPath: rhs).resolvingSymlinksInPath().path
     }
 
     /// Local branches fully merged into HEAD, excluding the current one.
