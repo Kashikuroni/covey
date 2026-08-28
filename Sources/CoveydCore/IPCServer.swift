@@ -177,6 +177,25 @@ public final class IPCServer {
         case let .kill(name, removeWorktree, deleteBranch):
             guard registry.get(name: name) != nil else { return notFound(name) }
             if deleteBranch == true {
+                guard let session = registry.get(name: name),
+                      session.worktreeRepo != nil,
+                      let branch = GitOps.currentBranch(session.dir) else {
+                    return reply(.error(
+                        code: "deleteBranchFailed", message: "not a worktree session"
+                    ))
+                }
+                guard !protectedBranches.contains(branch) else {
+                    return reply(.error(
+                        code: "deleteBranchFailed",
+                        message: "branch '\(branch)' is protected"
+                    ))
+                }
+                guard !GitOps.isDirty(session.dir) else {
+                    return reply(.error(
+                        code: "deleteBranchFailed",
+                        message: "working tree has uncommitted changes"
+                    ))
+                }
                 registry.markBranchDeletion(name: name)
                 registry.markWorktreeRemoval(name: name)   // delete needs the tree gone
             } else if removeWorktree == true {

@@ -783,13 +783,23 @@ struct KillSheet: View {
         .padding(20)
         .frame(width: 360)
         .task {
-            guard isWorktree else { return }
+            guard isWorktree,
+                  let session = model.sessions.first(where: { $0.name == name })
+            else { return }
             guard let st = await model.branchStatus(name: name) else {
                 branchGate = .blocked("Branch status unavailable"); return
             }
-            if st.dirty { branchGate = .blocked("Uncommitted changes") }
-            else if !st.merged { branchGate = .blocked("Unmerged commits") }
-            else { branchGate = .allowed }
+            var branch = session.git?.branch
+            if branch == nil {
+                branch = await model.gitInfo(session.dir).currentBranch
+            }
+            if let reason = worktreeBranchDeletionBlockReason(
+                branch: branch, dirty: st.dirty, merged: st.merged
+            ) {
+                branchGate = .blocked(reason)
+            } else {
+                branchGate = .allowed
+            }
         }
     }
 }

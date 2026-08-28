@@ -198,7 +198,7 @@ public final class SessionRegistry {
         lock.unlock()
     }
 
-    /// Schedules `git branch -d` of the session's branch once its process
+    /// Schedules deletion of the session's local branch once its process
     /// exits AND its worktree has been removed. Reads the branch by shelling
     /// out — done outside the lock.
     public func markBranchDeletion(name: String) {
@@ -364,7 +364,11 @@ public final class SessionRegistry {
         // Branch delete AFTER the worktree is removed — git refuses to delete a
         // branch still checked out in a worktree.
         if let branchDeletion {
-            try? GitOps.deleteBranch(repo: branchDeletion.repo, branch: branchDeletion.branch)
+            try? GitOps.deleteBranch(
+                repo: branchDeletion.repo,
+                branch: branchDeletion.branch,
+                force: true
+            )
         }
         onExit?(id, code)
     }

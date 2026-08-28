@@ -41,3 +41,13 @@ func preferredBranchDeleteDestination(_ branches: [String]) -> String? {
     }
     return branches.first
 }
+
+func worktreeBranchDeletionBlockReason(
+    branch: String?, dirty: Bool, merged: Bool
+) -> String? {
+    guard let branch else { return "Branch status unavailable" }
+    if protectedBranches.contains(branch) { return "Branch is protected" }
+    if dirty { return "Uncommitted changes" }
+    _ = merged
+    return nil
+}

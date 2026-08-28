@@ -68,4 +68,19 @@ final class GitPresentationTests: XCTestCase {
         )
         XCTAssertNil(preferredBranchDeleteDestination([]))
     }
+
+    func testWorktreeDeleteGateAllowsCleanUnmergedFeatureBranch() {
+        XCTAssertNil(worktreeBranchDeletionBlockReason(
+            branch: "feat", dirty: false, merged: false
+        ))
+    }
+
+    func testWorktreeDeleteGateBlocksDirtyAndProtectedBranches() {
+        XCTAssertEqual(worktreeBranchDeletionBlockReason(
+            branch: "feat", dirty: true, merged: false
+        ), "Uncommitted changes")
+        XCTAssertEqual(worktreeBranchDeletionBlockReason(
+            branch: "main", dirty: false, merged: true
+        ), "Branch is protected")
+    }
 }

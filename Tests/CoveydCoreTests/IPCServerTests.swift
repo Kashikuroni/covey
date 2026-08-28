@@ -535,20 +535,157 @@ final class IPCServerTests: XCTestCase {
         } }, "worktree create response")
         let wtPath = created!.dir
 
-        // branchStatus: feat is at main's tip -> clean & merged
+        try "work".write(
+            toFile: "\(wtPath)/work.txt", atomically: true, encoding: .utf8
+        )
+        let commit = Process()
+        commit.executableURL = URL(fileURLWithPath: "/bin/sh")
+        commit.arguments = [
+            "-c",
+            "git -C '\(wtPath)' add work.txt && git -C '\(wtPath)' -c user.email=t@t -c user.name=t commit -q -m work",
+        ]
+        try commit.run()
+        commit.waitUntilExit()
+        XCTAssertEqual(commit.terminationStatus, 0)
+
+        // The feature branch is clean but intentionally not merged into main.
         server.handle(Request(id: 2, op: .branchStatus(name: "wt")), from: sink)
         waitUntil({ sink.captured.contains {
             if case .response(2, .branchStatus(let dirty, let merged)) = $0 {
-                return dirty == false && merged == true
+                return dirty == false && merged == false
             }
             return false
-        } }, "clean, merged status")
+        } }, "clean, unmerged status")
 
         // kill + delete branch: worktree removed, branch gone
         server.handle(Request(id: 3, op: .kill(name: "wt", removeWorktree: nil,
                                                deleteBranch: true)), from: sink)
         waitUntil({ !FileManager.default.fileExists(atPath: wtPath) }, "worktree removed")
         waitUntil({ !GitOps.branchExists(repo, "feat") }, "branch deleted after worktree removal")
+    }
+
+    func testKillDeleteBranchRejectsDirtyWorktreeWithoutMutation() throws {
+        let repo = "\(NSTemporaryDirectory())covey-ipcdel-dirty-\(UInt32.random(in: 0..<UInt32.max))"
+        try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: repo) }
+        for cmd in [
+            "git -C '\(repo)' init -q -b main",
+            "git -C '\(repo)' -c user.email=t@t -c user.name=t commit --allow-empty -q -m init",
+        ] {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["-c", cmd]
+            try process.run()
+            process.waitUntilExit()
+            XCTAssertEqual(process.terminationStatus, 0)
+        }
+        let registry = SessionRegistry()
+        let server = IPCServer(
+            registry: registry,
+            monitor: StatusMonitor(snapshot: { registry.snapshotScreens() })
+        )
+        let sink = FakeSink(id: 1)
+        server.register(sink)
+        server.handle(Request(id: 1, op: .create(
+            dir: repo, agent: "sh", argv: nil, name: "dirty",
+            terminal: nil, worktree: .new(branch: "dirty-feat", base: "main"),
+            model: nil, effort: nil, resume: nil, companionOf: nil,
+            env: nil, providerId: nil
+        )), from: sink)
+        var created: Session?
+        waitUntil({ sink.captured.contains {
+            if case .response(1, .session(let session)) = $0 {
+                created = session
+                return true
+            }
+            return false
+        } }, "dirty worktree created")
+        let path = try XCTUnwrap(created?.dir)
+        try "dirty".write(
+            toFile: "\(path)/untracked.txt", atomically: true, encoding: .utf8
+        )
+
+        server.handle(Request(id: 2, op: .kill(
+            name: "dirty", removeWorktree: nil, deleteBranch: true
+        )), from: sink)
+
+        waitUntil({ sink.captured.contains {
+            if case .response(2, .error(let code, _)) = $0 {
+                return code == "deleteBranchFailed"
+            }
+            return false
+        } }, "dirty worktree deletion rejected")
+        XCTAssertNotNil(registry.get(name: "dirty"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: path))
+        XCTAssertTrue(GitOps.branchExists(repo, "dirty-feat"))
+
+        if registry.get(name: "dirty") != nil {
+            try? FileManager.default.removeItem(atPath: "\(path)/untracked.txt")
+            registry.markWorktreeRemoval(name: "dirty")
+            registry.kill(name: "dirty")
+            waitUntil({ !FileManager.default.fileExists(atPath: path) }, "dirty fixture removed")
+        }
+    }
+
+    func testKillDeleteBranchRejectsProtectedWorktreeWithoutMutation() throws {
+        let repo = "\(NSTemporaryDirectory())covey-ipcdel-protected-\(UInt32.random(in: 0..<UInt32.max))"
+        try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: repo) }
+        for cmd in [
+            "git -C '\(repo)' init -q -b main",
+            "git -C '\(repo)' -c user.email=t@t -c user.name=t commit --allow-empty -q -m init",
+        ] {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["-c", cmd]
+            try process.run()
+            process.waitUntilExit()
+            XCTAssertEqual(process.terminationStatus, 0)
+        }
+        let registry = SessionRegistry()
+        let server = IPCServer(
+            registry: registry,
+            monitor: StatusMonitor(snapshot: { registry.snapshotScreens() })
+        )
+        let sink = FakeSink(id: 1)
+        server.register(sink)
+        server.handle(Request(id: 1, op: .create(
+            dir: repo, agent: "sh", argv: nil, name: "protected",
+            terminal: nil, worktree: .new(branch: "dev", base: "main"),
+            model: nil, effort: nil, resume: nil, companionOf: nil,
+            env: nil, providerId: nil
+        )), from: sink)
+        var created: Session?
+        waitUntil({ sink.captured.contains {
+            if case .response(1, .session(let session)) = $0 {
+                created = session
+                return true
+            }
+            return false
+        } }, "protected worktree created")
+        let path = try XCTUnwrap(created?.dir)
+
+        server.handle(Request(id: 2, op: .kill(
+            name: "protected", removeWorktree: nil, deleteBranch: true
+        )), from: sink)
+
+        waitUntil({ sink.captured.contains {
+            if case .response(2, .error(let code, _)) = $0 {
+                return code == "deleteBranchFailed"
+            }
+            return false
+        } }, "protected worktree deletion rejected")
+        XCTAssertNotNil(registry.get(name: "protected"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: path))
+        XCTAssertTrue(GitOps.branchExists(repo, "dev"))
+
+        if registry.get(name: "protected") != nil {
+            registry.markWorktreeRemoval(name: "protected")
+            registry.kill(name: "protected")
+            waitUntil({
+                !FileManager.default.fileExists(atPath: path)
+            }, "protected fixture removed")
+        }
     }
 
     // Issue #5 regression: the output fanout captured the create-time name, so
