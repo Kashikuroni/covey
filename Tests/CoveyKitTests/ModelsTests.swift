@@ -49,7 +49,21 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(info.unstaged, GitDiffSummary(files: 1, added: 3, removed: 2))
         info.added = 0
         info.removed = 0
-        XCTAssertEqual(info.unstaged, .empty)
+        XCTAssertEqual(info.unstaged, GitDiffSummary(files: 1, added: 0, removed: 0))
+    }
+
+    func testLegacyZeroAssignmentPreservesLayeredFileOnlyDiff() {
+        var info = GitInfo(
+            branch: "main",
+            unstaged: GitDiffSummary(files: 2, added: 0, removed: 0),
+            staged: .empty,
+            untracked: 0
+        )
+
+        info.added = 0
+        info.removed = 0
+
+        XCTAssertEqual(info.unstaged, GitDiffSummary(files: 2, added: 0, removed: 0))
     }
 
     func testSessionRoundTrip() throws {

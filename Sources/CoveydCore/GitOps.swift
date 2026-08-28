@@ -93,8 +93,11 @@ public enum GitOps {
     /// main worktree is included; detached worktrees carry no branch line and
     /// are skipped.
     public static func worktrees(_ repo: String) -> [String: String] {
-        guard let out = try? run(repo, ["worktree", "list", "--porcelain"], readOnly: true)
-        else { return [:] }
+        (try? readWorktrees(repo)) ?? [:]
+    }
+
+    private static func readWorktrees(_ repo: String) throws -> [String: String] {
+        let out = try run(repo, ["worktree", "list", "--porcelain"], readOnly: true)
         var map: [String: String] = [:]
         var path: String?
         for line in out.split(separator: "\n", omittingEmptySubsequences: false) {
@@ -259,9 +262,20 @@ public enum GitOps {
     }
 
     public static func deleteBranch(repo: String, branch: String,
-                                    force: Bool = false) throws {
+                                    force: Bool = false,
+                                    expectedOID: String? = nil) throws {
         try requireDeletableBranch(branch)
-        try run(repo, ["branch", force ? "-D" : "-d", branch])
+        if force {
+            guard try readWorktrees(repo)[branch] == nil else {
+                throw GitError("branch '\(branch)' is checked out in a worktree")
+            }
+            guard let oid = try expectedOID ?? localBranchOID(repo, branch) else {
+                throw GitError("branch '\(branch)' does not exist")
+            }
+            try run(repo, ["update-ref", "-d", "refs/heads/\(branch)", oid])
+        } else {
+            try run(repo, ["branch", "-d", branch])
+        }
         guard try localBranchOID(repo, branch) == nil else {
             throw GitError("branch '\(branch)' still exists after deletion")
         }
@@ -288,14 +302,19 @@ public enum GitOps {
                 "branch '\(checkoutBranch)' is checked out in another worktree"
             )
         }
-        guard try localBranchOID(repo, expectedBranch) != nil else {
+        guard let sourceOID = try localBranchOID(repo, expectedBranch) else {
             if current == checkoutBranch { return }
             throw GitError("branch '\(expectedBranch)' does not exist")
         }
         if current == expectedBranch {
             try checkout(repo: repo, branch: checkoutBranch)
         }
-        try deleteBranch(repo: repo, branch: expectedBranch, force: true)
+        try deleteBranch(
+            repo: repo,
+            branch: expectedBranch,
+            force: true,
+            expectedOID: sourceOID
+        )
     }
 
     private static func sameDirectory(_ lhs: String, _ rhs: String) -> Bool {

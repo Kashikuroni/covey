@@ -234,6 +234,17 @@ final class GitOpsTests: XCTestCase {
         XCTAssertFalse(GitOps.branchExists(repo, "feat"))
     }
 
+    func testConditionalForceDeletionRejectsAdvancedBranchTip() throws {
+        try sh("git -C '\(repo)' checkout -q -b feat && echo one > '\(repo)/work.txt' && git -C '\(repo)' add work.txt && git -C '\(repo)' -c user.email=t@t -c user.name=t commit -q -m one && git -C '\(repo)' checkout -q main")
+        let expectedOID = try XCTUnwrap(GitOps.localBranchOID(repo, "feat"))
+        try sh("git -C '\(repo)' checkout -q feat && echo two >> '\(repo)/work.txt' && git -C '\(repo)' add work.txt && git -C '\(repo)' -c user.email=t@t -c user.name=t commit -q -m two && git -C '\(repo)' checkout -q main")
+
+        XCTAssertThrowsError(try GitOps.deleteBranch(
+            repo: repo, branch: "feat", force: true, expectedOID: expectedOID
+        ))
+        XCTAssertNotEqual(try GitOps.localBranchOID(repo, "feat"), expectedOID)
+    }
+
     func testSwitchAndDeleteChecksOutDestinationThenDeletesExpectedBranch() throws {
         try sh("git -C '\(repo)' checkout -q -b feat && echo work > '\(repo)/work.txt' && git -C '\(repo)' add work.txt && git -C '\(repo)' -c user.email=t@t -c user.name=t commit -q -m work")
 

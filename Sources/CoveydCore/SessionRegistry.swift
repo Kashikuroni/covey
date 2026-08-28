@@ -176,6 +176,10 @@ public final class SessionRegistry {
         guard let entry = entries[name] else {
             lock.unlock(); throw RegistryError.notFound(name)
         }
+        guard pendingBranchDeletion[name] == nil else {
+            lock.unlock()
+            throw GitOps.GitError("branch deletion is already in progress")
+        }
         let target = dir ?? entry.session.dir
         lock.unlock()
         var isDir: ObjCBool = false
@@ -216,6 +220,10 @@ public final class SessionRegistry {
         guard let entry = entries[name], let repo = entry.session.worktreeRepo else {
             lock.unlock()
             throw GitOps.GitError("not a worktree session")
+        }
+        guard pendingBranchDeletion[name] == nil else {
+            lock.unlock()
+            throw GitOps.GitError("branch deletion is already in progress")
         }
         let path = entry.session.dir
         lock.unlock()
@@ -297,6 +305,10 @@ public final class SessionRegistry {
         lock.lock()
         guard var entry = entries[name] else {
             lock.unlock(); throw RegistryError.notFound(name)
+        }
+        guard pendingBranchDeletion[name] == nil else {
+            lock.unlock()
+            throw GitOps.GitError("branch deletion is already in progress")
         }
         if entries[newName] != nil {
             lock.unlock(); throw RegistryError.duplicateName(newName)
@@ -426,7 +438,10 @@ public final class SessionRegistry {
             }
             try GitOps.removeWorktree(repo: deletion.repo, wtPath: deletion.path)
             try GitOps.deleteBranch(
-                repo: deletion.repo, branch: deletion.branch, force: true
+                repo: deletion.repo,
+                branch: deletion.branch,
+                force: true,
+                expectedOID: deletion.expectedOID
             )
             deletion.completion(.success(()))
         } catch let error as GitOps.GitError {

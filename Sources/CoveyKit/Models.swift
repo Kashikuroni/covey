@@ -83,7 +83,9 @@ public struct GitInfo: Codable, Equatable {
     }
 
     private mutating func normalizeLegacyFileCount() {
-        unstaged.files = unstaged.added == 0 && unstaged.removed == 0 ? 0 : max(1, unstaged.files)
+        if unstaged.added > 0 || unstaged.removed > 0 {
+            unstaged.files = max(1, unstaged.files)
+        }
     }
 }
 

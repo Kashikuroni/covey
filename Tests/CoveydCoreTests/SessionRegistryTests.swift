@@ -3,6 +3,41 @@ import XCTest
 import CoveyKit
 
 final class SessionRegistryTests: XCTestCase {
+    private func pendingDeletionFixture(_ label: String) throws
+        -> (repo: String, registry: SessionRegistry, name: String) {
+        let repo = "\(NSTemporaryDirectory())covey-reg-pending-\(label)-\(UInt32.random(in: 0..<UInt32.max))"
+        let worktree = "\(repo)/wt"
+        try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
+        for command in [
+            "git -C '\(repo)' init -q -b main",
+            "git -C '\(repo)' -c user.email=t@t -c user.name=t commit --allow-empty -q -m init",
+            "git -C '\(repo)' worktree add -q -b feat '\(worktree)' main",
+        ] {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["-c", command]
+            try process.run()
+            process.waitUntilExit()
+            XCTAssertEqual(process.terminationStatus, 0)
+        }
+        let registry = SessionRegistry()
+        let name = "pending"
+        _ = try registry.create(
+            dir: worktree, agent: "sh", argv: ["/bin/cat"], name: name,
+            worktreeRepo: repo
+        )
+        try registry.scheduleBranchDeletion(name: name) { _ in }
+        return (repo, registry, name)
+    }
+
+    private func tearDownPendingDeletionFixture(
+        repo: String, registry: SessionRegistry
+    ) {
+        for session in registry.list() { registry.kill(name: session.name) }
+        waitUntil({ registry.list().isEmpty }, "pending fixture exits")
+        try? FileManager.default.removeItem(atPath: repo)
+    }
+
     func testCreateAssignsNameAndClock() throws {
         let reg = SessionRegistry(clock: { 1234 })
         let s = try reg.create(dir: "/usr", agent: "sh", argv: ["/bin/cat"])
@@ -216,6 +251,46 @@ final class SessionRegistryTests: XCTestCase {
             XCTAssertEqual($0 as? RegistryError, .notFound("ghost"))
         }
         reg.kill(name: "r3")
+    }
+
+    func testPendingBranchDeletionRejectsRename() throws {
+        let fixture = try pendingDeletionFixture("rename")
+        defer {
+            tearDownPendingDeletionFixture(
+                repo: fixture.repo, registry: fixture.registry
+            )
+        }
+
+        XCTAssertThrowsError(try fixture.registry.rename(
+            name: fixture.name, newName: "renamed"
+        ))
+        XCTAssertNotNil(fixture.registry.get(name: fixture.name))
+        XCTAssertNil(fixture.registry.get(name: "renamed"))
+    }
+
+    func testPendingBranchDeletionRejectsRestart() throws {
+        let fixture = try pendingDeletionFixture("restart")
+        defer {
+            tearDownPendingDeletionFixture(
+                repo: fixture.repo, registry: fixture.registry
+            )
+        }
+
+        XCTAssertThrowsError(try fixture.registry.restart(name: fixture.name))
+        XCTAssertNotNil(fixture.registry.get(name: fixture.name))
+    }
+
+    func testPendingBranchDeletionRejectsDuplicateScheduling() throws {
+        let fixture = try pendingDeletionFixture("duplicate")
+        defer {
+            tearDownPendingDeletionFixture(
+                repo: fixture.repo, registry: fixture.registry
+            )
+        }
+
+        XCTAssertThrowsError(try fixture.registry.scheduleBranchDeletion(
+            name: fixture.name
+        ) { _ in })
     }
 
     func testRestartClaudeUsesResumeArgv() throws {
