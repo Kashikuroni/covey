@@ -1,3 +1,4 @@
+import Foundation
 import CoveyKit
 
 struct SessionGitDelta: Equatable {
@@ -18,4 +19,25 @@ func sessionGitDelta(_ git: GitInfo) -> SessionGitDelta? {
         )
     }
     return nil
+}
+
+func branchDeleteDestinations(
+    deleting: String,
+    repoRoot: String,
+    branches: [String],
+    worktrees: [String: String]
+) -> [String] {
+    let root = URL(fileURLWithPath: repoRoot).resolvingSymlinksInPath().path
+    return branches.filter { branch in
+        guard branch != deleting else { return false }
+        guard let path = worktrees[branch] else { return true }
+        return URL(fileURLWithPath: path).resolvingSymlinksInPath().path == root
+    }
+}
+
+func preferredBranchDeleteDestination(_ branches: [String]) -> String? {
+    for preferred in protectedBranches where branches.contains(preferred) {
+        return preferred
+    }
+    return branches.first
 }

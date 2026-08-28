@@ -44,4 +44,28 @@ final class GitPresentationTests: XCTestCase {
             SessionGitDelta(marker: "U", added: 0, removed: 0)
         )
     }
+
+    func testDeleteDestinationsExcludeSourceAndOtherWorktreesButAllowRoot() {
+        XCTAssertEqual(
+            branchDeleteDestinations(
+                deleting: "feat",
+                repoRoot: "/repo",
+                branches: ["feat", "main", "other", "busy"],
+                worktrees: ["main": "/repo", "busy": "/repo/.worktrees/busy"]
+            ),
+            ["main", "other"]
+        )
+    }
+
+    func testPreferredDeleteDestinationUsesProtectedPriorityThenFirst() {
+        XCTAssertEqual(
+            preferredBranchDeleteDestination(["topic", "dev", "main"]),
+            "main"
+        )
+        XCTAssertEqual(
+            preferredBranchDeleteDestination(["topic", "other"]),
+            "topic"
+        )
+        XCTAssertNil(preferredBranchDeleteDestination([]))
+    }
 }
