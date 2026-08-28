@@ -3,7 +3,7 @@ import CoveyKit
 @testable import covey
 
 final class GitPresentationTests: XCTestCase {
-    func testUnstagedWinsWhenBothLayersExist() {
+    func testCardDeltaUsesOnlyUnstagedLineCounts() {
         let info = GitInfo(
             branch: "feat",
             unstaged: .init(files: 1, added: 2, removed: 3),
@@ -12,19 +12,16 @@ final class GitPresentationTests: XCTestCase {
         )
         XCTAssertEqual(
             sessionGitDelta(info),
-            SessionGitDelta(marker: "U", added: 2, removed: 3)
+            SessionGitDelta(added: 2, removed: 3)
         )
     }
 
-    func testStagedShowsOnlyWhenUnstagedIsAbsent() {
+    func testStagedOnlyDoesNotCreateCardDelta() {
         let info = GitInfo(
             branch: "feat", unstaged: .empty,
             staged: .init(files: 1, added: 8, removed: 5), untracked: 0
         )
-        XCTAssertEqual(
-            sessionGitDelta(info),
-            SessionGitDelta(marker: "S", added: 8, removed: 5)
-        )
+        XCTAssertNil(sessionGitDelta(info))
     }
 
     func testUntrackedOnlyDoesNotCreateCardDelta() {
@@ -34,15 +31,12 @@ final class GitPresentationTests: XCTestCase {
         XCTAssertNil(sessionGitDelta(info))
     }
 
-    func testBinaryUnstagedStillShowsZeroLineDelta() {
+    func testZeroLineUnstagedChangeDoesNotCreateCardDelta() {
         let info = GitInfo(
             branch: "feat", unstaged: .init(files: 1, added: 0, removed: 0),
             staged: .empty, untracked: 0
         )
-        XCTAssertEqual(
-            sessionGitDelta(info),
-            SessionGitDelta(marker: "U", added: 0, removed: 0)
-        )
+        XCTAssertNil(sessionGitDelta(info))
     }
 
     func testDeleteDestinationsExcludeSourceAndOtherWorktreesButAllowRoot() {

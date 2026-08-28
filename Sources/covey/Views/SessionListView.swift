@@ -173,11 +173,14 @@ private struct SessionCardView: View {
                         Spacer()
                         if let delta {
                             HStack(spacing: 4) {
-                                Text(delta.marker).foregroundStyle(tk.t4)
-                                Text("+\(delta.added)")
-                                    .foregroundStyle(tk.diffAdd.opacity(0.65))
-                                Text("−\(delta.removed)")
-                                    .foregroundStyle(tk.diffDel.opacity(0.65))
+                                if delta.added > 0 {
+                                    Text("+\(delta.added)")
+                                        .foregroundStyle(tk.diffAdd.opacity(0.65))
+                                }
+                                if delta.removed > 0 {
+                                    Text("−\(delta.removed)")
+                                        .foregroundStyle(tk.diffDel.opacity(0.65))
+                                }
                             }
                             .font(mono(11))
                         }
