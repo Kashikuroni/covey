@@ -48,6 +48,23 @@ final class CommandCatalogTests: XCTestCase {
         XCTAssertNil(CommandCatalog.descriptor(for: .killSession).shortcut)
     }
 
+    func testPanelFocusUsesControlDigits() throws {
+        let expected: [(AppCommand, Character, String)] = [
+            (.focusSessionList, "1", "⌃1"),
+            (.focusAgent, "2", "⌃2"),
+            (.focusIssues, "3", "⌃3"),
+            (.focusTerminalSplit, "4", "⌃4"),
+            (.focusTrace, "5", "⌃5"),
+        ]
+
+        for (command, key, display) in expected {
+            let shortcut = try XCTUnwrap(CommandCatalog.descriptor(for: command).shortcut)
+            XCTAssertEqual(shortcut.key, key, "\(command)")
+            XCTAssertEqual(shortcut.modifiers, .control, "\(command)")
+            XCTAssertEqual(shortcut.display, display, "\(command)")
+        }
+    }
+
     func testFormerLeaderCommandsRemainInCatalog() {
         let expected: Set<AppCommand> = [
             .showLimitsDetail, .createGitHubIssue, .openIssueList, .promoteWorktree,

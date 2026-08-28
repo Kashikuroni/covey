@@ -173,6 +173,63 @@ final class AppModelChromeTests: XCTestCase {
     }
 
     @MainActor
+    func testCommandDigitsSelectVisibleSessionsWithoutChangingFocus() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        for number in 1...9 {
+            _ = try daemon.registry.create(dir: "/a", agent: "sh", argv: ["/bin/cat"],
+                                           name: "s\(number)")
+        }
+        await model.reconnect()
+        _ = await eventually { model.sessions.count == 9 }
+        model.setShowInspector(true)
+        model.setFocus(.inspector)
+
+        for number in 1...9 {
+            let key = Character(String(number))
+            let descriptor = try XCTUnwrap(CommandCatalog.all.first {
+                $0.shortcut?.key == key && $0.shortcut?.modifiers == .command
+            }, "missing ⌘\(number) session shortcut")
+
+            model.perform(descriptor.id)
+
+            _ = await eventually { model.selected == "s\(number)" }
+            XCTAssertEqual(model.selected, "s\(number)")
+            XCTAssertEqual(model.focus, .inspector)
+        }
+
+        await model.select("s1")
+        model.setFilter("s9")
+        model.perform(.selectSession1)
+        _ = await eventually { model.selected == "s9" }
+        XCTAssertEqual(model.selected, "s9")
+        XCTAssertEqual(model.focus, .inspector)
+
+        for session in model.sessions { daemon.registry.kill(name: session.name) }
+    }
+
+    @MainActor
+    func testUnavailableCommandDigitDoesNotDismissTransientMode() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        _ = try daemon.registry.create(dir: "/a", agent: "sh", argv: ["/bin/cat"],
+                                       name: "only")
+        await model.reconnect()
+        _ = await eventually { model.sessions.count == 1 }
+        model.perform(.showKeyboardHelp)
+
+        model.perform(.selectSession2)
+
+        XCTAssertEqual(model.commandAvailability(.selectSession2),
+                       .disabled(reason: "Session is not visible"))
+        XCTAssertEqual(model.inputMode, .help)
+        XCTAssertEqual(model.selected, "only")
+        daemon.registry.kill(name: "only")
+    }
+
+    @MainActor
     func testApplyModeTransitionsAndModals() async throws {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)

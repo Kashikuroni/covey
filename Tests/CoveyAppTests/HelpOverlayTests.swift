@@ -12,7 +12,9 @@ final class HelpOverlayTests: XCTestCase {
     func testHelpDoesNotAdvertiseRemovedNotesControls() {
         let pairs = helpGroups.flatMap { $0.1 }
         XCTAssertFalse(pairs.contains { $0.1.localizedCaseInsensitiveContains("note") })
-        XCTAssertTrue(pairs.contains { $0.0 == "⌘1-5" && $0.1.contains("issues") })
+        XCTAssertTrue(pairs.contains { $0.0 == "⌘1-9" && $0.1.contains("session") })
+        XCTAssertTrue(pairs.contains { $0.0 == "⌃1-5" && $0.1.contains("issues") })
+        XCTAssertFalse(pairs.contains { $0.0 == "⌘1-5" })
     }
 
     func testHelpAdvertisesPaletteAndNoLeaderAfterMigration() {

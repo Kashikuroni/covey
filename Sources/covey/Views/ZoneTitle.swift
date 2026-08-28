@@ -5,16 +5,6 @@ enum PanelLabelRole {
     case project
 }
 
-func zoneShortcutNumber(_ zone: FocusZone) -> Int {
-    switch zone {
-    case .session: return 1
-    case .agent: return 2
-    case .issues: return 3
-    case .terminalSplit: return 4
-    case .trace: return 5
-    }
-}
-
 func panelLabelColor(_ role: PanelLabelRole, tk: Tokens) -> Color {
     switch role {
     case .zone(let active):
@@ -24,15 +14,9 @@ func panelLabelColor(_ role: PanelLabelRole, tk: Tokens) -> Color {
     }
 }
 
-/// Zone header caption with its ⌘-digit badge: "Session [1]". The badge is
-/// always dim so it never competes with the active-accent title.
-func zoneTitle(_ title: String, zone: FocusZone, active: Bool, tk: Tokens) -> some View {
-    HStack(spacing: 4) {
-        Text(title)
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(panelLabelColor(.zone(active: active), tk: tk))
-        Text("[\(zoneShortcutNumber(zone))]")
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(tk.t4)
-    }
+/// Zone header caption. Keyboard navigation is documented in the status bar.
+func zoneTitle(_ title: String, zone _: FocusZone, active: Bool, tk: Tokens) -> some View {
+    Text(title)
+        .font(.system(size: 12, weight: .semibold))
+        .foregroundStyle(panelLabelColor(.zone(active: active), tk: tk))
 }

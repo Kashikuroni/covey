@@ -224,7 +224,7 @@ final class TerminalPaneRemountTests: XCTestCase {
         daemon.registry.kill(name: "agent-b")
     }
 
-    func testTerminalContentKeepsFourPointInsetsOnPanelEdges() async throws {
+    func testTerminalPaneSeparatesContentAndScrollerInsets() async throws {
         let daemon = try TestDaemon()
         defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
@@ -258,8 +258,12 @@ final class TerminalPaneRemountTests: XCTestCase {
 
         let terminal = try XCTUnwrap(terminalViews(in: root).first)
         let frame = terminal.convert(terminal.bounds, to: root)
+        let scroller = try XCTUnwrap(
+            terminal.subviews.compactMap { $0 as? NSScroller }.first
+        )
+        let scrollerFrame = scroller.convert(scroller.bounds, to: root)
         let leadingGap = frame.minX - root.bounds.minX
-        let trailingGap = root.bounds.maxX - frame.maxX
+        let scrollerTrailingGap = root.bounds.maxX - scrollerFrame.maxX
         let bottomGap = root.isFlipped
             ? root.bounds.maxY - frame.maxY
             : frame.minY - root.bounds.minY
@@ -267,8 +271,8 @@ final class TerminalPaneRemountTests: XCTestCase {
             ? frame.minY - root.bounds.minY
             : root.bounds.maxY - frame.maxY
 
-        XCTAssertEqual(leadingGap, 4, accuracy: 0.5)
-        XCTAssertEqual(trailingGap, 4, accuracy: 0.5)
+        XCTAssertEqual(leadingGap, 8, accuracy: 0.5)
+        XCTAssertEqual(scrollerTrailingGap, 4, accuracy: 0.5)
         XCTAssertEqual(bottomGap, 4, accuracy: 0.5)
         XCTAssertEqual(topGap, 25, accuracy: 0.5)
 

@@ -96,7 +96,7 @@ struct TerminalPaneView: View {
     private func pane(_ name: String) -> some View {
         TerminalRepresentable(model: model, name: name)
             .id(name)   // fresh TerminalView per session (spec §5)
-            .padding(EdgeInsets(top: 0, leading: 4, bottom: 4, trailing: 4))
+            .padding(EdgeInsets(top: 0, leading: 8, bottom: 4, trailing: 4))
             .onTapGesture { model.focusPane(name) }
     }
 

@@ -3,7 +3,7 @@ import Foundation
 import Observation
 import CoveyKit
 
-/// ⌘1-5 zone targets (menu key equivalents — reachable from any focus).
+/// ⌃1-5 zone targets (menu key equivalents — reachable from any focus).
 public enum FocusZone: Equatable {
     case session, agent, issues, terminalSplit, trace
 }
@@ -939,6 +939,7 @@ public final class AppModel {
             hasClaudeSessions: visibleSessions.contains {
                 $0.agent.split(separator: " ").first == "claude"
             },
+            visibleSessionCount: visibleSessionNames().count,
             canMoveSessionUp: index.map { $0 > 0 } ?? false,
             canMoveSessionDown: canMoveDown,
             terminalFocused: focus == .terminal && inputMode == .normal)
@@ -960,6 +961,10 @@ public final class AppModel {
             modal = .recent
         case .filterSessions:
             filterActive = true
+        case .selectSession1, .selectSession2, .selectSession3,
+             .selectSession4, .selectSession5, .selectSession6,
+             .selectSession7, .selectSession8, .selectSession9:
+            selectSession(at: command.sessionSelectionIndex)
         case .killSession:
             modal = selected.map(Modal.kill)
         case .renameSession:
@@ -1281,7 +1286,7 @@ public final class AppModel {
 
     /// ⌃h/⌃l: walk the session list, agent pane, companion shell pane (when
     /// split), and inspector (when shown), wrapping at the ends.
-    /// Direct zone jump for the View-menu ⌘1-5 items. Guards toast instead
+    /// Direct zone jump for the View-menu ⌃1-5 items. Guards toast instead
     /// of mutating anything (spec: no auto-show inspector, no auto-split).
     public func focusZone(_ zone: FocusZone) {
         switch zone {
@@ -1491,6 +1496,13 @@ public final class AppModel {
         let rows = visibleRows()
         guard !rows.isEmpty else { return }
         activate(rows[min(rows.count - 1, max(0, index))])
+    }
+
+    private func selectSession(at index: Int?) {
+        guard let index else { return }
+        let names = visibleSessionNames()
+        guard names.indices.contains(index) else { return }
+        Task { await select(names[index]) }
     }
 
     /// Keyboard reorder within the selected session's project group.

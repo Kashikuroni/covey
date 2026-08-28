@@ -16,6 +16,7 @@ struct CommandContext: Equatable {
     var hasTerminalSplit = false
     var inspectorShown = false
     var hasClaudeSessions = false
+    var visibleSessionCount = 0
     var canMoveSessionUp = false
     var canMoveSessionDown = false
     var terminalFocused = false
@@ -32,6 +33,15 @@ enum CommandRules {
              .toggleStatusBar, .toggleTopBar, .toggleTheme, .cycleUsagePlacement,
              .showLimitsDetail, .focusSessionList, .showKeyboardHelp,
              .addProject, .settings:
+            return .enabled
+
+        case .selectSession1, .selectSession2, .selectSession3,
+             .selectSession4, .selectSession5, .selectSession6,
+             .selectSession7, .selectSession8, .selectSession9:
+            guard let index = command.sessionSelectionIndex,
+                  index < context.visibleSessionCount else {
+                return .disabled(reason: "Session is not visible")
+            }
             return .enabled
 
         case .newSessionInCurrentProject, .removeProject, .renameProject:

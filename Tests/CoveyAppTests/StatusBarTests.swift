@@ -2,6 +2,15 @@ import XCTest
 @testable import covey
 
 final class StatusBarTests: XCTestCase {
+    func testStandardFooterShowsPanelShortcut() {
+        let hints = Dictionary(uniqueKeysWithValues: issueStatusBarHintPairs(
+            issueScreen: .browser,
+            browserScreen: .list
+        ))
+
+        XCTAssertEqual(hints["ctrl + 1...5"], "Panels")
+    }
+
     func testComposerFooterShowsEscapeToList() {
         let hints = Dictionary(uniqueKeysWithValues: issueStatusBarHintPairs(
             issueScreen: .composer,

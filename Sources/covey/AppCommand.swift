@@ -2,6 +2,8 @@ import SwiftUI
 
 enum AppCommand: String, CaseIterable, Hashable {
     case newSession, newSessionInCurrentProject, recentSessions, filterSessions
+    case selectSession1, selectSession2, selectSession3, selectSession4, selectSession5
+    case selectSession6, selectSession7, selectSession8, selectSession9
     case killSession, renameSession, restartSession, restartAllClaudeSessions
     case moveSessionUp, moveSessionDown
     case createGitHubIssue, openIssueList, promoteWorktree, deleteSessionBranch
@@ -12,6 +14,23 @@ enum AppCommand: String, CaseIterable, Hashable {
     case showLimitsDetail, focusSessionList, focusAgent, focusIssues
     case focusTerminalSplit, focusTrace, showKeyboardHelp
     case addProject, removeProject, renameProject, settings
+}
+
+extension AppCommand {
+    var sessionSelectionIndex: Int? {
+        switch self {
+        case .selectSession1: return 0
+        case .selectSession2: return 1
+        case .selectSession3: return 2
+        case .selectSession4: return 3
+        case .selectSession5: return 4
+        case .selectSession6: return 5
+        case .selectSession7: return 6
+        case .selectSession8: return 7
+        case .selectSession9: return 8
+        default: return nil
+        }
+    }
 }
 
 enum CommandCategory: Int, CaseIterable, Hashable {
@@ -80,6 +99,33 @@ enum CommandCatalog {
         descriptor(.filterSessions, "Filter Sessions", .session,
                    ["filter", "search", "фильтр сессий", "поиск сессий"],
                    .init(key: "f", modifiers: command, display: "⌘F")),
+        descriptor(.selectSession1, "Select Session 1", .session,
+                   ["jump session 1", "перейти к сессии 1"],
+                   .init(key: "1", modifiers: command, display: "⌘1")),
+        descriptor(.selectSession2, "Select Session 2", .session,
+                   ["jump session 2", "перейти к сессии 2"],
+                   .init(key: "2", modifiers: command, display: "⌘2")),
+        descriptor(.selectSession3, "Select Session 3", .session,
+                   ["jump session 3", "перейти к сессии 3"],
+                   .init(key: "3", modifiers: command, display: "⌘3")),
+        descriptor(.selectSession4, "Select Session 4", .session,
+                   ["jump session 4", "перейти к сессии 4"],
+                   .init(key: "4", modifiers: command, display: "⌘4")),
+        descriptor(.selectSession5, "Select Session 5", .session,
+                   ["jump session 5", "перейти к сессии 5"],
+                   .init(key: "5", modifiers: command, display: "⌘5")),
+        descriptor(.selectSession6, "Select Session 6", .session,
+                   ["jump session 6", "перейти к сессии 6"],
+                   .init(key: "6", modifiers: command, display: "⌘6")),
+        descriptor(.selectSession7, "Select Session 7", .session,
+                   ["jump session 7", "перейти к сессии 7"],
+                   .init(key: "7", modifiers: command, display: "⌘7")),
+        descriptor(.selectSession8, "Select Session 8", .session,
+                   ["jump session 8", "перейти к сессии 8"],
+                   .init(key: "8", modifiers: command, display: "⌘8")),
+        descriptor(.selectSession9, "Select Session 9", .session,
+                   ["jump session 9", "перейти к сессии 9"],
+                   .init(key: "9", modifiers: command, display: "⌘9")),
         descriptor(.killSession, "Kill Session", .session,
                    ["kill", "stop", "terminate", "завершить сессию", "остановить сессию"]),
         descriptor(.renameSession, "Rename Session", .session,
@@ -136,19 +182,19 @@ enum CommandCatalog {
                    .init(key: "l", modifiers: command, display: "⌘L")),
         descriptor(.focusSessionList, "Focus Session List", .view,
                    ["focus sessions", "фокус на сессии", "перейти к списку сессий"],
-                   .init(key: "1", modifiers: command, display: "⌘1")),
+                   .init(key: "1", modifiers: .control, display: "⌃1")),
         descriptor(.focusAgent, "Focus Agent", .view,
                    ["focus agent terminal", "фокус на агент", "перейти к агенту"],
-                   .init(key: "2", modifiers: command, display: "⌘2")),
+                   .init(key: "2", modifiers: .control, display: "⌃2")),
         descriptor(.focusIssues, "Focus Issues", .view,
                    ["focus issues", "фокус на задачи", "перейти к issues"],
-                   .init(key: "3", modifiers: command, display: "⌘3")),
+                   .init(key: "3", modifiers: .control, display: "⌃3")),
         descriptor(.focusTerminalSplit, "Focus Terminal Split", .view,
                    ["focus shell split", "фокус на сплит терминала", "перейти к shell"],
-                   .init(key: "4", modifiers: command, display: "⌘4")),
+                   .init(key: "4", modifiers: .control, display: "⌃4")),
         descriptor(.focusTrace, "Focus Trace", .view,
                    ["focus agent trace", "фокус на трассировку", "перейти к trace"],
-                   .init(key: "5", modifiers: command, display: "⌘5")),
+                   .init(key: "5", modifiers: .control, display: "⌃5")),
         descriptor(.showKeyboardHelp, "Show Keyboard Help", .view,
                    ["keys", "shortcuts", "помощь по клавишам", "горячие клавиши"]),
 
@@ -170,4 +216,10 @@ enum CommandCatalog {
         precondition(byID[command] != nil, "missing command descriptor: \(command)")
         return byID[command]!
     }
+
+    static let sessionSelectionCommands: [AppCommand] = [
+        .selectSession1, .selectSession2, .selectSession3,
+        .selectSession4, .selectSession5, .selectSession6,
+        .selectSession7, .selectSession8, .selectSession9,
+    ]
 }

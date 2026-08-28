@@ -1,9 +1,10 @@
 import SwiftUI
 
 private let commandPaletteHint = ("⌘P", "commands")
+private let panelFocusHint = ("ctrl + 1...5", "Panels")
 
 private func withPalette(_ hints: [(String, String)]) -> [(String, String)] {
-    hints + [commandPaletteHint]
+    hints + [commandPaletteHint, panelFocusHint]
 }
 
 enum IssueStatusBarSessionState: Equatable {

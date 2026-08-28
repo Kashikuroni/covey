@@ -5,6 +5,7 @@ let helpGroups: [(String, [(String, String)])] = [
         ("j / k", "next / previous session"),
         ("g", "first session"),
         ("s then 1-9", "jump to visible session"),
+        ("⌘1-9", "jump to visible session from any panel"),
         ("/", "filter / search sessions"),
     ]),
     ("act", [
@@ -22,7 +23,7 @@ let helpGroups: [(String, [(String, String)])] = [
         ("⌃h / ⌃l", "cycle focus: list · agent · shell · inspector"),
         ("⌃\\", "toggle split pane focus"),
         ("⌃k / ⌃j", "scroll terminal page up / down"),
-        ("⌘1-5", "zones: session · agent · issues · terminal · trace"),
+        ("⌃1-5", "zones: session · agent · issues · terminal · trace"),
         ("j/k · enter · e/c/x · s/g (issues)",
          "nav · view · edit/close/delete · session new/jump"),
         ("G / end", "terminal to bottom"),
