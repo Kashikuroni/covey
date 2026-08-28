@@ -1,12 +1,73 @@
-public struct GitInfo: Codable, Equatable {
-    public var branch: String
+public struct GitDiffSummary: Codable, Equatable {
+    public var files: UInt32
     public var added: UInt32
     public var removed: UInt32
-    
-    public init(branch: String, added: UInt32, removed: UInt32) {
-        self.branch = branch
+
+    public init(files: UInt32, added: UInt32, removed: UInt32) {
+        self.files = files
         self.added = added
         self.removed = removed
+    }
+
+    public static let empty = GitDiffSummary(files: 0, added: 0, removed: 0)
+}
+
+public struct GitInfo: Codable, Equatable {
+    public var branch: String
+    public var unstaged: GitDiffSummary
+    public var staged: GitDiffSummary
+    public var untracked: UInt32
+    public var added: UInt32 { unstaged.added }
+    public var removed: UInt32 { unstaged.removed }
+
+    private enum CodingKeys: String, CodingKey {
+        case branch, added, removed, unstaged, staged, untracked
+    }
+
+    public init(branch: String, unstaged: GitDiffSummary,
+                staged: GitDiffSummary, untracked: UInt32) {
+        self.branch = branch
+        self.unstaged = unstaged
+        self.staged = staged
+        self.untracked = untracked
+    }
+
+    public init(branch: String, added: UInt32, removed: UInt32) {
+        self.init(
+            branch: branch,
+            unstaged: GitDiffSummary(
+                files: added == 0 && removed == 0 ? 0 : 1,
+                added: added,
+                removed: removed
+            ),
+            staged: .empty,
+            untracked: 0
+        )
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        branch = try container.decode(String.self, forKey: .branch)
+        let legacyAdded = try container.decodeIfPresent(UInt32.self, forKey: .added) ?? 0
+        let legacyRemoved = try container.decodeIfPresent(UInt32.self, forKey: .removed) ?? 0
+        unstaged = try container.decodeIfPresent(GitDiffSummary.self, forKey: .unstaged)
+            ?? GitDiffSummary(
+                files: legacyAdded == 0 && legacyRemoved == 0 ? 0 : 1,
+                added: legacyAdded,
+                removed: legacyRemoved
+            )
+        staged = try container.decodeIfPresent(GitDiffSummary.self, forKey: .staged) ?? .empty
+        untracked = try container.decodeIfPresent(UInt32.self, forKey: .untracked) ?? 0
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(branch, forKey: .branch)
+        try container.encode(unstaged.added, forKey: .added)
+        try container.encode(unstaged.removed, forKey: .removed)
+        try container.encode(unstaged, forKey: .unstaged)
+        try container.encode(staged, forKey: .staged)
+        try container.encode(untracked, forKey: .untracked)
     }
 }
 
