@@ -508,6 +508,49 @@ final class IPCServerTests: XCTestCase {
         registry.kill(name: "worktree")
     }
 
+    func testSwitchAndDeleteBranchRejectsSessionInsideExternalLinkedWorktree() throws {
+        let repo = "\(NSTemporaryDirectory())covey-ipcswitch-external-\(UInt32.random(in: 0..<UInt32.max))"
+        let wt = "\(repo)/linked"
+        try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: repo) }
+        for command in [
+            "git -C '\(repo)' init -q -b main",
+            "git -C '\(repo)' -c user.email=t@t -c user.name=t commit --allow-empty -q -m init",
+            "git -C '\(repo)' branch landing",
+            "git -C '\(repo)' worktree add -q -b feat '\(wt)' main",
+        ] {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["-c", command]
+            try process.run()
+            process.waitUntilExit()
+            XCTAssertEqual(process.terminationStatus, 0)
+        }
+        let registry = SessionRegistry()
+        _ = try registry.create(
+            dir: wt, agent: "sh", argv: ["/bin/cat"], name: "external"
+        )
+        let server = IPCServer(
+            registry: registry,
+            monitor: StatusMonitor(snapshot: { registry.snapshotScreens() })
+        )
+        let sink = FakeSink(id: 1)
+
+        server.handle(Request(id: 1, op: .switchAndDeleteBranch(
+            name: "external", expectedBranch: "feat", checkoutBranch: "landing"
+        )), from: sink)
+
+        waitUntil({ sink.captured.contains {
+            if case .response(1, .error(let code, _)) = $0 {
+                return code == "deleteBranchFailed"
+            }
+            return false
+        } }, "external linked worktree is rejected")
+        XCTAssertEqual(GitOps.currentBranch(wt), "feat")
+        XCTAssertTrue(GitOps.branchExists(repo, "feat"))
+        registry.kill(name: "external")
+    }
+
     func testBranchStatusAndKillDeleteBranch() throws {
         let repo = "\(NSTemporaryDirectory())covey-ipcdel-\(UInt32.random(in: 0..<UInt32.max))"
         try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
@@ -560,8 +603,158 @@ final class IPCServerTests: XCTestCase {
         // kill + delete branch: worktree removed, branch gone
         server.handle(Request(id: 3, op: .kill(name: "wt", removeWorktree: nil,
                                                deleteBranch: true)), from: sink)
-        waitUntil({ !FileManager.default.fileExists(atPath: wtPath) }, "worktree removed")
-        waitUntil({ !GitOps.branchExists(repo, "feat") }, "branch deleted after worktree removal")
+        waitUntil({ sink.captured.contains {
+            if case .response(3, .ok) = $0 { return true }
+            return false
+        } }, "kill replies only after cleanup")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: wtPath))
+        XCTAssertFalse(GitOps.branchExists(repo, "feat"))
+    }
+
+    func testKillDeleteBranchPreservesShutdownTimeUntrackedFile() throws {
+        let repo = "\(NSTemporaryDirectory())covey-ipcdel-late-dirty-\(UInt32.random(in: 0..<UInt32.max))"
+        let wt = "\(repo)/wt"
+        try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: repo) }
+        for command in [
+            "git -C '\(repo)' init -q -b main",
+            "git -C '\(repo)' -c user.email=t@t -c user.name=t commit --allow-empty -q -m init",
+            "git -C '\(repo)' worktree add -q -b feat '\(wt)' main",
+        ] {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["-c", command]
+            try process.run()
+            process.waitUntilExit()
+            XCTAssertEqual(process.terminationStatus, 0)
+        }
+        let registry = SessionRegistry()
+        _ = try registry.create(
+            dir: wt, agent: "sh",
+            argv: [
+                "/bin/sh", "-c",
+                "trap 'printf late > late.txt; exit 0' HUP; while :; do sleep 1; done",
+            ],
+            name: "late-dirty", worktreeRepo: repo
+        )
+        let server = IPCServer(
+            registry: registry,
+            monitor: StatusMonitor(snapshot: { registry.snapshotScreens() })
+        )
+        let sink = FakeSink(id: 1)
+
+        server.handle(Request(id: 1, op: .kill(
+            name: "late-dirty", removeWorktree: nil, deleteBranch: true
+        )), from: sink)
+
+        waitUntil({ sink.captured.contains {
+            if case .response(1, .error(let code, _)) = $0 {
+                return code == "deleteBranchFailed"
+            }
+            return false
+        } }, "shutdown-time dirty state is reported")
+        XCTAssertEqual(try String(contentsOfFile: "\(wt)/late.txt", encoding: .utf8), "late")
+        XCTAssertTrue(GitOps.branchExists(repo, "feat"))
+    }
+
+    func testKillDeleteBranchPreservesShutdownTimeCommit() throws {
+        let repo = "\(NSTemporaryDirectory())covey-ipcdel-late-commit-\(UInt32.random(in: 0..<UInt32.max))"
+        let wt = "\(repo)/wt"
+        try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: repo) }
+        for command in [
+            "git -C '\(repo)' init -q -b main",
+            "git -C '\(repo)' -c user.email=t@t -c user.name=t commit --allow-empty -q -m init",
+            "git -C '\(repo)' worktree add -q -b feat '\(wt)' main",
+        ] {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["-c", command]
+            try process.run()
+            process.waitUntilExit()
+            XCTAssertEqual(process.terminationStatus, 0)
+        }
+        let initialTip = try XCTUnwrap(GitOps.localBranchOID(repo, "feat"))
+        let registry = SessionRegistry()
+        _ = try registry.create(
+            dir: wt, agent: "sh",
+            argv: [
+                "/bin/sh", "-c",
+                "trap 'printf late > late.txt; git add late.txt; git -c user.email=t@t -c user.name=t commit -q -m late; exit 0' HUP; while :; do sleep 1; done",
+            ],
+            name: "late-commit", worktreeRepo: repo
+        )
+        let server = IPCServer(
+            registry: registry,
+            monitor: StatusMonitor(snapshot: { registry.snapshotScreens() })
+        )
+        let sink = FakeSink(id: 1)
+
+        server.handle(Request(id: 1, op: .kill(
+            name: "late-commit", removeWorktree: nil, deleteBranch: true
+        )), from: sink)
+
+        waitUntil({ sink.captured.contains {
+            if case .response(1, .error(let code, _)) = $0 {
+                return code == "deleteBranchFailed"
+            }
+            return false
+        } }, "shutdown-time commit is reported")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: wt))
+        XCTAssertNotEqual(try GitOps.localBranchOID(repo, "feat"), initialTip)
+    }
+
+    func testKillDeleteBranchWaitsForCompanionBeforeFinalValidation() throws {
+        let repo = "\(NSTemporaryDirectory())covey-ipcdel-companion-\(UInt32.random(in: 0..<UInt32.max))"
+        let wt = "\(repo)/wt"
+        try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: repo) }
+        for command in [
+            "git -C '\(repo)' init -q -b main",
+            "git -C '\(repo)' -c user.email=t@t -c user.name=t commit --allow-empty -q -m init",
+            "git -C '\(repo)' worktree add -q -b feat '\(wt)' main",
+        ] {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["-c", command]
+            try process.run()
+            process.waitUntilExit()
+            XCTAssertEqual(process.terminationStatus, 0)
+        }
+        let registry = SessionRegistry()
+        _ = try registry.create(
+            dir: wt, agent: "agent", argv: ["/bin/cat"], name: "parent",
+            worktreeRepo: repo
+        )
+        _ = try registry.create(
+            dir: wt, agent: "shell",
+            argv: [
+                "/bin/sh", "-c",
+                "trap 'sleep 0.2; printf companion > companion.txt; exit 0' HUP; while :; do sleep 1; done",
+            ],
+            name: "parent+sh", companionOf: "parent"
+        )
+        let server = IPCServer(
+            registry: registry,
+            monitor: StatusMonitor(snapshot: { registry.snapshotScreens() })
+        )
+        let sink = FakeSink(id: 1)
+
+        server.handle(Request(id: 1, op: .kill(
+            name: "parent", removeWorktree: nil, deleteBranch: true
+        )), from: sink)
+
+        waitUntil({ sink.captured.contains {
+            if case .response(1, .error(let code, _)) = $0 {
+                return code == "deleteBranchFailed"
+            }
+            return false
+        } }, "companion shutdown change is reported")
+        XCTAssertEqual(
+            try String(contentsOfFile: "\(wt)/companion.txt", encoding: .utf8),
+            "companion"
+        )
+        XCTAssertTrue(GitOps.branchExists(repo, "feat"))
     }
 
     func testKillDeleteBranchRejectsDirtyWorktreeWithoutMutation() throws {

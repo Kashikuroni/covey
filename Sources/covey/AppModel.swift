@@ -431,13 +431,19 @@ public final class AppModel {
         catch { toast = errorText(error) }
     }
 
+    @discardableResult
     public func kill(_ name: String, removeWorktree: Bool = false,
-                     deleteBranch: Bool = false) async {
+                     deleteBranch: Bool = false) async -> String? {
         do {
             try await client.kill(name: name,
                                   removeWorktree: removeWorktree ? true : nil,
                                   deleteBranch: deleteBranch ? true : nil)
-        } catch { toast = errorText(error) }
+            return nil
+        } catch {
+            let message = errorText(error)
+            toast = message
+            return message
+        }
     }
 
     /// Restart via the daemon; the error text doubles as the sheet's inline

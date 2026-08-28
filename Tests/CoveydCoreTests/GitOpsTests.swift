@@ -90,6 +90,15 @@ final class GitOpsTests: XCTestCase {
         XCTAssertEqual(GitOps.worktrees(NSTemporaryDirectory()), [:])
     }
 
+    func testPrimaryWorktreeDetectionRejectsLinkedWorktree() throws {
+        let linked = "\(repo)/.worktrees/linked"
+        try sh("git -C '\(repo)' worktree add -q -b linked '\(linked)' main")
+
+        XCTAssertTrue(try GitOps.isPrimaryWorktree(repo))
+        XCTAssertFalse(try GitOps.isPrimaryWorktree(linked))
+        XCTAssertThrowsError(try GitOps.isPrimaryWorktree(NSTemporaryDirectory()))
+    }
+
     func testCreateBranch() throws {
         try GitOps.createBranch(repo, "feat", base: "main")
         XCTAssertEqual(GitOps.currentBranch(repo), "feat", "created AND checked out")
@@ -165,6 +174,18 @@ final class GitOpsTests: XCTestCase {
         XCTAssertNil(GitOps.readGitInfo(NSTemporaryDirectory()))
     }
 
+    func testRequireCleanWorktreeIgnoresStatusPreferenceAndFailsClosed() throws {
+        try sh("git -C '\(repo)' config status.showUntrackedFiles no")
+        try "untracked".write(
+            toFile: "\(repo)/untracked.txt", atomically: true, encoding: .utf8
+        )
+
+        XCTAssertThrowsError(try GitOps.requireCleanWorktree(repo)) { error in
+            XCTAssertTrue("\(error)".contains("uncommitted changes"))
+        }
+        XCTAssertThrowsError(try GitOps.requireCleanWorktree(NSTemporaryDirectory()))
+    }
+
     func testPromoteWorktreeMovesDirtyChanges() throws {
         let wt = "\(repo)/.worktrees/feat"
         try GitOps.prepareWorktree(repo: repo, wtPath: wt, newBranch: "feat", base: "main")
@@ -233,6 +254,13 @@ final class GitOpsTests: XCTestCase {
 
         XCTAssertEqual(GitOps.currentBranch(repo), "main")
         XCTAssertFalse(GitOps.branchExists(repo, "feat"))
+    }
+
+    func testSwitchAndDeleteRetrySucceedsWhenSourceIsAlreadyAbsent() throws {
+        XCTAssertNoThrow(try GitOps.switchAndDeleteBranch(
+            repo: repo, expectedBranch: "already-gone", checkoutBranch: "main"
+        ))
+        XCTAssertEqual(GitOps.currentBranch(repo), "main")
     }
 
     func testSwitchAndDeleteRejectsDirtyAndMissingDestination() throws {

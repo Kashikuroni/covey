@@ -17,8 +17,20 @@ public struct GitInfo: Codable, Equatable {
     public var unstaged: GitDiffSummary
     public var staged: GitDiffSummary
     public var untracked: UInt32
-    public var added: UInt32 { unstaged.added }
-    public var removed: UInt32 { unstaged.removed }
+    public var added: UInt32 {
+        get { unstaged.added }
+        set {
+            unstaged.added = newValue
+            normalizeLegacyFileCount()
+        }
+    }
+    public var removed: UInt32 {
+        get { unstaged.removed }
+        set {
+            unstaged.removed = newValue
+            normalizeLegacyFileCount()
+        }
+    }
 
     private enum CodingKeys: String, CodingKey {
         case branch, added, removed, unstaged, staged, untracked
@@ -68,6 +80,10 @@ public struct GitInfo: Codable, Equatable {
         try container.encode(unstaged, forKey: .unstaged)
         try container.encode(staged, forKey: .staged)
         try container.encode(untracked, forKey: .untracked)
+    }
+
+    private mutating func normalizeLegacyFileCount() {
+        unstaged.files = unstaged.added == 0 && unstaged.removed == 0 ? 0 : max(1, unstaged.files)
     }
 }
 

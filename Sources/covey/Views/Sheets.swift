@@ -735,6 +735,8 @@ struct KillSheet: View {
     @State private var removeWorktree = false
     @State private var deleteBranch = false
     @State private var branchGate: BranchGate = .loading
+    @State private var submitting = false
+    @State private var error: String?
 
     private enum BranchGate: Equatable {
         case loading
@@ -765,19 +767,31 @@ struct KillSheet: View {
                     }
                 }
             }
+            if let error {
+                Text("! \(error)").font(.caption).foregroundStyle(.red)
+            }
             HStack {
                 Spacer()
                 Button("Cancel") { model.modal = nil }
                 Button("Kill", role: .destructive) {
                     let rm = removeWorktree
                     let del = deleteBranch
+                    submitting = true
+                    error = nil
                     Task {
-                        await model.kill(name, removeWorktree: rm, deleteBranch: del)
-                        model.modal = nil
+                        if let message = await model.kill(
+                            name, removeWorktree: rm, deleteBranch: del
+                        ) {
+                            error = message
+                            submitting = false
+                        } else {
+                            model.modal = nil
+                        }
                     }
                 }
                 .buttonStyle(.glassProminent)
                 .keyboardShortcut(.defaultAction)
+                .disabled(submitting)
             }
         }
         .padding(20)

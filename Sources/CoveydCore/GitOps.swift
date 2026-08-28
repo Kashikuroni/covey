@@ -55,8 +55,38 @@ public enum GitOps {
     }
 
     public static func branchExists(_ repo: String, _ branch: String) -> Bool {
-        (try? run(repo, ["show-ref", "--verify", "--quiet", "refs/heads/\(branch)"],
-                  readOnly: true)) != nil
+        (try? localBranchOID(repo, branch)) != nil
+    }
+
+    /// Returns the exact local branch tip, nil when absent, and throws when Git
+    /// cannot answer. Full ref names avoid short-name ambiguity.
+    static func localBranchOID(_ repo: String, _ branch: String) throws -> String? {
+        let output = try run(
+            repo,
+            ["for-each-ref", "--format=%(refname)%09%(objectname)", "refs/heads"],
+            readOnly: true
+        )
+        let target = "refs/heads/\(branch)"
+        for line in output.split(separator: "\n") {
+            let fields = line.split(separator: "\t", maxSplits: 1)
+            if fields.count == 2, fields[0] == target {
+                return String(fields[1])
+            }
+        }
+        return nil
+    }
+
+    /// True only for the repository's primary worktree. Git failures throw so
+    /// destructive callers can reject unknown layouts instead of guessing.
+    public static func isPrimaryWorktree(_ dir: String) throws -> Bool {
+        let gitDir = try run(
+            dir, ["rev-parse", "--path-format=absolute", "--git-dir"], readOnly: true
+        )
+        let commonDir = try run(
+            dir, ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+            readOnly: true
+        )
+        return sameDirectory(gitDir, commonDir)
     }
 
     /// All of the repo's worktrees as branch -> path (porcelain parse). The
@@ -176,8 +206,22 @@ public enum GitOps {
         }
     }
 
+    public static func requireCleanWorktree(_ dir: String) throws {
+        let status = try run(
+            dir, ["status", "--porcelain=v1", "--untracked-files=all"], readOnly: true
+        )
+        guard status.isEmpty else {
+            throw GitError("working tree has uncommitted changes")
+        }
+    }
+
     public static func isDirty(_ dir: String) -> Bool {
-        !((try? run(dir, ["status", "--porcelain"], readOnly: true)) ?? "").isEmpty
+        do {
+            try requireCleanWorktree(dir)
+            return false
+        } catch {
+            return true
+        }
     }
 
     public static func stashPush(_ dir: String) throws {
@@ -218,12 +262,7 @@ public enum GitOps {
                                     force: Bool = false) throws {
         try requireDeletableBranch(branch)
         try run(repo, ["branch", force ? "-D" : "-d", branch])
-        let refs = try run(
-            repo, ["for-each-ref", "--format=%(refname:short)", "refs/heads"],
-            readOnly: true
-        )
-        let remaining = refs.split(separator: "\n").map(String.init)
-        guard !remaining.contains(branch) else {
+        guard try localBranchOID(repo, branch) == nil else {
             throw GitError("branch '\(branch)' still exists after deletion")
         }
     }
@@ -235,15 +274,10 @@ public enum GitOps {
         guard expectedBranch != checkoutBranch else {
             throw GitError("choose a different branch before deletion")
         }
-        guard branchExists(repo, expectedBranch) else {
-            throw GitError("branch '\(expectedBranch)' does not exist")
-        }
-        guard branchExists(repo, checkoutBranch) else {
+        guard try localBranchOID(repo, checkoutBranch) != nil else {
             throw GitError("branch '\(checkoutBranch)' does not exist")
         }
-        guard !isDirty(repo) else {
-            throw GitError("working tree has uncommitted changes")
-        }
+        try requireCleanWorktree(repo)
         guard let current = currentBranch(repo),
               current == expectedBranch || current == checkoutBranch else {
             throw GitError("current branch changed; expected '\(expectedBranch)'")
@@ -253,6 +287,10 @@ public enum GitOps {
             throw GitError(
                 "branch '\(checkoutBranch)' is checked out in another worktree"
             )
+        }
+        guard try localBranchOID(repo, expectedBranch) != nil else {
+            if current == checkoutBranch { return }
+            throw GitError("branch '\(expectedBranch)' does not exist")
         }
         if current == expectedBranch {
             try checkout(repo: repo, branch: checkoutBranch)

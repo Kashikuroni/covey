@@ -40,6 +40,18 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(info.removed, 2)
     }
 
+    func testLegacyGitInfoCountsRemainWritable() {
+        var info = GitInfo(branch: "main", added: 0, removed: 0)
+
+        info.added = 3
+        info.removed = 2
+
+        XCTAssertEqual(info.unstaged, GitDiffSummary(files: 1, added: 3, removed: 2))
+        info.added = 0
+        info.removed = 0
+        XCTAssertEqual(info.unstaged, .empty)
+    }
+
     func testSessionRoundTrip() throws {
         let session = Session(
             name: "s-1", dir: "/work", cwd: "/work", agent: "claude",
