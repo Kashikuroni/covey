@@ -123,6 +123,16 @@ public final class IPCClient {
         try await expectOK(.deleteBranch(dir: dir, branch: branch))
     }
 
+    public func switchAndDeleteBranch(
+        name: String, expectedBranch: String, checkoutBranch: String
+    ) async throws {
+        try await expectOK(.switchAndDeleteBranch(
+            name: name,
+            expectedBranch: expectedBranch,
+            checkoutBranch: checkoutBranch
+        ))
+    }
+
     public func mergedBranches(dir: String) async throws -> [String] {
         if case let .branches(list) = try await request(.mergedBranches(dir: dir)) {
             return list

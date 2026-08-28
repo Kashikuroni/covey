@@ -436,6 +436,52 @@ final class AppModelTests: XCTestCase {
     }
 
     @MainActor
+    func testSwitchAndDeleteBranchReturnsErrorThenPassesRetry() async throws {
+        let repo = "\(NSTemporaryDirectory())covey-am-switch-\(UInt32.random(in: 0..<UInt32.max))"
+        try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: repo) }
+        for cmd in [
+            "git -C '\(repo)' init -q -b main",
+            "git -C '\(repo)' -c user.email=t@t -c user.name=t commit --allow-empty -q -m init",
+            "git -C '\(repo)' checkout -q -b feat",
+        ] {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["-c", cmd]
+            try process.run()
+            process.waitUntilExit()
+            XCTAssertEqual(process.terminationStatus, 0)
+        }
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        _ = try daemon.registry.create(
+            dir: repo, agent: "sh", argv: ["/bin/cat"], name: "plain"
+        )
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+
+        try "dirty".write(
+            toFile: "\(repo)/dirty.txt", atomically: true, encoding: .utf8
+        )
+        let firstError = await model.switchAndDeleteBranch(
+            name: "plain", expectedBranch: "feat", checkoutBranch: "main"
+        )
+        XCTAssertNotNil(firstError)
+        XCTAssertEqual(GitOps.currentBranch(repo), "feat")
+        XCTAssertTrue(GitOps.branchExists(repo, "feat"))
+
+        try FileManager.default.removeItem(atPath: "\(repo)/dirty.txt")
+        let error = await model.switchAndDeleteBranch(
+            name: "plain", expectedBranch: "feat", checkoutBranch: "main"
+        )
+
+        XCTAssertNil(error)
+        XCTAssertEqual(GitOps.currentBranch(repo), "main")
+        XCTAssertFalse(GitOps.branchExists(repo, "feat"))
+        await model.kill("plain")
+    }
+
+    @MainActor
     func testBranchStatusAndKillDeleteBranch() async throws {
         let repo = "\(NSTemporaryDirectory())covey-am-del-\(UInt32.random(in: 0..<UInt32.max))"
         try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)

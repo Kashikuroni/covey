@@ -1455,6 +1455,21 @@ public final class AppModel {
         catch { return errorText(error) }
     }
 
+    public func switchAndDeleteBranch(
+        name: String, expectedBranch: String, checkoutBranch: String
+    ) async -> String? {
+        do {
+            try await client.switchAndDeleteBranch(
+                name: name,
+                expectedBranch: expectedBranch,
+                checkoutBranch: checkoutBranch
+            )
+            return nil
+        } catch {
+            return errorText(error)
+        }
+    }
+
     public func mergedBranches(dir: String) async -> [String] {
         (try? await client.mergedBranches(dir: dir)) ?? []
     }

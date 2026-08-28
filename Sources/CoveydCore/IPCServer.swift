@@ -213,11 +213,29 @@ public final class IPCServer {
                 reply(.ok)
             } catch { reply(.error(code: "promoteFailed", message: "\(error)")) }
 
-        case let .deleteBranch(dir, branch):
-            guard !protectedBranches.contains(branch) else {
+        case let .switchAndDeleteBranch(name, expectedBranch, checkoutBranch):
+            guard let session = registry.get(name: name) else { return notFound(name) }
+            guard session.worktreeRepo == nil else {
                 return reply(.error(code: "deleteBranchFailed",
-                                    message: "branch '\(branch)' is protected"))
+                                    message: "cannot switch a worktree session"))
             }
+            guard let repo = GitOps.repoRoot(session.dir) else {
+                return reply(.error(code: "deleteBranchFailed", message: "not a git repo"))
+            }
+            do {
+                try GitOps.switchAndDeleteBranch(
+                    repo: repo,
+                    expectedBranch: expectedBranch,
+                    checkoutBranch: checkoutBranch
+                )
+                gitMonitor?.forget(name: name)
+                gitMonitor?.poke(name: name, dir: session.dir)
+                reply(.ok)
+            } catch {
+                reply(.error(code: "deleteBranchFailed", message: "\(error)"))
+            }
+
+        case let .deleteBranch(dir, branch):
             guard let repo = GitOps.repoRoot(expandTilde(dir)) else {
                 return reply(.error(code: "deleteBranchFailed", message: "not a git repo"))
             }
