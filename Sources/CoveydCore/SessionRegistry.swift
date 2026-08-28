@@ -240,6 +240,10 @@ public final class SessionRegistry {
         }
 
         lock.lock()
+        guard pendingBranchDeletion[name] == nil else {
+            lock.unlock()
+            throw GitOps.GitError("branch deletion is already in progress")
+        }
         guard entries[name]?.session.dir == path else {
             lock.unlock()
             throw GitOps.GitError("session changed during branch deletion")

@@ -245,6 +245,25 @@ final class GitOpsTests: XCTestCase {
         XCTAssertNotEqual(try GitOps.localBranchOID(repo, "feat"), expectedOID)
     }
 
+    func testPostDeleteWorktreeDetectionRestoresExpectedBranchTip() throws {
+        let worktree = "\(repo)/.worktrees/feat"
+        try GitOps.prepareWorktree(
+            repo: repo, wtPath: worktree, newBranch: "feat", base: "main"
+        )
+        let expectedOID = try XCTUnwrap(GitOps.localBranchOID(repo, "feat"))
+        try GitOps.run(
+            repo, ["update-ref", "-d", "refs/heads/feat", expectedOID]
+        )
+        XCTAssertNil(try GitOps.localBranchOID(repo, "feat"))
+
+        XCTAssertThrowsError(try GitOps.verifyDeletedBranchNotCheckedOut(
+            repo: repo, branch: "feat", expectedOID: expectedOID
+        ))
+
+        XCTAssertEqual(try GitOps.localBranchOID(repo, "feat"), expectedOID)
+        XCTAssertEqual(GitOps.currentBranch(worktree), "feat")
+    }
+
     func testSwitchAndDeleteChecksOutDestinationThenDeletesExpectedBranch() throws {
         try sh("git -C '\(repo)' checkout -q -b feat && echo work > '\(repo)/work.txt' && git -C '\(repo)' add work.txt && git -C '\(repo)' -c user.email=t@t -c user.name=t commit -q -m work")
 

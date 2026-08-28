@@ -273,11 +273,68 @@ public enum GitOps {
                 throw GitError("branch '\(branch)' does not exist")
             }
             try run(repo, ["update-ref", "-d", "refs/heads/\(branch)", oid])
+            try verifyDeletedBranchNotCheckedOut(
+                repo: repo, branch: branch, expectedOID: oid
+            )
         } else {
             try run(repo, ["branch", "-d", branch])
         }
         guard try localBranchOID(repo, branch) == nil else {
             throw GitError("branch '\(branch)' still exists after deletion")
+        }
+    }
+
+    /// Compensates when a checkout wins the pre-delete scan race and publishes
+    /// a symbolic worktree HEAD before the post-delete scan. Restore the
+    /// captured tip before reporting the failed deletion; a failed scan also
+    /// restores because occupancy could not be ruled out.
+    static func verifyDeletedBranchNotCheckedOut(
+        repo: String, branch: String, expectedOID: String
+    ) throws {
+        let checkedOutPath: String?
+        do {
+            checkedOutPath = try readWorktrees(repo)[branch]
+        } catch {
+            do {
+                try restoreBranchIfAbsent(
+                    repo: repo, branch: branch, expectedOID: expectedOID
+                )
+            } catch let restoreError {
+                throw GitError(
+                    "could not verify worktrees after deletion; restore failed: "
+                        + "\(restoreError). Recover branch '\(branch)' at \(expectedOID)"
+                )
+            }
+            throw GitError("could not verify worktrees after deletion; branch restored")
+        }
+        guard let checkedOutPath else { return }
+        do {
+            try restoreBranchIfAbsent(
+                repo: repo, branch: branch, expectedOID: expectedOID
+            )
+        } catch let restoreError {
+            throw GitError(
+                "branch became checked out at '\(checkedOutPath)'; restore failed: "
+                    + "\(restoreError). Recover branch '\(branch)' at \(expectedOID)"
+            )
+        }
+        throw GitError(
+            "branch became checked out at '\(checkedOutPath)' during deletion; branch restored"
+        )
+    }
+
+    private static func restoreBranchIfAbsent(
+        repo: String, branch: String, expectedOID: String
+    ) throws {
+        if try localBranchOID(repo, branch) != nil { return }
+        do {
+            try run(repo, ["update-ref", "refs/heads/\(branch)", expectedOID, ""])
+        } catch {
+            // A concurrent writer may have recreated the branch between the
+            // read and conditional create. In that case it is no longer
+            // dangling and must not be overwritten.
+            if try localBranchOID(repo, branch) != nil { return }
+            throw error
         }
     }
 
