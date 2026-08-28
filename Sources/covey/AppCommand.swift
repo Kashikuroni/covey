@@ -2,6 +2,7 @@ import SwiftUI
 
 enum AppCommand: String, CaseIterable, Hashable {
     case newSession, newSessionInCurrentProject, recentSessions, filterSessions
+    case selectPreviousSession, selectNextSession
     case selectSession1, selectSession2, selectSession3, selectSession4, selectSession5
     case selectSession6, selectSession7, selectSession8, selectSession9
     case killSession, renameSession, restartSession, restartAllClaudeSessions
@@ -99,6 +100,12 @@ enum CommandCatalog {
         descriptor(.filterSessions, "Filter Sessions", .session,
                    ["filter", "search", "фильтр сессий", "поиск сессий"],
                    .init(key: "f", modifiers: command, display: "⌘F")),
+        descriptor(.selectPreviousSession, "Select Previous Session", .session,
+                   ["previous session", "предыдущая сессия", "перейти назад"],
+                   .init(key: "[", modifiers: command, display: "⌘[")),
+        descriptor(.selectNextSession, "Select Next Session", .session,
+                   ["next session", "следующая сессия", "перейти вперед"],
+                   .init(key: "]", modifiers: command, display: "⌘]")),
         descriptor(.selectSession1, "Select Session 1", .session,
                    ["jump session 1", "перейти к сессии 1"],
                    .init(key: "1", modifiers: command, display: "⌘1")),
@@ -221,5 +228,9 @@ enum CommandCatalog {
         .selectSession1, .selectSession2, .selectSession3,
         .selectSession4, .selectSession5, .selectSession6,
         .selectSession7, .selectSession8, .selectSession9,
+    ]
+
+    static let sessionCyclingCommands: [AppCommand] = [
+        .selectPreviousSession, .selectNextSession,
     ]
 }

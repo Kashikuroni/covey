@@ -27,4 +27,12 @@ final class HelpOverlayTests: XCTestCase {
                 $0.1.localizedCaseInsensitiveContains("menu")
         })
     }
+
+    func testHelpAdvertisesSessionCyclingShortcuts() {
+        let pairs = helpGroups.flatMap(\.1)
+
+        XCTAssertTrue(pairs.contains {
+            $0.0 == "⌘[ / ⌘]" && $0.1.localizedCaseInsensitiveContains("session")
+        })
+    }
 }

@@ -35,6 +35,10 @@ enum CommandRules {
              .addProject, .settings:
             return .enabled
 
+        case .selectPreviousSession, .selectNextSession:
+            return context.visibleSessionCount > 0
+                ? .enabled : .disabled(reason: "No visible sessions")
+
         case .selectSession1, .selectSession2, .selectSession3,
              .selectSession4, .selectSession5, .selectSession6,
              .selectSession7, .selectSession8, .selectSession9:

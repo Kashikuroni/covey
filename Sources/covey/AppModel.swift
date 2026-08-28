@@ -214,6 +214,8 @@ public final class AppModel {
     private let store: StateStore
     private var persisted = PersistedState()   // last known full state (keeps schema-only fields)
     private var eventLoop: Task<Void, Never>?
+    @ObservationIgnored private var sessionCycleTarget: String?
+    @ObservationIgnored private var sessionCycleTask: Task<Void, Never>?
     private let fetchAccount: () async -> Account
     private let fetchGlmAccount: () async -> Account
     private let usageInterval: TimeInterval
@@ -961,6 +963,10 @@ public final class AppModel {
             modal = .recent
         case .filterSessions:
             filterActive = true
+        case .selectPreviousSession:
+            cycleSession(by: -1)
+        case .selectNextSession:
+            cycleSession(by: 1)
         case .selectSession1, .selectSession2, .selectSession3,
              .selectSession4, .selectSession5, .selectSession6,
              .selectSession7, .selectSession8, .selectSession9:
@@ -1488,8 +1494,12 @@ public final class AppModel {
     private func step(by delta: Int) {
         let rows = visibleRows()
         guard !rows.isEmpty else { return }
-        let cur = rows.firstIndex(where: rowIsCurrent) ?? -1
-        activate(rows[min(rows.count - 1, max(0, cur + delta))])
+        guard let current = rows.firstIndex(where: rowIsCurrent) else {
+            activate(rows[0])
+            return
+        }
+        let next = (current + delta % rows.count + rows.count) % rows.count
+        activate(rows[next])
     }
 
     private func jump(to index: Int) {
@@ -1503,6 +1513,31 @@ public final class AppModel {
         let names = visibleSessionNames()
         guard names.indices.contains(index) else { return }
         Task { await select(names[index]) }
+    }
+
+    private func cycleSession(by delta: Int) {
+        let names = visibleSessionNames()
+        guard !names.isEmpty else { return }
+        let current = sessionCycleTarget ?? selected
+        let next: String
+        if let current, let index = names.firstIndex(of: current) {
+            let nextIndex = (index + delta % names.count + names.count) % names.count
+            next = names[nextIndex]
+        } else {
+            next = names[0]
+        }
+        sessionCycleTarget = next
+        guard sessionCycleTask == nil else { return }
+        sessionCycleTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while let target = self.sessionCycleTarget {
+                await self.select(target)
+                if self.sessionCycleTarget == target {
+                    self.sessionCycleTarget = nil
+                }
+            }
+            self.sessionCycleTask = nil
+        }
     }
 
     /// Keyboard reorder within the selected session's project group.

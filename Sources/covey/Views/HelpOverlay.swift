@@ -6,6 +6,7 @@ let helpGroups: [(String, [(String, String)])] = [
         ("g", "first session"),
         ("s then 1-9", "jump to visible session"),
         ("⌘1-9", "jump to visible session from any panel"),
+        ("⌘[ / ⌘]", "previous / next session (wraps)"),
         ("/", "filter / search sessions"),
     ]),
     ("act", [

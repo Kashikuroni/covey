@@ -20,6 +20,7 @@ final class CommandSearchTests: XCTestCase {
         let found = Set(ids("сессия"))
         let expected: Set<AppCommand> = [
             .newSession, .newSessionInCurrentProject, .recentSessions, .filterSessions,
+            .selectPreviousSession, .selectNextSession,
             .selectSession1, .selectSession2, .selectSession3,
             .selectSession4, .selectSession5, .selectSession6,
             .selectSession7, .selectSession8, .selectSession9,

@@ -173,6 +173,30 @@ final class AppModelChromeTests: XCTestCase {
     }
 
     @MainActor
+    func testApplyNavigationWrapsVisibleRowsAtBothEnds() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        for number in 1...3 {
+            _ = try daemon.registry.create(dir: "/a", agent: "sh", argv: ["/bin/cat"],
+                                           name: "s\(number)")
+        }
+        await model.reconnect()
+        _ = await eventually { model.sessions.count == 3 }
+
+        await model.select("s3")
+        model.apply(.selectNext)
+        _ = await eventually { model.selected == "s1" }
+        XCTAssertEqual(model.selected, "s1")
+
+        model.apply(.selectPrev)
+        _ = await eventually { model.selected == "s3" }
+        XCTAssertEqual(model.selected, "s3")
+
+        for session in model.sessions { daemon.registry.kill(name: session.name) }
+    }
+
+    @MainActor
     func testCommandDigitsSelectVisibleSessionsWithoutChangingFocus() async throws {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
@@ -206,6 +230,61 @@ final class AppModelChromeTests: XCTestCase {
         XCTAssertEqual(model.selected, "s9")
         XCTAssertEqual(model.focus, .inspector)
 
+        for session in model.sessions { daemon.registry.kill(name: session.name) }
+    }
+
+    @MainActor
+    func testCommandBracketsCycleVisibleSessionsWithoutChangingFocus() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        for number in 1...3 {
+            _ = try daemon.registry.create(dir: "/a", agent: "sh", argv: ["/bin/cat"],
+                                           name: "s\(number)")
+        }
+        await model.reconnect()
+        _ = await eventually { model.sessions.count == 3 }
+        await model.select("s1")
+        model.setShowInspector(true)
+        model.setFocus(.inspector)
+
+        model.perform(.selectPreviousSession)
+        _ = await eventually { model.selected == "s3" }
+        XCTAssertEqual(model.selected, "s3")
+        XCTAssertEqual(model.focus, .inspector)
+
+        model.perform(.selectNextSession)
+        _ = await eventually { model.selected == "s1" }
+        XCTAssertEqual(model.selected, "s1")
+        XCTAssertEqual(model.focus, .inspector)
+
+        model.setFilter("s2")
+        model.perform(.selectNextSession)
+        _ = await eventually { model.selected == "s2" }
+        XCTAssertEqual(model.selected, "s2")
+        XCTAssertEqual(model.focus, .inspector)
+
+        for session in model.sessions { daemon.registry.kill(name: session.name) }
+    }
+
+    @MainActor
+    func testRapidCommandBracketsAdvanceOncePerKeyPress() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        for number in 1...3 {
+            _ = try daemon.registry.create(dir: "/a", agent: "sh", argv: ["/bin/cat"],
+                                           name: "s\(number)")
+        }
+        await model.reconnect()
+        _ = await eventually { model.sessions.count == 3 }
+        await model.select("s1")
+
+        model.perform(.selectNextSession)
+        model.perform(.selectNextSession)
+
+        _ = await eventually { model.selected == "s3" }
+        XCTAssertEqual(model.selected, "s3")
         for session in model.sessions { daemon.registry.kill(name: session.name) }
     }
 

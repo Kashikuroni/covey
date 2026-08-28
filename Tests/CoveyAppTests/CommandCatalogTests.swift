@@ -30,6 +30,22 @@ final class CommandCatalogTests: XCTestCase {
         XCTAssertEqual(keys.count, Set(keys).count)
     }
 
+    func testSessionCyclingCommandsUseCommandBrackets() throws {
+        let expected: [(AppCommand, Character, String)] = [
+            (.selectPreviousSession, "[", "⌘["),
+            (.selectNextSession, "]", "⌘]"),
+        ]
+
+        XCTAssertEqual(CommandCatalog.sessionCyclingCommands, expected.map(\.0))
+        for (command, key, display) in expected {
+            let descriptor = try XCTUnwrap(CommandCatalog.all.first { $0.id == command })
+            let shortcut = try XCTUnwrap(descriptor.shortcut)
+            XCTAssertEqual(shortcut.key, key)
+            XCTAssertEqual(shortcut.modifiers, .command)
+            XCTAssertEqual(shortcut.display, display)
+        }
+    }
+
     func testIssueSixTerminalAndLimitsShortcuts() throws {
         let expected: [(AppCommand, Character, EventModifiers, String)] = [
             (.splitTerminalVertically, "d", .command, "⌘D"),

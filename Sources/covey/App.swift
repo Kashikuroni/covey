@@ -96,6 +96,10 @@ struct CoveyApp: App {
                     CatalogCommandButton(command, model: model)
                 }
                 Divider()
+                ForEach(CommandCatalog.sessionCyclingCommands, id: \.self) { command in
+                    CatalogCommandButton(command, model: model)
+                }
+                Divider()
                 CatalogCommandButton(.killSession, model: model)
                 CatalogCommandButton(.renameSession, model: model)
             }

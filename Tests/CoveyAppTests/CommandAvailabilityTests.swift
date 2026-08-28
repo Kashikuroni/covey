@@ -18,6 +18,17 @@ final class CommandAvailabilityTests: XCTestCase {
                        .disabled(reason: "No terminal split"))
     }
 
+    func testSessionCyclingRequiresVisibleSessions() {
+        for command in [AppCommand.selectPreviousSession, .selectNextSession] {
+            XCTAssertEqual(CommandRules.availability(for: command, context: .init()),
+                           .disabled(reason: "No visible sessions"))
+            XCTAssertEqual(CommandRules.availability(
+                for: command,
+                context: .init(visibleSessionCount: 1)),
+                           .enabled)
+        }
+    }
+
     func testCloseSplitRequiresTerminalFocus() {
         var context = CommandContext(hasSelectedSession: true,
                                      hasTerminalSplit: true)
