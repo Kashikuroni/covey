@@ -55,16 +55,49 @@ public enum GitOps {
     }
 
     public static func branchExists(_ repo: String, _ branch: String) -> Bool {
-        (try? run(repo, ["show-ref", "--verify", "--quiet", "refs/heads/\(branch)"],
-                  readOnly: true)) != nil
+        (try? localBranchOID(repo, branch)) != nil
+    }
+
+    /// Returns the exact local branch tip, nil when absent, and throws when Git
+    /// cannot answer. Full ref names avoid short-name ambiguity.
+    static func localBranchOID(_ repo: String, _ branch: String) throws -> String? {
+        let output = try run(
+            repo,
+            ["for-each-ref", "--format=%(refname)%09%(objectname)", "refs/heads"],
+            readOnly: true
+        )
+        let target = "refs/heads/\(branch)"
+        for line in output.split(separator: "\n") {
+            let fields = line.split(separator: "\t", maxSplits: 1)
+            if fields.count == 2, fields[0] == target {
+                return String(fields[1])
+            }
+        }
+        return nil
+    }
+
+    /// True only for the repository's primary worktree. Git failures throw so
+    /// destructive callers can reject unknown layouts instead of guessing.
+    public static func isPrimaryWorktree(_ dir: String) throws -> Bool {
+        let gitDir = try run(
+            dir, ["rev-parse", "--path-format=absolute", "--git-dir"], readOnly: true
+        )
+        let commonDir = try run(
+            dir, ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+            readOnly: true
+        )
+        return sameDirectory(gitDir, commonDir)
     }
 
     /// All of the repo's worktrees as branch -> path (porcelain parse). The
     /// main worktree is included; detached worktrees carry no branch line and
     /// are skipped.
     public static func worktrees(_ repo: String) -> [String: String] {
-        guard let out = try? run(repo, ["worktree", "list", "--porcelain"], readOnly: true)
-        else { return [:] }
+        (try? readWorktrees(repo)) ?? [:]
+    }
+
+    private static func readWorktrees(_ repo: String) throws -> [String: String] {
+        let out = try run(repo, ["worktree", "list", "--porcelain"], readOnly: true)
         var map: [String: String] = [:]
         var path: String?
         for line in out.split(separator: "\n", omittingEmptySubsequences: false) {
@@ -176,8 +209,22 @@ public enum GitOps {
         }
     }
 
+    public static func requireCleanWorktree(_ dir: String) throws {
+        let status = try run(
+            dir, ["status", "--porcelain=v1", "--untracked-files=all"], readOnly: true
+        )
+        guard status.isEmpty else {
+            throw GitError("working tree has uncommitted changes")
+        }
+    }
+
     public static func isDirty(_ dir: String) -> Bool {
-        !((try? run(dir, ["status", "--porcelain"], readOnly: true)) ?? "").isEmpty
+        do {
+            try requireCleanWorktree(dir)
+            return false
+        } catch {
+            return true
+        }
     }
 
     public static func stashPush(_ dir: String) throws {
@@ -208,8 +255,128 @@ public enum GitOps {
         if dirty { try stashPop(repo) }
     }
 
-    public static func deleteBranch(repo: String, branch: String) throws {
-        try run(repo, ["branch", "-d", branch])
+    private static func requireDeletableBranch(_ branch: String) throws {
+        if protectedBranches.contains(branch) {
+            throw GitError("branch '\(branch)' is protected")
+        }
+    }
+
+    public static func deleteBranch(repo: String, branch: String,
+                                    force: Bool = false,
+                                    expectedOID: String? = nil) throws {
+        try requireDeletableBranch(branch)
+        if force {
+            guard try readWorktrees(repo)[branch] == nil else {
+                throw GitError("branch '\(branch)' is checked out in a worktree")
+            }
+            guard let oid = try expectedOID ?? localBranchOID(repo, branch) else {
+                throw GitError("branch '\(branch)' does not exist")
+            }
+            try run(repo, ["update-ref", "-d", "refs/heads/\(branch)", oid])
+            try verifyDeletedBranchNotCheckedOut(
+                repo: repo, branch: branch, expectedOID: oid
+            )
+        } else {
+            try run(repo, ["branch", "-d", branch])
+        }
+        guard try localBranchOID(repo, branch) == nil else {
+            throw GitError("branch '\(branch)' still exists after deletion")
+        }
+    }
+
+    /// Compensates when a checkout wins the pre-delete scan race and publishes
+    /// a symbolic worktree HEAD before the post-delete scan. Restore the
+    /// captured tip before reporting the failed deletion; a failed scan also
+    /// restores because occupancy could not be ruled out.
+    static func verifyDeletedBranchNotCheckedOut(
+        repo: String, branch: String, expectedOID: String
+    ) throws {
+        let checkedOutPath: String?
+        do {
+            checkedOutPath = try readWorktrees(repo)[branch]
+        } catch {
+            do {
+                try restoreBranchIfAbsent(
+                    repo: repo, branch: branch, expectedOID: expectedOID
+                )
+            } catch let restoreError {
+                throw GitError(
+                    "could not verify worktrees after deletion; restore failed: "
+                        + "\(restoreError). Recover branch '\(branch)' at \(expectedOID)"
+                )
+            }
+            throw GitError("could not verify worktrees after deletion; branch restored")
+        }
+        guard let checkedOutPath else { return }
+        do {
+            try restoreBranchIfAbsent(
+                repo: repo, branch: branch, expectedOID: expectedOID
+            )
+        } catch let restoreError {
+            throw GitError(
+                "branch became checked out at '\(checkedOutPath)'; restore failed: "
+                    + "\(restoreError). Recover branch '\(branch)' at \(expectedOID)"
+            )
+        }
+        throw GitError(
+            "branch became checked out at '\(checkedOutPath)' during deletion; branch restored"
+        )
+    }
+
+    private static func restoreBranchIfAbsent(
+        repo: String, branch: String, expectedOID: String
+    ) throws {
+        if try localBranchOID(repo, branch) != nil { return }
+        do {
+            try run(repo, ["update-ref", "refs/heads/\(branch)", expectedOID, ""])
+        } catch {
+            // A concurrent writer may have recreated the branch between the
+            // read and conditional create. In that case it is no longer
+            // dangling and must not be overwritten.
+            if try localBranchOID(repo, branch) != nil { return }
+            throw error
+        }
+    }
+
+    public static func switchAndDeleteBranch(
+        repo: String, expectedBranch: String, checkoutBranch: String
+    ) throws {
+        try requireDeletableBranch(expectedBranch)
+        guard expectedBranch != checkoutBranch else {
+            throw GitError("choose a different branch before deletion")
+        }
+        guard try localBranchOID(repo, checkoutBranch) != nil else {
+            throw GitError("branch '\(checkoutBranch)' does not exist")
+        }
+        try requireCleanWorktree(repo)
+        guard let current = currentBranch(repo),
+              current == expectedBranch || current == checkoutBranch else {
+            throw GitError("current branch changed; expected '\(expectedBranch)'")
+        }
+        if let path = worktreeForBranch(repo, checkoutBranch),
+           !sameDirectory(path, repo) {
+            throw GitError(
+                "branch '\(checkoutBranch)' is checked out in another worktree"
+            )
+        }
+        guard let sourceOID = try localBranchOID(repo, expectedBranch) else {
+            if current == checkoutBranch { return }
+            throw GitError("branch '\(expectedBranch)' does not exist")
+        }
+        if current == expectedBranch {
+            try checkout(repo: repo, branch: checkoutBranch)
+        }
+        try deleteBranch(
+            repo: repo,
+            branch: expectedBranch,
+            force: true,
+            expectedOID: sourceOID
+        )
+    }
+
+    private static func sameDirectory(_ lhs: String, _ rhs: String) -> Bool {
+        URL(fileURLWithPath: lhs).resolvingSymlinksInPath().path
+            == URL(fileURLWithPath: rhs).resolvingSymlinksInPath().path
     }
 
     /// Local branches fully merged into HEAD, excluding the current one.
@@ -223,26 +390,53 @@ public enum GitOps {
             .filter { !$0.isEmpty && $0 != current }
     }
 
-    /// Branch + working-tree shortstat, or nil outside a repo (git.rs read()).
+    /// Branch plus independent unstaged, staged, and untracked state.
     public static func readGitInfo(_ dir: String) -> GitInfo? {
         guard repoRoot(dir) != nil else { return nil }
         guard let branch = currentBranch(dir)
             ?? (try? run(dir, ["rev-parse", "--short", "HEAD"], readOnly: true))
         else { return nil }
-        let stat = (try? run(dir, ["diff", "--shortstat"], readOnly: true)) ?? ""
-        let (added, removed) = parseShortstat(stat)
-        return GitInfo(branch: branch, added: UInt32(added), removed: UInt32(removed))
+        let unstaged = parseNumstat(
+            (try? run(dir, ["diff", "--numstat", "-z"], readOnly: true)) ?? ""
+        )
+        let staged = parseNumstat(
+            (try? run(dir, ["diff", "--cached", "--numstat", "-z"], readOnly: true)) ?? ""
+        )
+        let untrackedOutput = (
+            try? run(dir, ["ls-files", "--others", "--exclude-standard", "-z"],
+                     readOnly: true)
+        ) ?? ""
+        let untracked = UInt32(clamping: untrackedOutput.split(
+            separator: "\0", omittingEmptySubsequences: true
+        ).count)
+        return GitInfo(
+            branch: branch, unstaged: unstaged, staged: staged, untracked: untracked
+        )
     }
 
-    public static func parseShortstat(_ s: String) -> (added: Int, removed: Int) {
-        var added = 0, removed = 0
-        for part in s.split(separator: ",") {
-            let p = part.trimmingCharacters(in: .whitespaces)
-            guard let n = p.split(separator: " ").first.flatMap({ Int($0) }) else { continue }
-            if p.contains("insertion") { added = n }
-            else if p.contains("deletion") { removed = n }
+    static func parseNumstat(_ output: String) -> GitDiffSummary {
+        let limit = UInt64(UInt32.max)
+        var files: UInt64 = 0
+        var added: UInt64 = 0
+        var removed: UInt64 = 0
+
+        func add(_ value: UInt64, to total: inout UInt64) {
+            total += min(value, limit - total)
         }
-        return (added, removed)
+
+        for record in output.split(separator: "\0", omittingEmptySubsequences: true) {
+            let fields = record.split(
+                separator: "\t", maxSplits: 2, omittingEmptySubsequences: false
+            )
+            guard fields.count == 3 else { continue }
+            add(1, to: &files)
+            if let count = UInt64(fields[0]) { add(count, to: &added) }
+            if let count = UInt64(fields[1]) { add(count, to: &removed) }
+        }
+
+        return GitDiffSummary(
+            files: UInt32(files), added: UInt32(added), removed: UInt32(removed)
+        )
     }
 
     /// Resolves the first word of `cmd` on PATH via `command -v`. The word is

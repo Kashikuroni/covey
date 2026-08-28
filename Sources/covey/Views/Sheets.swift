@@ -438,46 +438,162 @@ struct PromoteSheet: View {
 struct DeleteBranchSheet: View {
     let model: AppModel
     let name: String
+    @State private var expectedBranch: String?
+    @State private var destinations: [String] = []
+    @State private var checkoutInput = ""
+    @State private var selected = 0
+    @State private var loading = true
+    @State private var submitting = false
     @State private var error: String?
     @FocusState private var focused: Bool
 
-    private var branch: String {
-        model.sessions.first { $0.name == name }?.git?.branch ?? "?"
+    private var session: Session? {
+        model.sessions.first { $0.name == name }
+    }
+
+    private var trimmedCheckout: String {
+        checkoutInput.trimmingCharacters(in: .whitespaces)
+    }
+
+    private var suggestions: [String] {
+        filterBranches(destinations, query: trimmedCheckout)
+    }
+
+    private var canSubmit: Bool {
+        !submitting && destinations.contains(trimmedCheckout)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Delete branch '\(branch)'?").font(.headline)
-            Text("git branch -d — merged branches only.")
-                .font(.caption).foregroundStyle(.secondary)
+            Text("Delete branch '\(expectedBranch ?? "?")'?").font(.headline)
+            Text("Switches branches, then force-deletes only the local branch. Remote is untouched.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if loading {
+                Text("loading branches…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if destinations.isEmpty {
+                Text("No available local branch to switch to")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 2) {
+                    TextField("Switch to branch", text: $checkoutInput)
+                        .ayuField(Tokens(Theme(raw: model.themeRaw)), focused: focused)
+                        .focused($focused)
+                        .onChange(of: checkoutInput) { _, _ in selected = 0 }
+                        .onKeyPress(.downArrow) {
+                            guard !suggestions.isEmpty else { return .handled }
+                            selected = (selected + 1) % suggestions.count
+                            return .handled
+                        }
+                        .onKeyPress(.upArrow) {
+                            guard !suggestions.isEmpty else { return .handled }
+                            selected = (selected - 1 + suggestions.count) % suggestions.count
+                            return .handled
+                        }
+                        .onKeyPress(.tab) {
+                            guard suggestions.indices.contains(selected) else { return .ignored }
+                            checkoutInput = suggestions[selected]
+                            return .handled
+                        }
+
+                    if focused && !suggestions.isEmpty {
+                        VStack(alignment: .leading, spacing: 1) {
+                            ForEach(
+                                Array(suggestions.prefix(8).enumerated()), id: \.offset
+                            ) { index, branch in
+                                Text(branch)
+                                    .font(.caption.monospaced())
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 1)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(
+                                        index == selected
+                                            ? Color.accentColor.opacity(0.2) : .clear
+                                    )
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        selected = index
+                                        checkoutInput = branch
+                                    }
+                            }
+                        }
+                    }
+                }
+            }
+
             if let error {
                 Text("! \(error)").font(.caption).foregroundStyle(.red)
             }
             HStack {
-                Text("y delete · n cancel").font(.caption2).foregroundStyle(.tertiary)
+                Text("enter delete · esc cancel")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
                 Spacer()
                 Button("Cancel") { model.modal = nil }
-                Button("Delete", role: .destructive) { confirm() }
+                Button("Switch & Delete", role: .destructive) { confirm() }
                     .buttonStyle(.glassProminent)
                     .keyboardShortcut(.defaultAction)
+                    .disabled(!canSubmit)
             }
         }
         .padding(20)
-        .frame(width: 400)
-        .focusable()
-        .focused($focused)
-        .onAppear { focused = true }
-        .onKeyPress(.init("y")) { confirm(); return .handled }
-        .onKeyPress(.init("n")) { model.modal = nil; return .handled }
+        .frame(width: 460)
+        .task {
+            await load()
+            focused = true
+        }
         .onExitCommand { model.modal = nil }
     }
 
+    private func load() async {
+        loading = true
+        guard let session else {
+            error = "Session no longer exists"
+            loading = false
+            return
+        }
+        if expectedBranch == nil { expectedBranch = session.git?.branch }
+        let info = await model.gitInfo(session.dir)
+        if expectedBranch == nil { expectedBranch = info.currentBranch }
+        guard let deleting = expectedBranch, let root = info.repoRoot else {
+            error = "Current Git branch is unavailable"
+            loading = false
+            return
+        }
+        destinations = branchDeleteDestinations(
+            deleting: deleting,
+            repoRoot: root,
+            branches: info.branches,
+            worktrees: info.worktrees
+        )
+        if !destinations.contains(trimmedCheckout) {
+            checkoutInput = preferredBranchDeleteDestination(destinations) ?? ""
+        }
+        selected = 0
+        loading = false
+    }
+
     private func confirm() {
-        guard let s = model.sessions.first(where: { $0.name == name }),
-              let branch = s.git?.branch else { model.modal = nil; return }
+        guard canSubmit, let deleting = expectedBranch else { return }
+        submitting = true
+        error = nil
+        let checkout = trimmedCheckout
         Task {
-            if let err = await model.deleteBranch(dir: s.dir, branch: branch) { error = err }
-            else { model.modal = nil }
+            if let message = await model.switchAndDeleteBranch(
+                name: name,
+                expectedBranch: deleting,
+                checkoutBranch: checkout
+            ) {
+                error = message
+                await load()
+                submitting = false
+            } else {
+                model.modal = nil
+            }
         }
     }
 }
@@ -619,6 +735,8 @@ struct KillSheet: View {
     @State private var removeWorktree = false
     @State private var deleteBranch = false
     @State private var branchGate: BranchGate = .loading
+    @State private var submitting = false
+    @State private var error: String?
 
     private enum BranchGate: Equatable {
         case loading
@@ -649,31 +767,53 @@ struct KillSheet: View {
                     }
                 }
             }
+            if let error {
+                Text("! \(error)").font(.caption).foregroundStyle(.red)
+            }
             HStack {
                 Spacer()
                 Button("Cancel") { model.modal = nil }
                 Button("Kill", role: .destructive) {
                     let rm = removeWorktree
                     let del = deleteBranch
+                    submitting = true
+                    error = nil
                     Task {
-                        await model.kill(name, removeWorktree: rm, deleteBranch: del)
-                        model.modal = nil
+                        if let message = await model.kill(
+                            name, removeWorktree: rm, deleteBranch: del
+                        ) {
+                            error = message
+                            submitting = false
+                        } else {
+                            model.modal = nil
+                        }
                     }
                 }
                 .buttonStyle(.glassProminent)
                 .keyboardShortcut(.defaultAction)
+                .disabled(submitting)
             }
         }
         .padding(20)
         .frame(width: 360)
         .task {
-            guard isWorktree else { return }
+            guard isWorktree,
+                  let session = model.sessions.first(where: { $0.name == name })
+            else { return }
             guard let st = await model.branchStatus(name: name) else {
                 branchGate = .blocked("Branch status unavailable"); return
             }
-            if st.dirty { branchGate = .blocked("Uncommitted changes") }
-            else if !st.merged { branchGate = .blocked("Unmerged commits") }
-            else { branchGate = .allowed }
+            var branch = session.git?.branch
+            if branch == nil {
+                branch = await model.gitInfo(session.dir).currentBranch
+            }
+            if let reason = worktreeBranchDeletionBlockReason(
+                branch: branch, dirty: st.dirty, merged: st.merged
+            ) {
+                branchGate = .blocked(reason)
+            } else {
+                branchGate = .allowed
+            }
         }
     }
 }

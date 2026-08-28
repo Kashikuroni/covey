@@ -25,6 +25,9 @@ public struct Request: Codable, Equatable {
         case gitInfo(dir: String)
         case promote(name: String)
         case deleteBranch(dir: String, branch: String)
+        case switchAndDeleteBranch(
+            name: String, expectedBranch: String, checkoutBranch: String
+        )
         case mergedBranches(dir: String)
         case cleanupBranches(dir: String, branches: [String])
         case branchStatus(name: String)

@@ -33,7 +33,14 @@ public final class SessionRegistry {
     private var lostMetas: [SessionMeta]
     private let onPersist: (([SessionMeta]) -> Void)?
     private var pendingWorktreeRemoval: [String: (repo: String, path: String)] = [:]
-    private var pendingBranchDeletion: [String: (repo: String, branch: String)] = [:]
+    private struct PendingBranchDeletion {
+        let repo: String
+        let path: String
+        let branch: String
+        let expectedOID: String
+        let completion: (Result<Void, GitOps.GitError>) -> Void
+    }
+    private var pendingBranchDeletion: [String: PendingBranchDeletion] = [:]
 
     public init(clock: @escaping () -> Int64 = { Int64(time(nil)) },
                 persisted: [SessionMeta] = [],
@@ -169,6 +176,10 @@ public final class SessionRegistry {
         guard let entry = entries[name] else {
             lock.unlock(); throw RegistryError.notFound(name)
         }
+        guard pendingBranchDeletion[name] == nil else {
+            lock.unlock()
+            throw GitOps.GitError("branch deletion is already in progress")
+        }
         let target = dir ?? entry.session.dir
         lock.unlock()
         var isDir: ObjCBool = false
@@ -198,19 +209,53 @@ public final class SessionRegistry {
         lock.unlock()
     }
 
-    /// Schedules `git branch -d` of the session's branch once its process
-    /// exits AND its worktree has been removed. Reads the branch by shelling
-    /// out — done outside the lock.
-    public func markBranchDeletion(name: String) {
+    /// Validates and schedules local branch deletion after the session and its
+    /// companion have exited. The exact branch tip and clean state are checked
+    /// again immediately before removing the worktree.
+    public func scheduleBranchDeletion(
+        name: String,
+        completion: @escaping (Result<Void, GitOps.GitError>) -> Void
+    ) throws {
         lock.lock()
         guard let entry = entries[name], let repo = entry.session.worktreeRepo else {
-            lock.unlock(); return
+            lock.unlock()
+            throw GitOps.GitError("not a worktree session")
         }
-        let dir = entry.session.dir
+        guard pendingBranchDeletion[name] == nil else {
+            lock.unlock()
+            throw GitOps.GitError("branch deletion is already in progress")
+        }
+        let path = entry.session.dir
         lock.unlock()
-        guard let branch = GitOps.currentBranch(dir) else { return }
+
+        guard let branch = GitOps.currentBranch(path) else {
+            throw GitOps.GitError("no branch checked out")
+        }
+        guard !protectedBranches.contains(branch) else {
+            throw GitOps.GitError("branch '\(branch)' is protected")
+        }
+        try GitOps.requireCleanWorktree(path)
+        guard let expectedOID = try GitOps.localBranchOID(repo, branch) else {
+            throw GitOps.GitError("branch '\(branch)' does not exist")
+        }
+
         lock.lock()
-        pendingBranchDeletion[name] = (repo: repo, branch: branch)
+        guard pendingBranchDeletion[name] == nil else {
+            lock.unlock()
+            throw GitOps.GitError("branch deletion is already in progress")
+        }
+        guard entries[name]?.session.dir == path else {
+            lock.unlock()
+            throw GitOps.GitError("session changed during branch deletion")
+        }
+        pendingWorktreeRemoval[name] = (repo: repo, path: path)
+        pendingBranchDeletion[name] = PendingBranchDeletion(
+            repo: repo,
+            path: path,
+            branch: branch,
+            expectedOID: expectedOID,
+            completion: completion
+        )
         lock.unlock()
     }
 
@@ -264,6 +309,10 @@ public final class SessionRegistry {
         lock.lock()
         guard var entry = entries[name] else {
             lock.unlock(); throw RegistryError.notFound(name)
+        }
+        guard pendingBranchDeletion[name] == nil else {
+            lock.unlock()
+            throw GitOps.GitError("branch deletion is already in progress")
         }
         if entries[newName] != nil {
             lock.unlock(); throw RegistryError.duplicateName(newName)
@@ -353,20 +402,57 @@ public final class SessionRegistry {
             updated = entries[id]?.session
         }
         entries[id] = nil
-        let removal = pendingWorktreeRemoval.removeValue(forKey: id)
-        let branchDeletion = pendingBranchDeletion.removeValue(forKey: id)
+        var removal = pendingWorktreeRemoval.removeValue(forKey: id)
+        var branchDeletion = pendingBranchDeletion.removeValue(forKey: id)
+        if let companion = entries.values.first(where: {
+            $0.session.companionOf == id
+        })?.session.name {
+            if let removal { pendingWorktreeRemoval[companion] = removal }
+            if let branchDeletion { pendingBranchDeletion[companion] = branchDeletion }
+            removal = nil
+            branchDeletion = nil
+        }
         lock.unlock()
         persistNow()
         if let updated { onSessionAdded?(updated) }   // recents read the client cache
-        if let removal {
+        if let branchDeletion {
+            finishBranchDeletion(branchDeletion, removal: removal)
+        } else if let removal {
             try? GitOps.removeWorktree(repo: removal.repo, wtPath: removal.path)
         }
-        // Branch delete AFTER the worktree is removed — git refuses to delete a
-        // branch still checked out in a worktree.
-        if let branchDeletion {
-            try? GitOps.deleteBranch(repo: branchDeletion.repo, branch: branchDeletion.branch)
-        }
         onExit?(id, code)
+    }
+
+    private func finishBranchDeletion(
+        _ deletion: PendingBranchDeletion,
+        removal: (repo: String, path: String)?
+    ) {
+        do {
+            guard removal?.repo == deletion.repo,
+                  removal?.path == deletion.path else {
+                throw GitOps.GitError("worktree cleanup state is unavailable")
+            }
+            try GitOps.requireCleanWorktree(deletion.path)
+            guard GitOps.currentBranch(deletion.path) == deletion.branch else {
+                throw GitOps.GitError("worktree branch changed during shutdown")
+            }
+            guard try GitOps.localBranchOID(deletion.repo, deletion.branch)
+                    == deletion.expectedOID else {
+                throw GitOps.GitError("branch changed during shutdown")
+            }
+            try GitOps.removeWorktree(repo: deletion.repo, wtPath: deletion.path)
+            try GitOps.deleteBranch(
+                repo: deletion.repo,
+                branch: deletion.branch,
+                force: true,
+                expectedOID: deletion.expectedOID
+            )
+            deletion.completion(.success(()))
+        } catch let error as GitOps.GitError {
+            deletion.completion(.failure(error))
+        } catch {
+            deletion.completion(.failure(GitOps.GitError("\(error)")))
+        }
     }
 
     /// Respawns a pending-restart session in `dir`. Returns the updated

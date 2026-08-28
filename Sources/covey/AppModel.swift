@@ -433,13 +433,19 @@ public final class AppModel {
         catch { toast = errorText(error) }
     }
 
+    @discardableResult
     public func kill(_ name: String, removeWorktree: Bool = false,
-                     deleteBranch: Bool = false) async {
+                     deleteBranch: Bool = false) async -> String? {
         do {
             try await client.kill(name: name,
                                   removeWorktree: removeWorktree ? true : nil,
                                   deleteBranch: deleteBranch ? true : nil)
-        } catch { toast = errorText(error) }
+            return nil
+        } catch {
+            let message = errorText(error)
+            toast = message
+            return message
+        }
     }
 
     /// Restart via the daemon; the error text doubles as the sheet's inline
@@ -1459,6 +1465,21 @@ public final class AppModel {
     public func deleteBranch(dir: String, branch: String) async -> String? {
         do { try await client.deleteBranch(dir: dir, branch: branch); return nil }
         catch { return errorText(error) }
+    }
+
+    public func switchAndDeleteBranch(
+        name: String, expectedBranch: String, checkoutBranch: String
+    ) async -> String? {
+        do {
+            try await client.switchAndDeleteBranch(
+                name: name,
+                expectedBranch: expectedBranch,
+                checkoutBranch: checkoutBranch
+            )
+            return nil
+        } catch {
+            return errorText(error)
+        }
     }
 
     public func mergedBranches(dir: String) async -> [String] {

@@ -1,5 +1,6 @@
 import XCTest
 @testable import CoveydCore
+import CoveyKit
 
 final class GitOpsTests: XCTestCase {
     private var repo = ""
@@ -89,6 +90,15 @@ final class GitOpsTests: XCTestCase {
         XCTAssertEqual(GitOps.worktrees(NSTemporaryDirectory()), [:])
     }
 
+    func testPrimaryWorktreeDetectionRejectsLinkedWorktree() throws {
+        let linked = "\(repo)/.worktrees/linked"
+        try sh("git -C '\(repo)' worktree add -q -b linked '\(linked)' main")
+
+        XCTAssertTrue(try GitOps.isPrimaryWorktree(repo))
+        XCTAssertFalse(try GitOps.isPrimaryWorktree(linked))
+        XCTAssertThrowsError(try GitOps.isPrimaryWorktree(NSTemporaryDirectory()))
+    }
+
     func testCreateBranch() throws {
         try GitOps.createBranch(repo, "feat", base: "main")
         XCTAssertEqual(GitOps.currentBranch(repo), "feat", "created AND checked out")
@@ -104,12 +114,52 @@ final class GitOpsTests: XCTestCase {
         XCTAssertNil(GitOps.resolveAgentPath(""))
     }
 
-    func testParseShortstat() {
-        XCTAssertEqual(GitOps.parseShortstat(" 2 files changed, 10 insertions(+), 3 deletions(-)").added, 10)
-        XCTAssertEqual(GitOps.parseShortstat(" 2 files changed, 10 insertions(+), 3 deletions(-)").removed, 3)
-        XCTAssertEqual(GitOps.parseShortstat(" 1 file changed, 1 insertion(+)").added, 1)
-        XCTAssertEqual(GitOps.parseShortstat(" 1 file changed, 1 insertion(+)").removed, 0)
-        XCTAssertEqual(GitOps.parseShortstat("").added, 0)
+    func testReadGitInfoSeparatesUnstagedStagedAndUntracked() throws {
+        try ".ignored\n".write(
+            toFile: "\(repo)/.gitignore", atomically: true, encoding: .utf8
+        )
+        try "base\n".write(
+            toFile: "\(repo)/tracked.txt", atomically: true, encoding: .utf8
+        )
+        try sh("git -C '\(repo)' add .gitignore tracked.txt && git -C '\(repo)' -c user.email=t@t -c user.name=t commit -q -m tracked")
+
+        try "base\nstaged\n".write(
+            toFile: "\(repo)/tracked.txt", atomically: true, encoding: .utf8
+        )
+        try sh("git -C '\(repo)' add tracked.txt")
+        try "base\nstaged\nunstaged\n".write(
+            toFile: "\(repo)/tracked.txt", atomically: true, encoding: .utf8
+        )
+        try "new".write(
+            toFile: "\(repo)/untracked.txt", atomically: true, encoding: .utf8
+        )
+        try "ignored".write(
+            toFile: "\(repo)/.ignored", atomically: true, encoding: .utf8
+        )
+
+        let info = try XCTUnwrap(GitOps.readGitInfo(repo))
+        XCTAssertEqual(info.unstaged, GitDiffSummary(files: 1, added: 1, removed: 0))
+        XCTAssertEqual(info.staged, GitDiffSummary(files: 1, added: 1, removed: 0))
+        XCTAssertEqual(info.untracked, 1)
+    }
+
+    func testReadGitInfoCountsBinaryChangeWithZeroLineDelta() throws {
+        try Data([0, 1, 2]).write(to: URL(fileURLWithPath: "\(repo)/binary.dat"))
+        try sh("git -C '\(repo)' add binary.dat && git -C '\(repo)' -c user.email=t@t -c user.name=t commit -q -m binary")
+        try Data([0, 1, 3]).write(to: URL(fileURLWithPath: "\(repo)/binary.dat"))
+
+        let info = try XCTUnwrap(GitOps.readGitInfo(repo))
+        XCTAssertEqual(info.unstaged, GitDiffSummary(files: 1, added: 0, removed: 0))
+    }
+
+    func testParseNumstatHandlesBinaryAndRenamePathRecords() {
+        let text = "1\t2\tfile.swift\0"
+            + "-\t-\tbinary.dat\0"
+            + "0\t0\t\0old\0new\0"
+        XCTAssertEqual(
+            GitOps.parseNumstat(text),
+            GitDiffSummary(files: 3, added: 1, removed: 2)
+        )
     }
 
     func testReadGitInfo() throws {
@@ -122,6 +172,18 @@ final class GitOpsTests: XCTestCase {
         info = GitOps.readGitInfo(repo)
         XCTAssertEqual(info?.added, 1)
         XCTAssertNil(GitOps.readGitInfo(NSTemporaryDirectory()))
+    }
+
+    func testRequireCleanWorktreeIgnoresStatusPreferenceAndFailsClosed() throws {
+        try sh("git -C '\(repo)' config status.showUntrackedFiles no")
+        try "untracked".write(
+            toFile: "\(repo)/untracked.txt", atomically: true, encoding: .utf8
+        )
+
+        XCTAssertThrowsError(try GitOps.requireCleanWorktree(repo)) { error in
+            XCTAssertTrue("\(error)".contains("uncommitted changes"))
+        }
+        XCTAssertThrowsError(try GitOps.requireCleanWorktree(NSTemporaryDirectory()))
     }
 
     func testPromoteWorktreeMovesDirtyChanges() throws {
@@ -142,6 +204,130 @@ final class GitOpsTests: XCTestCase {
         // an unmerged branch refuses -d
         try sh("git -C '\(repo)' checkout -q -b unmerged && touch '\(repo)/u.txt' && git -C '\(repo)' add u.txt && git -C '\(repo)' -c user.email=t@t -c user.name=t commit -q -m u && git -C '\(repo)' checkout -q main")
         XCTAssertThrowsError(try GitOps.deleteBranch(repo: repo, branch: "unmerged"))
+    }
+
+    func testProtectedBranchesCannotBeDeletedInSafeOrForceMode() throws {
+        for branch in ["master", "develop", "dev"] {
+            try sh("git -C '\(repo)' branch '\(branch)'")
+        }
+        for branch in ["main", "master", "develop", "dev"] {
+            for force in [false, true] {
+                XCTAssertThrowsError(
+                    try GitOps.deleteBranch(repo: repo, branch: branch, force: force)
+                ) { error in
+                    XCTAssertTrue("\(error)".contains("protected"))
+                }
+                XCTAssertTrue(GitOps.branchExists(repo, branch))
+            }
+        }
+    }
+
+    func testForceModeDeletesCleanUnmergedLocalBranch() throws {
+        try sh("git -C '\(repo)' checkout -q -b feat && echo work > '\(repo)/work.txt' && git -C '\(repo)' add work.txt && git -C '\(repo)' -c user.email=t@t -c user.name=t commit -q -m work && git -C '\(repo)' checkout -q main")
+
+        XCTAssertThrowsError(
+            try GitOps.deleteBranch(repo: repo, branch: "feat", force: false)
+        )
+        XCTAssertTrue(GitOps.branchExists(repo, "feat"))
+
+        try GitOps.deleteBranch(repo: repo, branch: "feat", force: true)
+        XCTAssertFalse(GitOps.branchExists(repo, "feat"))
+    }
+
+    func testConditionalForceDeletionRejectsAdvancedBranchTip() throws {
+        try sh("git -C '\(repo)' checkout -q -b feat && echo one > '\(repo)/work.txt' && git -C '\(repo)' add work.txt && git -C '\(repo)' -c user.email=t@t -c user.name=t commit -q -m one && git -C '\(repo)' checkout -q main")
+        let expectedOID = try XCTUnwrap(GitOps.localBranchOID(repo, "feat"))
+        try sh("git -C '\(repo)' checkout -q feat && echo two >> '\(repo)/work.txt' && git -C '\(repo)' add work.txt && git -C '\(repo)' -c user.email=t@t -c user.name=t commit -q -m two && git -C '\(repo)' checkout -q main")
+
+        XCTAssertThrowsError(try GitOps.deleteBranch(
+            repo: repo, branch: "feat", force: true, expectedOID: expectedOID
+        ))
+        XCTAssertNotEqual(try GitOps.localBranchOID(repo, "feat"), expectedOID)
+    }
+
+    func testPostDeleteWorktreeDetectionRestoresExpectedBranchTip() throws {
+        let worktree = "\(repo)/.worktrees/feat"
+        try GitOps.prepareWorktree(
+            repo: repo, wtPath: worktree, newBranch: "feat", base: "main"
+        )
+        let expectedOID = try XCTUnwrap(GitOps.localBranchOID(repo, "feat"))
+        try GitOps.run(
+            repo, ["update-ref", "-d", "refs/heads/feat", expectedOID]
+        )
+        XCTAssertNil(try GitOps.localBranchOID(repo, "feat"))
+
+        XCTAssertThrowsError(try GitOps.verifyDeletedBranchNotCheckedOut(
+            repo: repo, branch: "feat", expectedOID: expectedOID
+        ))
+
+        XCTAssertEqual(try GitOps.localBranchOID(repo, "feat"), expectedOID)
+        XCTAssertEqual(GitOps.currentBranch(worktree), "feat")
+    }
+
+    func testSwitchAndDeleteChecksOutDestinationThenDeletesExpectedBranch() throws {
+        try sh("git -C '\(repo)' checkout -q -b feat && echo work > '\(repo)/work.txt' && git -C '\(repo)' add work.txt && git -C '\(repo)' -c user.email=t@t -c user.name=t commit -q -m work")
+
+        try GitOps.switchAndDeleteBranch(
+            repo: repo, expectedBranch: "feat", checkoutBranch: "main"
+        )
+
+        XCTAssertEqual(GitOps.currentBranch(repo), "main")
+        XCTAssertFalse(GitOps.branchExists(repo, "feat"))
+    }
+
+    func testSwitchAndDeleteSupportsRetryAfterCheckout() throws {
+        try sh("git -C '\(repo)' branch feat")
+
+        try GitOps.switchAndDeleteBranch(
+            repo: repo, expectedBranch: "feat", checkoutBranch: "main"
+        )
+
+        XCTAssertEqual(GitOps.currentBranch(repo), "main")
+        XCTAssertFalse(GitOps.branchExists(repo, "feat"))
+    }
+
+    func testSwitchAndDeleteRetrySucceedsWhenSourceIsAlreadyAbsent() throws {
+        XCTAssertNoThrow(try GitOps.switchAndDeleteBranch(
+            repo: repo, expectedBranch: "already-gone", checkoutBranch: "main"
+        ))
+        XCTAssertEqual(GitOps.currentBranch(repo), "main")
+    }
+
+    func testSwitchAndDeleteRejectsDirtyAndMissingDestination() throws {
+        try sh("git -C '\(repo)' branch feat")
+        try "dirty".write(
+            toFile: "\(repo)/dirty.txt", atomically: true, encoding: .utf8
+        )
+        XCTAssertThrowsError(try GitOps.switchAndDeleteBranch(
+            repo: repo, expectedBranch: "feat", checkoutBranch: "main"
+        ))
+        try FileManager.default.removeItem(atPath: "\(repo)/dirty.txt")
+        XCTAssertThrowsError(try GitOps.switchAndDeleteBranch(
+            repo: repo, expectedBranch: "feat", checkoutBranch: "missing"
+        ))
+    }
+
+    func testSwitchAndDeleteRejectsStaleCurrentBranch() throws {
+        try sh("git -C '\(repo)' branch feat")
+        try sh("git -C '\(repo)' checkout -q -b other")
+
+        XCTAssertThrowsError(try GitOps.switchAndDeleteBranch(
+            repo: repo, expectedBranch: "feat", checkoutBranch: "main"
+        ))
+        XCTAssertEqual(GitOps.currentBranch(repo), "other")
+        XCTAssertTrue(GitOps.branchExists(repo, "feat"))
+    }
+
+    func testSwitchAndDeleteRejectsDestinationInAnotherWorktree() throws {
+        try sh("git -C '\(repo)' checkout -q -b feat")
+        let other = "\(repo)/.worktrees/other"
+        try sh("git -C '\(repo)' worktree add -q -b other '\(other)' main")
+
+        XCTAssertThrowsError(try GitOps.switchAndDeleteBranch(
+            repo: repo, expectedBranch: "feat", checkoutBranch: "other"
+        ))
+        XCTAssertEqual(GitOps.currentBranch(repo), "feat")
+        XCTAssertTrue(GitOps.branchExists(repo, "feat"))
     }
 
     func testListMergedBranches() throws {

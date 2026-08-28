@@ -436,6 +436,52 @@ final class AppModelTests: XCTestCase {
     }
 
     @MainActor
+    func testSwitchAndDeleteBranchReturnsErrorThenPassesRetry() async throws {
+        let repo = "\(NSTemporaryDirectory())covey-am-switch-\(UInt32.random(in: 0..<UInt32.max))"
+        try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: repo) }
+        for cmd in [
+            "git -C '\(repo)' init -q -b main",
+            "git -C '\(repo)' -c user.email=t@t -c user.name=t commit --allow-empty -q -m init",
+            "git -C '\(repo)' checkout -q -b feat",
+        ] {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["-c", cmd]
+            try process.run()
+            process.waitUntilExit()
+            XCTAssertEqual(process.terminationStatus, 0)
+        }
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        _ = try daemon.registry.create(
+            dir: repo, agent: "sh", argv: ["/bin/cat"], name: "plain"
+        )
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+
+        try "dirty".write(
+            toFile: "\(repo)/dirty.txt", atomically: true, encoding: .utf8
+        )
+        let firstError = await model.switchAndDeleteBranch(
+            name: "plain", expectedBranch: "feat", checkoutBranch: "main"
+        )
+        XCTAssertNotNil(firstError)
+        XCTAssertEqual(GitOps.currentBranch(repo), "feat")
+        XCTAssertTrue(GitOps.branchExists(repo, "feat"))
+
+        try FileManager.default.removeItem(atPath: "\(repo)/dirty.txt")
+        let error = await model.switchAndDeleteBranch(
+            name: "plain", expectedBranch: "feat", checkoutBranch: "main"
+        )
+
+        XCTAssertNil(error)
+        XCTAssertEqual(GitOps.currentBranch(repo), "main")
+        XCTAssertFalse(GitOps.branchExists(repo, "feat"))
+        await model.kill("plain")
+    }
+
+    @MainActor
     func testBranchStatusAndKillDeleteBranch() async throws {
         let repo = "\(NSTemporaryDirectory())covey-am-del-\(UInt32.random(in: 0..<UInt32.max))"
         try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
@@ -449,25 +495,60 @@ final class AppModelTests: XCTestCase {
         }
         let daemon = try TestDaemon()
         defer { daemon.stop() }
+        let wtPath = try {
+            let prepared = try CreateService.prepare(CreateSpec(
+                dir: repo, agent: "sh", worktree: .new(branch: "feat", base: "main")
+            ))
+            return prepared.finalDir
+        }()
         _ = try daemon.registry.create(
-            dir: try {
-                let pr = try CreateService.prepare(CreateSpec(
-                    dir: repo, agent: "sh", worktree: .new(branch: "feat", base: "main")))
-                return pr.finalDir
-            }(),
-            agent: "sh", argv: ["/bin/cat"], name: "wt", worktreeRepo: repo)
+            dir: wtPath, agent: "sh", argv: ["/bin/cat"],
+            name: "wt", worktreeRepo: repo
+        )
+        try "work".write(
+            toFile: "\(wtPath)/work.txt", atomically: true, encoding: .utf8
+        )
+        let commit = Process()
+        commit.executableURL = URL(fileURLWithPath: "/bin/sh")
+        commit.arguments = [
+            "-c",
+            "git -C '\(wtPath)' add work.txt && git -C '\(wtPath)' -c user.email=t@t -c user.name=t commit -q -m work",
+        ]
+        try commit.run()
+        commit.waitUntilExit()
+        XCTAssertEqual(commit.terminationStatus, 0)
         let (model, _) = try makeModel(daemon)
 
         let st = await model.branchStatus(name: "wt")
         XCTAssertEqual(st?.dirty, false)
-        XCTAssertEqual(st?.merged, true)
+        XCTAssertEqual(st?.merged, false)
 
         await model.kill("wt", removeWorktree: false, deleteBranch: true)
-        // deleteBranch implies worktree removal, then branch delete.
-        let deadline = Date().addingTimeInterval(5)
-        while GitOps.branchExists(repo, "feat") && Date() < deadline {
-            try await Task.sleep(nanoseconds: 50_000_000)
+        let deleted = await eventually { !GitOps.branchExists(repo, "feat") }
+        XCTAssertTrue(deleted, "clean unmerged branch deleted via kill")
+
+        let protectedPath = try CreateService.prepare(CreateSpec(
+            dir: repo, agent: "sh", worktree: .new(branch: "dev", base: "main")
+        )).finalDir
+        _ = try daemon.registry.create(
+            dir: protectedPath, agent: "sh", argv: ["/bin/cat"],
+            name: "protected", worktreeRepo: repo
+        )
+
+        await model.kill("protected", removeWorktree: false, deleteBranch: true)
+
+        XCTAssertNotNil(daemon.registry.get(name: "protected"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: protectedPath))
+        XCTAssertTrue(GitOps.branchExists(repo, "dev"))
+        XCTAssertNotNil(model.toast)
+
+        if daemon.registry.get(name: "protected") != nil {
+            daemon.registry.markWorktreeRemoval(name: "protected")
+            daemon.registry.kill(name: "protected")
+            let removed = await eventually {
+                !FileManager.default.fileExists(atPath: protectedPath)
+            }
+            XCTAssertTrue(removed, "protected test fixture removed")
         }
-        XCTAssertFalse(GitOps.branchExists(repo, "feat"), "branch deleted via kill")
     }
 }

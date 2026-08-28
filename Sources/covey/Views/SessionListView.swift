@@ -137,6 +137,7 @@ private struct SessionCardView: View {
         let cardBackground = selected ? tk.cardHover : tk.card
         let status = model.statusByName[session.name] ?? .idle
         let modelName = model.modelByName[session.name].map(modelDisplayName)
+        let delta = session.git.flatMap(sessionGitDelta)
         return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
                 Text(session.name)
@@ -170,16 +171,13 @@ private struct SessionCardView: View {
                             }
                         }
                         Spacer()
-                        if let git = session.git, git.added > 0 || git.removed > 0 {
+                        if let delta {
                             HStack(spacing: 4) {
-                                if git.added > 0 {
-                                    Text("+\(git.added)")
-                                        .foregroundStyle(tk.diffAdd.opacity(0.65))
-                                }
-                                if git.removed > 0 {
-                                    Text("−\(git.removed)")
-                                        .foregroundStyle(tk.diffDel.opacity(0.65))
-                                }
+                                Text(delta.marker).foregroundStyle(tk.t4)
+                                Text("+\(delta.added)")
+                                    .foregroundStyle(tk.diffAdd.opacity(0.65))
+                                Text("−\(delta.removed)")
+                                    .foregroundStyle(tk.diffDel.opacity(0.65))
                             }
                             .font(mono(11))
                         }

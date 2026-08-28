@@ -47,6 +47,9 @@ final class ProtocolTests: XCTestCase {
             .gitInfo(dir: "/work"),
             .promote(name: "s-1"),
             .deleteBranch(dir: "/work", branch: "feat"),
+            .switchAndDeleteBranch(
+                name: "s-1", expectedBranch: "feat", checkoutBranch: "main"
+            ),
             .mergedBranches(dir: "/work"),
             .cleanupBranches(dir: "/work", branches: ["a", "b"]),
         ]
@@ -147,4 +150,3 @@ final class ProtocolTests: XCTestCase {
         )
     }
 }
-

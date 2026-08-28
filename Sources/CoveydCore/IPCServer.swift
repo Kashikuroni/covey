@@ -177,8 +177,28 @@ public final class IPCServer {
         case let .kill(name, removeWorktree, deleteBranch):
             guard registry.get(name: name) != nil else { return notFound(name) }
             if deleteBranch == true {
-                registry.markBranchDeletion(name: name)
-                registry.markWorktreeRemoval(name: name)   // delete needs the tree gone
+                do {
+                    try registry.scheduleBranchDeletion(name: name) {
+                        [weak self, weak sink] result in
+                        guard let self, let sink else { return }
+                        self.server.async {
+                            let response: ServerMessage.Result
+                            switch result {
+                            case .success:
+                                response = .ok
+                            case .failure(let error):
+                                response = .error(
+                                    code: "deleteBranchFailed", message: "\(error)"
+                                )
+                            }
+                            sink.send(.response(id: id, result: response))
+                        }
+                    }
+                } catch {
+                    return reply(.error(code: "deleteBranchFailed", message: "\(error)"))
+                }
+                registry.kill(name: name)
+                return
             } else if removeWorktree == true {
                 registry.markWorktreeRemoval(name: name)
             }
@@ -213,11 +233,32 @@ public final class IPCServer {
                 reply(.ok)
             } catch { reply(.error(code: "promoteFailed", message: "\(error)")) }
 
-        case let .deleteBranch(dir, branch):
-            guard !protectedBranches.contains(branch) else {
+        case let .switchAndDeleteBranch(name, expectedBranch, checkoutBranch):
+            guard let session = registry.get(name: name) else { return notFound(name) }
+            guard session.worktreeRepo == nil else {
                 return reply(.error(code: "deleteBranchFailed",
-                                    message: "branch '\(branch)' is protected"))
+                                    message: "cannot switch a worktree session"))
             }
+            guard let repo = GitOps.repoRoot(session.dir) else {
+                return reply(.error(code: "deleteBranchFailed", message: "not a git repo"))
+            }
+            do {
+                guard try GitOps.isPrimaryWorktree(repo) else {
+                    throw GitOps.GitError("cannot switch a linked worktree session")
+                }
+                try GitOps.switchAndDeleteBranch(
+                    repo: repo,
+                    expectedBranch: expectedBranch,
+                    checkoutBranch: checkoutBranch
+                )
+                gitMonitor?.forget(name: name)
+                gitMonitor?.poke(name: name, dir: session.dir)
+                reply(.ok)
+            } catch {
+                reply(.error(code: "deleteBranchFailed", message: "\(error)"))
+            }
+
+        case let .deleteBranch(dir, branch):
             guard let repo = GitOps.repoRoot(expandTilde(dir)) else {
                 return reply(.error(code: "deleteBranchFailed", message: "not a git repo"))
             }
