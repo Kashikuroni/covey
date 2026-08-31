@@ -222,7 +222,7 @@ public final class AppModel {
     private let fetchAccount: () async -> Account
     private let fetchGlmAccount: () async -> Account
     private let usageInterval: TimeInterval
-    private(set) var usageStore: UsageStore!
+    private var usageStore: UsageStore!
     private let readProviderKey: @Sendable (String) -> String?
     private let writeProviderKey: @Sendable (String, String) -> Bool
     private let deleteProviderKey: @Sendable (String) -> Bool
@@ -1590,6 +1590,11 @@ public final class AppModel {
 
     func ingestCodexRateLimits(_ update: CodexRateLimitsSnapshot, now: Date = Date()) {
         usageStore.ingestRateLimits(update, now: now)
+    }
+
+    /// App teardown: terminate the codex subprocess.
+    func stopCodexServer() {
+        usageStore.stopCodexServer()
     }
 
     private func apply(_ event: DaemonEvent) {

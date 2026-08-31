@@ -7,16 +7,14 @@ import CoveyKit
 /// usage-store-refactor-design.md.
 @MainActor @Observable
 final class UsageStore {
-    // Internal writable while the tick/codex methods still live in AppModel
-    // (Tasks 2–3 move them here); the facade keeps the public surface.
-    var usage: Usage?
-    var plan: String?
-    var usageError: String?
-    var glmUsage: Usage?
-    var glmUsageError: String?
-    var codexUsage: CodexRateLimitsSnapshot?
-    var codexPlan: String?
-    var codexState: CodexServerState = .stopped
+    private(set) var usage: Usage?
+    private(set) var plan: String?
+    private(set) var usageError: String?
+    private(set) var glmUsage: Usage?
+    private(set) var glmUsageError: String?
+    private(set) var codexUsage: CodexRateLimitsSnapshot?
+    private(set) var codexPlan: String?
+    private(set) var codexState: CodexServerState = .stopped
 
     var claudeUsageEnabled = true
     var codexUsageEnabled = true

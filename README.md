@@ -28,7 +28,7 @@ Other CLI agents can be added as presets or entered as a custom command. Covey l
 - **Agent traces** — normalize Claude Code transcripts and Codex rollouts into one event stream with turns, tool calls/results, edits, token usage, model/effort metadata, and nested-agent filtering. Normalized traces are retained locally for seven days.
 - **GitHub Issues** — browse, search, create, edit, close, reopen, and delete issues through `gh`; issue drafts are persisted per project, and issues can seed session names and branches.
 - **Provider profiles** — Claude Code can use the normal Anthropic login or Claude-compatible providers. Anthropic and GLM are built in; additional profiles can be defined in `~/.covey/config.json`, with secrets stored in Keychain.
-- **Usage monitoring** — Claude OAuth windows, Codex ChatGPT limits via `codex app-server`, and the GLM token window. Claude and Codex crossings at 80% generate deduplicated system notifications when Covey runs as an app bundle.
+- **Usage monitoring** — Claude OAuth windows, Codex ChatGPT limits via `codex app-server`, and the GLM token window. Claude and Codex crossings at 80% generate deduplicated system notifications when Covey runs as an app bundle. Every poll, RPC error, and parse failure is recorded to a local diagnostics log, searchable in-app via Command-P › Search App Logs.
 - **Keyboard-first UI** — command palette, native menu shortcuts, optional vim-style workspace navigation, and a Vim-like issue text editor with normal/insert/visual modes.
 - **Persistent workspace** — theme, panel visibility and sizes, project/session order, recent sessions, provider toggles, issue bindings, and drafts are stored in `~/.covey/state.json`.
 
@@ -103,6 +103,7 @@ The main local files are:
 | `~/.covey/registry.json` | Daemon metadata used to surface sessions lost with a previous daemon process |
 | `~/.covey/coveyd.sock` | Local Unix socket, created with mode `0600` |
 | `~/.covey/traces/` | Normalized per-session trace events and source cursors |
+| `~/Library/Logs/Covey/` | NDJSON diagnostics logs (`usage.log` for usage polling, rotated at 1 MB; `pane-layout.log`) |
 
 Provider secrets are not written to these JSON files. Covey stores configured provider keys in macOS Keychain; Claude usage reads Claude Code's existing OAuth credential file or Keychain item.
 

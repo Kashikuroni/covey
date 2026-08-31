@@ -72,7 +72,7 @@ struct CoveyApp: App {
                     startupError = "\(error)"
                 }
             }
-            .onDisappear { model?.usageStore.stopCodexServer() }
+            .onDisappear { model?.stopCodexServer() }
         }
         // Content under the title bar: the topbar row sits at traffic-light
         // level (TopBar pads left for the buttons), and the toolbar is gone.
