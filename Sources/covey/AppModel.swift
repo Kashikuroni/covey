@@ -223,7 +223,6 @@ public final class AppModel {
     private let fetchGlmAccount: () async -> Account
     private let usageInterval: TimeInterval
     private(set) var usageStore: UsageStore!
-    @ObservationIgnored private var codexServer: CodexAppServer?
     private let readProviderKey: @Sendable (String) -> String?
     private let writeProviderKey: @Sendable (String, String) -> Bool
     private let deleteProviderKey: @Sendable (String) -> Bool
@@ -329,7 +328,7 @@ public final class AppModel {
             self.toast = "daemon connection lost"
         }
         usageStore.startPolling()
-        startCodexServer()
+        usageStore.startCodexServerIfNeeded()
     }
 
     public func select(_ name: String?) async {
@@ -1093,7 +1092,7 @@ public final class AppModel {
         usageStore.codexUsageEnabled = values.codexUsageEnabled
         usageStore.glmUsageEnabled = values.glmUsageEnabled
         persist()
-        if codexChanged { synchronizeCodexUsageServer() }
+        if codexChanged { usageStore.synchronizeCodexServer() }
         offerThemeRestartAfterModalDismiss = themeChanged
         modal = nil
     }
@@ -1111,21 +1110,11 @@ public final class AppModel {
     public func setCodexUsageEnabled(_ on: Bool) {
         usageStore.codexUsageEnabled = on
         persist()
-        synchronizeCodexUsageServer()
+        usageStore.synchronizeCodexServer()
     }
     public func setGlmUsageEnabled(_ on: Bool) {
         usageStore.glmUsageEnabled = on
         persist()
-    }
-
-    private func synchronizeCodexUsageServer() {
-        if codexUsageEnabled {
-            startCodexServer()
-        } else {
-            codexServer?.stop()
-            codexServer = nil
-            usageStore.codexState = .stopped
-        }
     }
 
     public func setSbWidth(_ px: Int) {
@@ -1593,55 +1582,14 @@ public final class AppModel {
         store.save(persisted)
     }
 
-    /// Spawn codex app-server if the binary resolves; wire snapshots/state in.
-    /// No binary → stays `.stopped`, chip empty. Passive-only.
-    private func startCodexServer() {
-        guard codexUsageEnabled, codexServer == nil, let path = resolveCodexPath() else { return }
-        let server = CodexAppServer()
-        server.onState = { [weak self] state in self?.setCodexState(state) }
-        server.onRateLimits = { [weak self] snap in self?.ingestCodexRateLimits(snap) }
-        codexServer = server
-        server.start(codexPath: path)
-    }
-
+    // Test seams: existing AppModel tests drive codex state through these;
+    // the implementation lives in UsageStore.
     func setCodexState(_ state: CodexServerState) {
-        usageStore.codexState = state
-        switch state {
-        case .active(let acc):
-            usageStore.codexPlan = codexPlanLabel(acc.planType)
-        case .unauthed:
-            // A different (non-chatgpt) account really has no data — unlike
-            // .stopped/.starting this isn't a transient gap, so the cache
-            // does not carry over.
-            usageStore.codexPlan = nil
-            usageStore.codexUsage = nil
-        case .stopped, .starting:
-            break   // keep the last-known cache; server down != data invalid
-        }
+        usageStore.setCodexState(state)
     }
 
-    /// Merge a (possibly partial) Codex snapshot into the live one, then run
-    /// the same 80%-alert machinery as Claude under the "codex" marker prefix.
     func ingestCodexRateLimits(_ update: CodexRateLimitsSnapshot, now: Date = Date()) {
-        usageStore.codexUsage = mergeCodex(into: usageStore.codexUsage, update: update)
-        persist()
-        guard let usage = codexUsage else { return }
-        let old = persisted.usageNotified ?? [:]
-        let windows: [(key: String, window: UsageWindow?)] =
-            usage.windows.map { ($0.label, $0.window) }
-        let (alerts, marks) = limitAlerts(agent: "Codex", windows: windows,
-                                          notified: old, now: now)
-        for alert in alerts { Notifier.post(alert) }
-        if marks != old {
-            persisted.usageNotified = marks
-            persist()
-        }
-    }
-
-    /// App teardown: terminate the codex subprocess.
-    func stopCodexServer() {
-        codexServer?.stop()
-        codexServer = nil
+        usageStore.ingestRateLimits(update, now: now)
     }
 
     private func apply(_ event: DaemonEvent) {

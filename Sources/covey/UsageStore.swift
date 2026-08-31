@@ -131,4 +131,74 @@ final class UsageStore {
         glmUsageEnabled = persisted.glmUsageEnabled ?? true
         if let cached = persisted.glmUsage { glmUsage = cached.live }
     }
+
+    // MARK: - Codex app-server lifecycle (moved verbatim from AppModel)
+
+    private var codexServer: CodexAppServer?
+    /// Test seam: true between spawn and termination, without touching a real
+    /// subprocess (resolveCodexPath may find nothing in a test environment).
+    private(set) var codexServerActive = false
+
+    /// Spawn codex app-server if the binary resolves; wire snapshots/state in.
+    /// No binary → stays `.stopped`, chip empty. Passive-only.
+    func startCodexServerIfNeeded() {
+        guard codexUsageEnabled, codexServer == nil, let path = resolveCodexPath() else { return }
+        let server = CodexAppServer()
+        server.onState = { [weak self] state in self?.setCodexState(state) }
+        server.onRateLimits = { [weak self] snap in self?.ingestRateLimits(snap) }
+        codexServer = server
+        codexServerActive = true
+        server.start(codexPath: path)
+    }
+
+    func setCodexState(_ state: CodexServerState) {
+        codexState = state
+        if case .stopped = state { codexServerActive = false }
+        switch state {
+        case .active(let acc):
+            codexPlan = codexPlanLabel(acc.planType)
+        case .unauthed:
+            // A different (non-chatgpt) account really has no data — unlike
+            // .stopped/.starting this isn't a transient gap, so the cache
+            // does not carry over.
+            codexPlan = nil
+            codexUsage = nil
+        case .stopped, .starting:
+            break   // keep the last-known cache; server down != data invalid
+        }
+    }
+
+    /// Merge a (possibly partial) Codex snapshot into the live one, then run
+    /// the same 80%-alert machinery as Claude under the "codex" marker prefix.
+    func ingestRateLimits(_ update: CodexRateLimitsSnapshot, now: Date = Date()) {
+        codexUsage = mergeCodex(into: codexUsage, update: update)
+        onPersist()
+        guard let usage = codexUsage else { return }
+        let old = readMarkers()
+        let windows: [(key: String, window: UsageWindow?)] =
+            usage.windows.map { ($0.label, $0.window) }
+        let (alerts, marks) = limitAlerts(agent: "Codex", windows: windows,
+                                          notified: old, now: now)
+        for alert in alerts { Notifier.post(alert) }
+        if marks != old {
+            writeMarkers(marks)
+            onPersist()
+        }
+    }
+
+    /// Toggle-driven: spawn when enabled, tear down when not.
+    func synchronizeCodexServer() {
+        if codexUsageEnabled {
+            startCodexServerIfNeeded()
+        } else {
+            stopCodexServer()
+            codexState = .stopped
+        }
+    }
+
+    func stopCodexServer() {
+        codexServer?.stop()
+        codexServer = nil
+        codexServerActive = false
+    }
 }

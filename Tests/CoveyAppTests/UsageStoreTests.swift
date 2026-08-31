@@ -6,12 +6,16 @@ import CoveyKit
 final class UsageStoreTests: XCTestCase {
     private func makeStore(
         fetchAccount: @escaping () async -> Account = { Account() },
-        fetchGlm: @escaping () async -> Account = { Account() }
+        fetchGlm: @escaping () async -> Account = { Account() },
+        readMarkers: @escaping () -> [String: Int64] = { [:] },
+        writeMarkers: @escaping ([String: Int64]) -> Void = { _ in }
     ) -> (store: UsageStore, persisted: PersistedState) {
         let persisted = PersistedState()
         let store = UsageStore(fetchAccount: fetchAccount,
                                fetchGlmAccount: fetchGlm,
-                               onPersist: {})
+                               onPersist: {},
+                               readMarkers: readMarkers,
+                               writeMarkers: writeMarkers)
         return (store, persisted)
     }
 
@@ -83,5 +87,30 @@ final class UsageStoreTests: XCTestCase {
         store.glmUsageEnabled = false
         await store.tickGlm()
         XCTAssertEqual(calls, 0)
+    }
+
+    func testSynchronizeDisabledResetsState() {
+        let (store, _) = makeStore()
+        store.synchronizeCodexServer()   // enabled: may or may not spawn, either is fine
+        store.codexUsageEnabled = false
+        store.synchronizeCodexServer()
+        XCTAssertEqual(store.codexState, .stopped)
+        XCTAssertFalse(store.codexServerActive)
+    }
+
+    func testIngestMergesAndDedupsMarkers() {
+        var markers: [String: Int64] = [:]
+        let (store, _) = makeStore(readMarkers: { markers },
+                                   writeMarkers: { markers = $0 })
+        let snap = CodexRateLimitsSnapshot(
+            primary: LabeledWindow(label: "5h",
+                                   window: UsageWindow(utilization: 90, resetUnix: 100)),
+            secondary: nil)
+        store.ingestRateLimits(snap, now: Date(timeIntervalSince1970: 200))
+        XCTAssertEqual(store.codexUsage?.primary?.window.utilization, 90)
+        XCTAssertEqual(markers["codex:5h"], 100)   // alert marker recorded
+        // Same cycle again: deduped, marker unchanged.
+        store.ingestRateLimits(snap, now: Date(timeIntervalSince1970: 300))
+        XCTAssertEqual(markers["codex:5h"], 100)
     }
 }
