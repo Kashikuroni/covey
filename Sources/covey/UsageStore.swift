@@ -32,6 +32,8 @@ final class UsageStore {
     private let writeMarkers: ([String: Int64]) -> Void
     private var usagePoller: Task<Void, Never>?
     private var glmUsagePoller: Task<Void, Never>?
+    /// Test seam: nil → system notifications, exactly as before the refactor.
+    var alertSink: (([LimitAlert]) -> Void)?
 
     init(fetchAccount: @escaping () async -> Account = { Account() },
          fetchGlmAccount: @escaping () async -> Account = { Account() },
@@ -64,17 +66,10 @@ final class UsageStore {
         // Failed fetch (nil usage) must not touch alert markers: the
         // current window's dedup survives network gaps.
         guard let usage = acc.usage else { return }
-        let old = readMarkers()
         // Sonnet's 7d window is deliberately absent: chip-only, no alerts.
-        let (alerts, marks) = limitAlerts(
-            agent: "Claude",
-            windows: [("5h", usage.fiveHour), ("7d", usage.sevenDay)],
-            notified: old, now: Date())
-        for alert in alerts { Notifier.post(alert) }
-        if marks != old {
-            writeMarkers(marks)
-            onPersist()
-        }
+        runAlerts(agent: "Claude",
+                  windows: [("5h", usage.fiveHour), ("7d", usage.sevenDay)],
+                  notified: readMarkers(), now: Date())
     }
 
     /// GLM's poll: usage-only (no plan, no window alerts — those are Claude's
@@ -174,13 +169,22 @@ final class UsageStore {
         codexUsage = mergeCodex(into: codexUsage, update: update)
         onPersist()
         guard let usage = codexUsage else { return }
-        let old = readMarkers()
         let windows: [(key: String, window: UsageWindow?)] =
             usage.windows.map { ($0.label, $0.window) }
-        let (alerts, marks) = limitAlerts(agent: "Codex", windows: windows,
-                                          notified: old, now: now)
-        for alert in alerts { Notifier.post(alert) }
-        if marks != old {
+        runAlerts(agent: "Codex", windows: windows,
+                  notified: readMarkers(), now: now)
+    }
+
+    /// Shared 80%-crossing detection for both agents: dedup via the persisted
+    /// marker map, deliver via alertSink (system notifier by default).
+    private func runAlerts(agent: String,
+                           windows: [(key: String, window: UsageWindow?)],
+                           notified: [String: Int64], now: Date) {
+        let (alerts, marks) = limitAlerts(agent: agent, windows: windows,
+                                          notified: notified, now: now)
+        if let alertSink { alertSink(alerts) }
+        else { for alert in alerts { Notifier.post(alert) } }
+        if marks != notified {
             writeMarkers(marks)
             onPersist()
         }

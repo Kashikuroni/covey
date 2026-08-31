@@ -113,4 +113,23 @@ final class UsageStoreTests: XCTestCase {
         store.ingestRateLimits(snap, now: Date(timeIntervalSince1970: 300))
         XCTAssertEqual(markers["codex:5h"], 100)
     }
+
+    func testClaudeTickCrossingEightyPercentPostsOneAlert() async {
+        var posted: [LimitAlert] = []
+        var markers: [String: Int64] = [:]
+        let (store, _) = makeStore(
+            fetchAccount: {
+                Account(usage: Usage(fiveHour: UsageWindow(utilization: 85, resetUnix: 500),
+                                     sevenDay: nil, sevenDaySonnet: nil))
+            },
+            readMarkers: { markers },
+            writeMarkers: { markers = $0 })
+        store.alertSink = { posted += $0 }
+        await store.tickClaude()
+        XCTAssertEqual(posted.count, 1)
+        XCTAssertEqual(posted[0].title, "Claude 5h limit at 85%")
+        XCTAssertEqual(markers["claude:5h"], 500)
+        await store.tickClaude()   // same window: no duplicate alert
+        XCTAssertEqual(posted.count, 1)
+    }
 }
