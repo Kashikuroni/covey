@@ -99,17 +99,19 @@ public final class AppModel {
     public private(set) var splitPct: Int = 38
     public private(set) var usagePlacement: UsagePlacement = .right
     public private(set) var recents: [RecentSession] = []
-    public private(set) var usage: Usage?
-    public private(set) var plan: String?
-    public private(set) var usageError: String?
-    public private(set) var glmUsage: Usage?
-    public private(set) var glmUsageError: String?
-    public private(set) var glmUsageEnabled = true
+    // Usage/limits state lives in UsageStore; these forwarding properties keep
+    // the facade views and tests already read.
+    public var usage: Usage? { usageStore.usage }
+    public var plan: String? { usageStore.plan }
+    public var usageError: String? { usageStore.usageError }
+    public var glmUsage: Usage? { usageStore.glmUsage }
+    public var glmUsageError: String? { usageStore.glmUsageError }
     /// Per-provider display/polling toggle — off skips the network call (and,
     /// for Codex, tears down the whole subprocess) but keeps the last known
     /// snapshot around for the dimmed popover row.
-    public private(set) var claudeUsageEnabled = true
-    public private(set) var codexUsageEnabled = true
+    public var claudeUsageEnabled: Bool { usageStore.claudeUsageEnabled }
+    public var codexUsageEnabled: Bool { usageStore.codexUsageEnabled }
+    public var glmUsageEnabled: Bool { usageStore.glmUsageEnabled }
     /// Which provider the limits detail popover highlights — j/k moves it, h/l
     /// disables/enables it. Resets to `.claude` every time the popover opens;
     /// not persisted, this is transient keyboard-navigation state.
@@ -117,9 +119,9 @@ public final class AppModel {
     public private(set) var limitsSelectedProvider: LimitsProvider = .claude
     // Codex limits are consumed only in-module (TopBar) + @testable tests, so
     // these stay internal — their types (CodexRateLimitsSnapshot/State) are too.
-    private(set) var codexUsage: CodexRateLimitsSnapshot?
-    private(set) var codexPlan: String?
-    private(set) var codexState: CodexServerState = .stopped
+    var codexUsage: CodexRateLimitsSnapshot? { usageStore.codexUsage }
+    var codexPlan: String? { usageStore.codexPlan }
+    var codexState: CodexServerState { usageStore.codexState }
     public private(set) var order: [String] = []
     public private(set) var projectOrder: [String] = []
     public var filter: String = ""
@@ -220,6 +222,7 @@ public final class AppModel {
     private let fetchAccount: () async -> Account
     private let fetchGlmAccount: () async -> Account
     private let usageInterval: TimeInterval
+    private(set) var usageStore: UsageStore!
     private var usagePoller: Task<Void, Never>?
     private var glmUsagePoller: Task<Void, Never>?
     @ObservationIgnored private var codexServer: CodexAppServer?
@@ -257,6 +260,12 @@ public final class AppModel {
         self.fetchAccount = fetchAccount
         self.fetchGlmAccount = fetchGlmAccount
         self.usageInterval = usageInterval
+        // Created before any self-capturing closures read usage state.
+        usageStore = UsageStore(
+            fetchAccount: fetchAccount,
+            fetchGlmAccount: fetchGlmAccount,
+            usageInterval: usageInterval,
+            onPersist: { [weak self] in self?.persist() })
         issueBrowser.toast = { [weak self] msg in self?.showToast(msg) }
         issueBrowser.fetchBranches = { [weak self] dir in
             await self?.gitInfo(dir).branches ?? []
@@ -280,14 +289,7 @@ public final class AppModel {
         vimMode = persisted.vimMode ?? true
         projectNames = persisted.projectNames
         projects = persisted.projects ?? []
-        claudeUsageEnabled = persisted.claudeUsageEnabled ?? true
-        codexUsageEnabled = persisted.codexUsageEnabled ?? true
-        if let cached = persisted.claudeUsage { usage = cached.live }
-        plan = persisted.claudePlan
-        if let cached = persisted.codexUsage { codexUsage = cached.live }
-        codexPlan = persisted.codexPlan
-        glmUsageEnabled = persisted.glmUsageEnabled ?? true
-        if let cached = persisted.glmUsage { glmUsage = cached.live }
+        usageStore.restoreFromPersisted(persisted)
         do {
             let (list, statuses, lost, models) = try await client.list()
             sessions = list.sorted { $0.created < $1.created }
@@ -1102,9 +1104,9 @@ public final class AppModel {
         showHeader = values.showHeader
         showFooter = values.showFooter
         usagePlacement = values.usagePlacement
-        claudeUsageEnabled = values.claudeUsageEnabled
-        codexUsageEnabled = values.codexUsageEnabled
-        glmUsageEnabled = values.glmUsageEnabled
+        usageStore.claudeUsageEnabled = values.claudeUsageEnabled
+        usageStore.codexUsageEnabled = values.codexUsageEnabled
+        usageStore.glmUsageEnabled = values.glmUsageEnabled
         persist()
         if codexChanged { synchronizeCodexUsageServer() }
         offerThemeRestartAfterModalDismiss = themeChanged
@@ -1118,16 +1120,16 @@ public final class AppModel {
     }
 
     public func setClaudeUsageEnabled(_ on: Bool) {
-        claudeUsageEnabled = on
+        usageStore.claudeUsageEnabled = on
         persist()
     }
     public func setCodexUsageEnabled(_ on: Bool) {
-        codexUsageEnabled = on
+        usageStore.codexUsageEnabled = on
         persist()
         synchronizeCodexUsageServer()
     }
     public func setGlmUsageEnabled(_ on: Bool) {
-        glmUsageEnabled = on
+        usageStore.glmUsageEnabled = on
         persist()
     }
 
@@ -1137,7 +1139,7 @@ public final class AppModel {
         } else {
             codexServer?.stop()
             codexServer = nil
-            codexState = .stopped
+            usageStore.codexState = .stopped
         }
     }
 
@@ -1612,9 +1614,9 @@ public final class AppModel {
         guard glmUsageEnabled else { return }
         let acc = await fetchGlmAccount()
         var changed = false
-        if let newUsage = acc.usage { glmUsage = newUsage; changed = true }
+        if let newUsage = acc.usage { usageStore.glmUsage = newUsage; changed = true }
         if changed { persist() }
-        glmUsageError = acc.usageError
+        usageStore.glmUsageError = acc.usageError
         if let err = acc.usageError, err != glmUsageError {
             UsageLog.note("glm", [("ev", "tick"), ("err", err)])
         }
@@ -1627,10 +1629,10 @@ public final class AppModel {
         // replaces the cache on its own success, so a transient failure of
         // either never blanks out the other's last known value.
         var changed = false
-        if let newUsage = acc.usage { usage = newUsage; changed = true }
-        if let newPlan = acc.plan { plan = newPlan; changed = true }
+        if let newUsage = acc.usage { usageStore.usage = newUsage; changed = true }
+        if let newPlan = acc.plan { usageStore.plan = newPlan; changed = true }
         if changed { persist() }
-        usageError = acc.usageError
+        usageStore.usageError = acc.usageError
         if let err = acc.usageError {
             UsageLog.note("claude", [("ev", "tick"), ("err", err)])
         }
@@ -1662,16 +1664,16 @@ public final class AppModel {
     }
 
     func setCodexState(_ state: CodexServerState) {
-        codexState = state
+        usageStore.codexState = state
         switch state {
         case .active(let acc):
-            codexPlan = codexPlanLabel(acc.planType)
+            usageStore.codexPlan = codexPlanLabel(acc.planType)
         case .unauthed:
             // A different (non-chatgpt) account really has no data — unlike
             // .stopped/.starting this isn't a transient gap, so the cache
             // does not carry over.
-            codexPlan = nil
-            codexUsage = nil
+            usageStore.codexPlan = nil
+            usageStore.codexUsage = nil
         case .stopped, .starting:
             break   // keep the last-known cache; server down != data invalid
         }
@@ -1680,7 +1682,7 @@ public final class AppModel {
     /// Merge a (possibly partial) Codex snapshot into the live one, then run
     /// the same 80%-alert machinery as Claude under the "codex" marker prefix.
     func ingestCodexRateLimits(_ update: CodexRateLimitsSnapshot, now: Date = Date()) {
-        codexUsage = mergeCodex(into: codexUsage, update: update)
+        usageStore.codexUsage = mergeCodex(into: usageStore.codexUsage, update: update)
         persist()
         guard let usage = codexUsage else { return }
         let old = persisted.usageNotified ?? [:]
