@@ -223,8 +223,6 @@ public final class AppModel {
     private let fetchGlmAccount: () async -> Account
     private let usageInterval: TimeInterval
     private(set) var usageStore: UsageStore!
-    private var usagePoller: Task<Void, Never>?
-    private var glmUsagePoller: Task<Void, Never>?
     @ObservationIgnored private var codexServer: CodexAppServer?
     private let readProviderKey: @Sendable (String) -> String?
     private let writeProviderKey: @Sendable (String, String) -> Bool
@@ -265,7 +263,9 @@ public final class AppModel {
             fetchAccount: fetchAccount,
             fetchGlmAccount: fetchGlmAccount,
             usageInterval: usageInterval,
-            onPersist: { [weak self] in self?.persist() })
+            onPersist: { [weak self] in self?.persist() },
+            readMarkers: { [weak self] in self?.persisted.usageNotified ?? [:] },
+            writeMarkers: { [weak self] in self?.persisted.usageNotified = $0 })
         issueBrowser.toast = { [weak self] msg in self?.showToast(msg) }
         issueBrowser.fetchBranches = { [weak self] dir in
             await self?.gitInfo(dir).branches ?? []
@@ -328,22 +328,7 @@ public final class AppModel {
             self.connected = false
             self.toast = "daemon connection lost"
         }
-        usagePoller?.cancel()
-        usagePoller = Task { [weak self] in
-            guard let self else { return }
-            while !Task.isCancelled {
-                await self.tickUsage()
-                try? await Task.sleep(nanoseconds: UInt64(self.usageInterval * 1_000_000_000))
-            }
-        }
-        glmUsagePoller?.cancel()
-        glmUsagePoller = Task { [weak self] in
-            guard let self else { return }
-            while !Task.isCancelled {
-                await self.tickGlmUsage()
-                try? await Task.sleep(nanoseconds: UInt64(self.usageInterval * 1_000_000_000))
-            }
-        }
+        usageStore.startPolling()
         startCodexServer()
     }
 
@@ -807,7 +792,7 @@ public final class AppModel {
             providerKeyStatuses[account] = .set
             if profile.id == ProviderProfile.glm.id {
                 Task { [weak self] in
-                    await self?.tickGlmUsage()
+                    await self?.usageStore.tickGlm()
                 }
             }
             return .success
@@ -1606,50 +1591,6 @@ public final class AppModel {
         persisted.glmUsageEnabled = glmUsageEnabled
         persisted.glmUsage = glmUsage.map(PersistedUsage.init)
         store.save(persisted)
-    }
-
-    /// GLM's poll: usage-only (no plan, no window alerts — those are Claude's
-    /// 5h/7d alerting, out of scope for the read-only 5h token gauge here).
-    private func tickGlmUsage() async {
-        guard glmUsageEnabled else { return }
-        let acc = await fetchGlmAccount()
-        var changed = false
-        if let newUsage = acc.usage { usageStore.glmUsage = newUsage; changed = true }
-        if changed { persist() }
-        usageStore.glmUsageError = acc.usageError
-        if let err = acc.usageError, err != glmUsageError {
-            UsageLog.note("glm", [("ev", "tick"), ("err", err)])
-        }
-    }
-
-    private func tickUsage() async {
-        guard claudeUsageEnabled else { return }
-        let acc = await fetchAccount()
-        // usage and plan come from two independent API calls — each only
-        // replaces the cache on its own success, so a transient failure of
-        // either never blanks out the other's last known value.
-        var changed = false
-        if let newUsage = acc.usage { usageStore.usage = newUsage; changed = true }
-        if let newPlan = acc.plan { usageStore.plan = newPlan; changed = true }
-        if changed { persist() }
-        usageStore.usageError = acc.usageError
-        if let err = acc.usageError {
-            UsageLog.note("claude", [("ev", "tick"), ("err", err)])
-        }
-        // Failed fetch (nil usage) must not touch alert markers: the
-        // current window's dedup survives network gaps.
-        guard let usage = acc.usage else { return }
-        let old = persisted.usageNotified ?? [:]
-        // Sonnet's 7d window is deliberately absent: chip-only, no alerts.
-        let (alerts, marks) = limitAlerts(
-            agent: "Claude",
-            windows: [("5h", usage.fiveHour), ("7d", usage.sevenDay)],
-            notified: old, now: Date())
-        for alert in alerts { Notifier.post(alert) }
-        if marks != old {
-            persisted.usageNotified = marks
-            persist()
-        }
     }
 
     /// Spawn codex app-server if the binary resolves; wire snapshots/state in.

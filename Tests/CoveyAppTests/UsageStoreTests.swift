@@ -35,4 +35,53 @@ final class UsageStoreTests: XCTestCase {
         XCTAssertEqual(store.codexUsage?.primary?.label, "5h")
         XCTAssertEqual(store.codexPlan, "Pro")
     }
+
+    func testTickClaudeAppliesUsageAndPlan() async {
+        var calls = 0
+        let (store, _) = makeStore(fetchAccount: {
+            calls += 1
+            return Account(usage: Usage(fiveHour: UsageWindow(utilization: 50, resetUnix: nil),
+                                        sevenDay: nil, sevenDaySonnet: nil),
+                           plan: "Max")
+        })
+        await store.tickClaude()
+        XCTAssertEqual(store.usage?.fiveHour?.utilization, 50)
+        XCTAssertEqual(store.plan, "Max")
+        XCTAssertNil(store.usageError)
+        XCTAssertEqual(calls, 1)
+    }
+
+    func testTickClaudeErrorKeepsLastGoodUsage() async {
+        let good = Usage(fiveHour: UsageWindow(utilization: 10, resetUnix: nil),
+                         sevenDay: nil, sevenDaySonnet: nil)
+        var calls = 0
+        let (store, _) = makeStore(fetchAccount: {
+            calls += 1
+            return calls == 1
+                ? Account(usage: good, plan: "Max")
+                : Account(usageError: "401")
+        })
+        await store.tickClaude()
+        XCTAssertEqual(store.usage?.fiveHour?.utilization, 10)
+        await store.tickClaude()
+        XCTAssertEqual(store.usage?.fiveHour?.utilization, 10)   // last good survives
+        XCTAssertEqual(store.usageError, "401")
+        XCTAssertEqual(store.plan, "Max")                         // plan cache survives too
+    }
+
+    func testTickClaudeDisabledSkipsFetch() async {
+        var calls = 0
+        let (store, _) = makeStore(fetchAccount: { calls += 1; return Account() })
+        store.claudeUsageEnabled = false
+        await store.tickClaude()
+        XCTAssertEqual(calls, 0)
+    }
+
+    func testTickGlmDisabledSkipsFetch() async {
+        var calls = 0
+        let (store, _) = makeStore(fetchGlm: { calls += 1; return Account() })
+        store.glmUsageEnabled = false
+        await store.tickGlm()
+        XCTAssertEqual(calls, 0)
+    }
 }
