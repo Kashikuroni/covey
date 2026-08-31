@@ -32,7 +32,7 @@ enum CommandRules {
              .toggleSessionsPanel, .toggleInspector, .toggleAgentTrace,
              .toggleStatusBar, .toggleTopBar, .toggleTheme, .cycleUsagePlacement,
              .showLimitsDetail, .focusSessionList, .showKeyboardHelp,
-             .addProject, .settings:
+             .addProject, .settings, .searchLogs:
             return .enabled
 
         case .selectPreviousSession, .selectNextSession:

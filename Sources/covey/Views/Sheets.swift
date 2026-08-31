@@ -18,6 +18,7 @@ extension AppModel.Modal: Identifiable {
         case .restartAll: return "restart-all"
         case .themeRestart: return "theme-restart"
         case .addProject: return "add-project"
+        case .logSearch: return "log-search"
         }
     }
 }

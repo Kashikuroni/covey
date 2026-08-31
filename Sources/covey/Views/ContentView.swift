@@ -72,6 +72,7 @@ struct ContentView: View {
                 case .restartAll: RestartAllSheet(model: model)
                 case .themeRestart: ThemeRestartSheet(model: model)
                 case .addProject: AddProjectSheet(model: model)
+                case .logSearch: LogSearchSheet(model: model)
                 }
             }
             .installSubduedScrollbars()

@@ -14,7 +14,7 @@ enum AppCommand: String, CaseIterable, Hashable {
     case toggleStatusBar, toggleTopBar, toggleTheme, cycleUsagePlacement
     case showLimitsDetail, focusSessionList, focusAgent, focusIssues
     case focusTerminalSplit, focusTrace, showKeyboardHelp
-    case addProject, removeProject, renameProject, settings
+    case addProject, removeProject, renameProject, settings, searchLogs
 }
 
 extension AppCommand {
@@ -215,6 +215,9 @@ enum CommandCatalog {
         descriptor(.settings, "Settings…", .app,
                    ["preferences", "configuration", "настройки", "параметры приложения"],
                    .init(key: ",", modifiers: command, display: "⌘,")),
+        descriptor(.searchLogs, "Search App Logs", .app,
+                   ["logs", "usage log", "log search", "логи", "поиск по логам",
+                    "журнал", "отладка"]),
     ]
 
     private static let byID = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) })

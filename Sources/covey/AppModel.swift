@@ -44,6 +44,7 @@ public final class AppModel {
         case restartAll
         case themeRestart
         case addProject
+        case logSearch
     }
 
     public enum Focus { case sessions, terminal, inspector }
@@ -1082,6 +1083,8 @@ public final class AppModel {
             if let root = inspectorRoot { modal = .renameProject(root) }
         case .settings:
             openSettings()
+        case .searchLogs:
+            modal = .logSearch
         }
     }
 
@@ -1612,6 +1615,9 @@ public final class AppModel {
         if let newUsage = acc.usage { glmUsage = newUsage; changed = true }
         if changed { persist() }
         glmUsageError = acc.usageError
+        if let err = acc.usageError, err != glmUsageError {
+            UsageLog.note("glm", [("ev", "tick"), ("err", err)])
+        }
     }
 
     private func tickUsage() async {
@@ -1625,6 +1631,9 @@ public final class AppModel {
         if let newPlan = acc.plan { plan = newPlan; changed = true }
         if changed { persist() }
         usageError = acc.usageError
+        if let err = acc.usageError {
+            UsageLog.note("claude", [("ev", "tick"), ("err", err)])
+        }
         // Failed fetch (nil usage) must not touch alert markers: the
         // current window's dedup survives network gaps.
         guard let usage = acc.usage else { return }
