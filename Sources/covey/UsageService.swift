@@ -14,6 +14,8 @@ enum UsageService {
                 acc.usage = usage
             } else {
                 acc.usageError = "parse"
+                UsageLog.note("claude", [("path", "/api/oauth/usage"),
+                                         ("err", "parse"), ("body", UsageLog.excerpt(body))])
             }
         case .failure(let f):
             acc.usageError = f.code
@@ -26,7 +28,10 @@ enum UsageService {
 
     /// GET an OAuth endpoint with the stored token and Claude Code headers.
     static func oauthGet(_ path: String) async -> Result<Data, UsageFailure> {
-        guard let token = readToken(), !token.isEmpty else { return .failure(UsageFailure(code: "no auth")) }
+        guard let token = readToken(), !token.isEmpty else {
+            UsageLog.note("claude", [("path", path), ("err", "no auth")])
+            return .failure(UsageFailure(code: "no auth"))
+        }
         var req = URLRequest(url: URL(string: "https://api.anthropic.com\(path)")!)
         req.timeoutInterval = 10
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -35,9 +40,15 @@ enum UsageService {
         do {
             let (data, resp) = try await URLSession.shared.data(for: req)
             let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
-            guard (200..<300).contains(status) else { return .failure(UsageFailure(code: "\(status)")) }
+            guard (200..<300).contains(status) else {
+                UsageLog.note("claude", [("path", path), ("status", status),
+                                         ("body", UsageLog.excerpt(data))])
+                return .failure(UsageFailure(code: "\(status)"))
+            }
             return .success(data)
         } catch {
+            UsageLog.note("claude", [("path", path), ("err", "net"),
+                                     ("detail", "\(error)")])
             return .failure(UsageFailure(code: "net"))
         }
     }

@@ -36,13 +36,18 @@ enum GlmUsageService {
             let (data, resp) = try await URLSession.shared.data(for: req)
             let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
             guard (200..<300).contains(status) else {
+                UsageLog.note("glm", [("status", status),
+                                      ("body", UsageLog.excerpt(data))])
                 return Account(usageError: "\(status)")
             }
             guard let usage = parseGlmQuota(data) else {
+                UsageLog.note("glm", [("err", "parse"),
+                                      ("body", UsageLog.excerpt(data))])
                 return Account(usageError: "parse")
             }
             return Account(usage: usage)
         } catch {
+            UsageLog.note("glm", [("err", "net"), ("detail", "\(error)")])
             return Account(usageError: "net")
         }
     }

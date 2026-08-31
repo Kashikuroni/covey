@@ -17,6 +17,21 @@ struct JSONLFramer {
     }
 }
 
+/// Thread-safe bounded byte buffer: keeps the most recent `limit` bytes.
+private final class ByteBuffer {
+    private let lock = NSLock()
+    private var data = Data()
+    private let limit: Int
+    init(limit: Int) { self.limit = limit }
+    func append(_ chunk: Data) {
+        lock.lock(); defer { lock.unlock() }
+        data.append(chunk)
+        if data.count > limit { data.removeFirst(data.count - limit) }
+    }
+    var text: String { lock.lock(); defer { lock.unlock() }
+        return String(decoding: data, as: UTF8.self) }
+}
+
 /// Codex app-server connection state.
 enum CodexServerState: Equatable {
     case stopped
@@ -76,12 +91,26 @@ final class CodexAppServer {
     func start(codexPath: String) {
         guard !started else { return }
         started = true
+        UsageLog.note("codex", [("ev", "start"), ("path", codexPath)])
         onState?(.starting)
         process.executableURL = URL(fileURLWithPath: codexPath)
         process.arguments = ["app-server"]
         process.standardInput = inPipe
         process.standardOutput = outPipe
-        process.standardError = Pipe()
+        // Stderr is kept buffered so a crash's last words land in the log.
+        // A lock-protected box: the readabilityHandler runs off-main while the
+        // termination handler reads the tail on main.
+        let stderrBuf = ByteBuffer(limit: 4000)
+        let errPipe = Pipe()
+        errPipe.fileHandleForReading.readabilityHandler = { h in
+            let chunk = h.availableData
+            guard !chunk.isEmpty else {
+                h.readabilityHandler = nil
+                return
+            }
+            stderrBuf.append(chunk)
+        }
+        process.standardError = errPipe
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         var env = ProcessInfo.processInfo.environment
         env["PATH"] = enrichedPATH(env["PATH"], home: home)
@@ -96,12 +125,18 @@ final class CodexAppServer {
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.consume(data) } }
         }
         process.terminationHandler = { [weak self] _ in
-            DispatchQueue.main.async { MainActor.assumeIsolated { self?.onState?(.stopped) } }
+            DispatchQueue.main.async { MainActor.assumeIsolated {
+                UsageLog.note("codex", [("ev", "exit"),
+                                        ("status", self?.process.terminationStatus ?? -1),
+                                        ("stderr", stderrBuf.text)])
+                self?.onState?(.stopped)
+            } }
         }
 
         do {
             try process.run()
         } catch {
+            UsageLog.note("codex", [("ev", "spawnError"), ("detail", "\(error)")])
             onState?(.stopped)
             return
         }
@@ -150,20 +185,40 @@ final class CodexAppServer {
             // Error responses carry `id` too (no `result`); they fall through
             // to a nil parse and simply don't update — the poll retries.
             let result = msg["result"] as? [String: Any] ?? [:]
+            if result.isEmpty, let err = msg["error"] as? [String: Any] {
+                UsageLog.note("codex", [("ev", "rpcError"),
+                                        ("id", id),
+                                        ("code", err["code"] ?? "?"),
+                                        ("msg", "\(err["message"] ?? "?")")])
+            }
             switch RPC(rawValue: id) {
             case .initialize:
                 send(method: "initialized")
                 send(method: "account/read", id: RPC.account.rawValue,
                      params: ["refreshToken": true])
             case .account:
-                guard let acc = parseCodexAccount(result) else { onState?(.stopped); return }
-                guard acc.type == "chatgpt" else { onState?(.unauthed); return }
+                guard let acc = parseCodexAccount(result) else {
+                    UsageLog.note("codex", [("ev", "parseFail"), ("id", id),
+                                            ("body", "\(result)")])
+                    onState?(.stopped)
+                    return
+                }
+                guard acc.type == "chatgpt" else {
+                    UsageLog.note("codex", [("ev", "unauthed"), ("type", acc.type)])
+                    onState?(.unauthed)
+                    return
+                }
                 onState?(.active(acc))
                 startRateLimitsPolling()
             case .rateLimits:
                 if let snap = parseCodexRateLimits(result) {
                     hasSnapshot = true
+                    UsageLog.note("codex", [("ev", "snapshot"),
+                                            ("buckets", snap.buckets.count)])
                     onRateLimits?(snap)
+                } else {
+                    UsageLog.note("codex", [("ev", "parseFail"), ("id", id),
+                                            ("body", "\(result)")])
                 }
             case .none:
                 break
@@ -172,10 +227,15 @@ final class CodexAppServer {
         }
         // Push notifications carry `method`, no `id`.
         if let method = msg["method"] as? String,
-           method == "account/rateLimits/updated",
-           let params = msg["params"] as? [String: Any],
-           let snap = parseCodexRateLimits(params) {
+           method == "account/rateLimits/updated" {
+            guard let params = msg["params"] as? [String: Any],
+                  let snap = parseCodexRateLimits(params) else {
+                UsageLog.note("codex", [("ev", "parseFail"), ("push", method)])
+                return
+            }
             hasSnapshot = true
+            UsageLog.note("codex", [("ev", "snapshot"), ("push", true),
+                                    ("buckets", snap.buckets.count)])
             onRateLimits?(snap)
         }
     }
