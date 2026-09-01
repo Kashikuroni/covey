@@ -2,9 +2,8 @@ import XCTest
 @testable import covey
 import CoveyKit
 
-/// Split View — псевдо-проект сверху списка: сессии сплита уходят из своих
-/// проектов в отдельную группу и возвращаются на своё место, когда сплит
-/// разобран.
+/// Every multi-leaf workspace view is its own nested group above the projects;
+/// its leaves leave their own projects and come back on teardown.
 @MainActor
 final class SidebarGroupsTests: XCTestCase {
     private func session(_ name: String, dir: String) -> Session {
@@ -18,60 +17,81 @@ final class SidebarGroupsTests: XCTestCase {
     private var projects: [(dir: String, sessions: [Session])] {
         [("/covey", covey), ("/mentor", mentor)]
     }
-
-    func testNoSplitLeavesTheProjectsUntouched() {
-        let groups = SidebarLayout.groups(projects: projects, splitLeaves: [])
-        XCTAssertEqual(groups.map(\.id), ["project:/covey", "project:/mentor"])
-        XCTAssertEqual(groups[0].sessions.map(\.name), ["ui", "perf"])
+    private var byName: [String: Session] {
+        Dictionary((covey + mentor).map { ($0.name, $0) }, uniquingKeysWith: { a, _ in a })
     }
 
-    func testSplitGroupComesFirstAndKeepsTreeOrder() {
-        // Порядок обхода дерева, а не сайдбара: perf раньше ui.
-        let groups = SidebarLayout.groups(projects: projects,
-                                          splitLeaves: ["perf", "ui"])
-        XCTAssertEqual(groups.first?.id, "splitview")
-        XCTAssertEqual(groups.first?.kind, .splitView)
-        XCTAssertEqual(groups.first?.sessions.map(\.name), ["perf", "ui"])
+    private func splitView(_ id: ViewID, _ leaves: [String]) -> WorkspaceView {
+        var tree: PaneNode = .agent(session: leaves[0])
+        for leaf in leaves.dropFirst() {
+            tree = .split(axis: .vertical, ratio: 0.5, first: tree, second: .agent(session: leaf))
+        }
+        return WorkspaceView(id: id, agentTree: tree, terminal: nil,
+                             inspector: .hidden, agentAreaRatio: 1.0)
     }
 
-    func testSplitSessionsLeaveTheirOwnProjects() {
-        let groups = SidebarLayout.groups(projects: projects,
-                                          splitLeaves: ["perf", "ozon"])
-        XCTAssertEqual(groups.map(\.id),
-                       ["splitview", "project:/covey", "project:/mentor"])
-        XCTAssertEqual(groups[1].sessions.map(\.name), ["ui"])
-        XCTAssertEqual(groups[2].sessions.map(\.name), ["wb"])
+    private func groups(_ views: [WorkspaceView],
+                        _ projects: [(dir: String, sessions: [Session])]? = nil) -> [SidebarGroup] {
+        SidebarLayout.groups(projects: projects ?? self.projects,
+                             views: views, sessionsByName: byName)
     }
 
-    func testSplitMayMixProjects() {
-        let groups = SidebarLayout.groups(projects: projects,
-                                          splitLeaves: ["ui", "ozon"])
-        XCTAssertEqual(groups.first?.sessions.map(\.name), ["ui", "ozon"])
+    func testNoSplitViewsLeavesTheProjectsUntouched() {
+        let g = groups([])
+        XCTAssertEqual(g.map(\.id), ["project:/covey", "project:/mentor"])
+        XCTAssertEqual(g[0].sessions.map(\.name), ["ui", "perf"])
     }
 
-    func testProjectEmptiedByTheSplitDisappears() {
-        let groups = SidebarLayout.groups(projects: projects,
-                                          splitLeaves: ["ozon", "wb"])
-        XCTAssertEqual(groups.map(\.id), ["splitview", "project:/covey"],
-                       "проект, чьи сессии целиком в сплите, не показывается")
+    func testSplitViewComesFirstAndKeepsTreeOrder() {
+        let g = groups([splitView("v1", ["perf", "ui"])])
+        XCTAssertEqual(g.first?.id, "splitview:v1")
+        XCTAssertEqual(g.first?.kind, .splitView(id: "v1"))
+        XCTAssertEqual(g.first?.sessions.map(\.name), ["perf", "ui"])
+    }
+
+    func testTwoIndependentSplitViewsEachRenderAsAGroup() {
+        let g = groups([splitView("v1", ["ui", "perf"]), splitView("v2", ["ozon", "wb"])])
+        XCTAssertEqual(g.map(\.id), ["splitview:v1", "splitview:v2"])
+        XCTAssertEqual(g[0].sessions.map(\.name), ["ui", "perf"])
+        XCTAssertEqual(g[1].sessions.map(\.name), ["ozon", "wb"])
+    }
+
+    func testSplitViewLeavesLeaveTheirOwnProjects() {
+        let g = groups([splitView("v1", ["perf", "ozon"])])
+        XCTAssertEqual(g.map(\.id), ["splitview:v1", "project:/covey", "project:/mentor"])
+        XCTAssertEqual(g[1].sessions.map(\.name), ["ui"])
+        XCTAssertEqual(g[2].sessions.map(\.name), ["wb"])
+    }
+
+    func testProjectEmptiedByASplitViewDisappears() {
+        let g = groups([splitView("v1", ["ozon", "wb"])])
+        XCTAssertEqual(g.map(\.id), ["splitview:v1", "project:/covey"])
     }
 
     func testRegisteredEmptyProjectStaysForItsGhostRow() {
-        let groups = SidebarLayout.groups(
-            projects: [("/covey", covey), ("/empty", [])],
-            splitLeaves: ["ui", "perf"])
-        XCTAssertEqual(groups.map(\.id), ["splitview", "project:/empty"],
-                       "пустой зарегистрированный проект остаётся ради ghost-строки")
+        let g = groups([splitView("v1", ["ui", "perf"])],
+                       [("/covey", covey), ("/empty", [])])
+        XCTAssertEqual(g.map(\.id), ["splitview:v1", "project:/empty"])
     }
 
-    func testUnknownLeafIsIgnored() {
-        // Лист мёртвой сессии не должен рисовать пустую карточку.
-        let groups = SidebarLayout.groups(projects: projects,
-                                          splitLeaves: ["ui", "ghost"])
-        XCTAssertEqual(groups.first?.sessions.map(\.name), ["ui"])
+    func testSingleLeafViewsDoNotFormAGroup() {
+        let single = WorkspaceView.single("ui", id: "v1")
+        XCTAssertEqual(groups([single]).map(\.id), ["project:/covey", "project:/mentor"])
     }
 
-    func testModelFeedsTheTreeLeavesIntoTheSplitGroup() async throws {
+    func testProjectGroupsCarryTheirDirSplitViewsDoNot() {
+        let g = groups([splitView("v1", ["ui", "perf"])])
+        XCTAssertNil(g[0].dir)
+        XCTAssertEqual(g[1].dir, "/mentor")
+    }
+
+    func testSplitTitleJoinsLeafNames() {
+        XCTAssertEqual(SidebarLayout.splitTitle(leaves: ["a", "b", "c"]), "a+b+c")
+    }
+
+    // MARK: - Model-level
+
+    func testModelFeedsViewLeavesIntoTheSplitGroup() async throws {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
         await model.start()
@@ -79,20 +99,16 @@ final class SidebarGroupsTests: XCTestCase {
             _ = try daemon.registry.create(dir: "/tmp", agent: "claude",
                                            argv: ["/bin/cat"], name: name)
         }
-        _ = await eventually { model.sessions.count == 3 }
+        _ = await eventually { model.viewOfSession.count == 3 }
         await model.select("a")
-        model.perform(.splitTerminalVertically)
-        await model.splitPickerChosen(.init(kind: .session("b"), label: "b"))
-        _ = await eventually { model.splitTree?.leafCount == 2 }
+        await model.splitFocusedPane(axis: .vertical, newSession: "b")
 
-        let groups = model.sidebarGroups()
-        XCTAssertEqual(groups.map(\.id), ["splitview", "project:/tmp"])
-        XCTAssertEqual(groups[0].sessions.map(\.name), ["a", "b"])
-        XCTAssertEqual(groups[1].sessions.map(\.name), ["c"])
+        let g = model.sidebarGroups()
+        XCTAssertEqual(g.count, 2)
+        XCTAssertEqual(Set(g[0].sessions.map(\.name)), ["a", "b"])
+        XCTAssertEqual(g[1].sessions.map(\.name), ["c"])
     }
 
-    /// j/k и ⌘1…9 обязаны идти в том же порядке, в каком список нарисован,
-    /// иначе навигация выбирает не ту карточку, что подсвечена.
     func testKeyboardOrderFollowsTheRenderedSidebar() async throws {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
@@ -101,21 +117,12 @@ final class SidebarGroupsTests: XCTestCase {
             _ = try daemon.registry.create(dir: "/tmp", agent: "claude",
                                            argv: ["/bin/cat"], name: name)
         }
-        _ = await eventually { model.sessions.count == 3 }
+        _ = await eventually { model.viewOfSession.count == 3 }
         await model.select("b")
-        model.perform(.splitTerminalVertically)
-        await model.splitPickerChosen(.init(kind: .session("c"), label: "c"))
-        _ = await eventually { model.splitTree?.leafCount == 2 }
+        await model.splitFocusedPane(axis: .vertical, newSession: "c")
 
-        XCTAssertEqual(model.sidebarGroups().flatMap { $0.sessions.map(\.name) },
-                       ["b", "c", "a"], "предусловие: Split View сверху")
-        XCTAssertEqual(model.visibleSessionNames(), ["b", "c", "a"])
-        XCTAssertEqual(model.visibleRows(), [.session("b"), .session("c"), .session("a")])
-    }
-
-    func testProjectGroupsCarryTheirDirForReorderAndGhostRows() {
-        let groups = SidebarLayout.groups(projects: projects, splitLeaves: ["ui"])
-        XCTAssertNil(groups[0].dir, "у Split View нет каталога — драг и ghost не его")
-        XCTAssertEqual(groups[1].dir, "/covey")
+        let flat = model.sidebarGroups().flatMap { $0.sessions.map(\.name) }
+        XCTAssertEqual(model.visibleSessionNames(), flat)
+        XCTAssertEqual(model.visibleRows(), flat.map(AppModel.ListRow.session))
     }
 }

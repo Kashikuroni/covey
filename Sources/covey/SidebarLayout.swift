@@ -1,10 +1,11 @@
 import Foundation
 import CoveyKit
 
-/// Одна группа сайдбара: проект или псевдо-проект «Split View».
+/// One sidebar group: a project, or a multi-session workspace view rendered as
+/// a nested card.
 struct SidebarGroup: Identifiable, Equatable {
     enum Kind: Equatable {
-        case splitView
+        case splitView(id: ViewID)
         case project(dir: String)
     }
 
@@ -13,41 +14,43 @@ struct SidebarGroup: Identifiable, Equatable {
 
     var id: String {
         switch kind {
-        case .splitView: return "splitview"
+        case .splitView(let vid): return "splitview:\(vid)"
         case .project(let dir): return "project:\(dir)"
         }
     }
 
-    /// Каталог проекта; nil у Split View — драг-перестановка и ghost-строка
-    /// принадлежат только настоящим проектам.
+    /// Project directory; nil for a split-view group — drag-reorder and the
+    /// ghost row belong only to real projects.
     var dir: String? {
         if case .project(let dir) = kind { return dir }
         return nil
     }
 }
 
-/// Порядок групп сайдбара. Split View — отдельная сущность над проектами:
-/// сессии сплита показываются в нём (в порядке обхода дерева) и уходят из
-/// своих проектов, а после разбора сплита возвращаются на прежние места —
-/// пользовательский `order` при этом не трогается.
+/// Sidebar group order. Every multi-leaf view is its own nested group, above
+/// the projects (like the single "Split View" group of Split Session, now N).
+/// A view's leaves leave their projects and return on teardown — the user's
+/// `order` is never touched.
 enum SidebarLayout {
-    static let splitTitle = "Split View"
+    static func splitTitle(leaves: [String]) -> String {
+        leaves.joined(separator: "+")
+    }
 
     static func groups(projects: [(dir: String, sessions: [Session])],
-                       splitLeaves: [String]) -> [SidebarGroup] {
-        guard !splitLeaves.isEmpty else {
-            return projects.map { SidebarGroup(kind: .project(dir: $0.dir),
-                                               sessions: $0.sessions) }
+                       views: [WorkspaceView],
+                       sessionsByName: [String: Session]) -> [SidebarGroup] {
+        let splitViews = views.filter { $0.isSplit }.sorted { $0.id < $1.id }
+        let taken = Set(splitViews.flatMap(\.leaves))
+
+        var result = splitViews.map { v in
+            SidebarGroup(kind: .splitView(id: v.id),
+                         sessions: v.leaves.compactMap { sessionsByName[$0] })
         }
-        let byName = Dictionary(projects.flatMap(\.sessions).map { ($0.name, $0) },
-                                uniquingKeysWith: { first, _ in first })
-        let taken = Set(splitLeaves)
-        var result = [SidebarGroup(kind: .splitView,
-                                   sessions: splitLeaves.compactMap { byName[$0] })]
+
         for project in projects {
             let rest = project.sessions.filter { !taken.contains($0.name) }
-            // Проект, чьи сессии целиком уехали в сплит, из списка уходит;
-            // зарегистрированный пустой остаётся ради ghost-строки.
+            // A project whose sessions all moved into split views disappears;
+            // a registered empty project stays for its ghost row.
             guard !rest.isEmpty || project.sessions.isEmpty else { continue }
             result.append(SidebarGroup(kind: .project(dir: project.dir), sessions: rest))
         }

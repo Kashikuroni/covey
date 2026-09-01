@@ -102,7 +102,7 @@ final class TerminalPaneRemountTests: XCTestCase {
 
         model.perform(.splitTerminalVertically)
         await model.splitPickerChosen(.init(kind: .session("agent-b"), label: "agent-b"))
-        _ = await eventually { model.splitTree?.leafCount == 2 }
+        _ = await eventually { model.activeView?.leaves.count == 2 }
         let openRestored = await eventually {
             guard let root = window.contentView else { return false }
             return self.terminalViews(in: root).count == 2
@@ -126,7 +126,7 @@ final class TerminalPaneRemountTests: XCTestCase {
         }
 
         model.perform(.closeTerminalSplit)
-        _ = await eventually { model.splitTree == nil }
+        _ = await eventually { (model.activeView.map { !$0.isSplit } ?? true) }
         let closeRestored = await eventually {
             guard let root = window.contentView else { return false }
             return self.terminalViews(in: root).count == 1
@@ -284,9 +284,8 @@ final class TerminalPaneRemountTests: XCTestCase {
         }
         _ = await eventually { model.sessions.count == 2 }
         await model.select("agent-a")
-        model.perform(.splitTerminalVertically)
-        await model.splitPickerChosen(.init(kind: .terminal, label: "Терминал"))
-        _ = await eventually { model.companionShell == "agent-a+sh" }
+        await model.toggleActiveTerminal()
+        _ = await eventually { model.activeView?.terminal?.shellSession != nil }
 
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
                               styleMask: [.titled], backing: .buffered, defer: false)
@@ -358,7 +357,7 @@ final class TerminalPaneRemountTests: XCTestCase {
         await model.select("agent-a")
         model.perform(.splitTerminalVertically)
         await model.splitPickerChosen(.init(kind: .session("agent-b"), label: "agent-b"))
-        _ = await eventually { model.splitTree?.leafCount == 2 }
+        _ = await eventually { model.activeView?.leaves.count == 2 }
 
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 700),
                               styleMask: [.titled], backing: .buffered, defer: false)

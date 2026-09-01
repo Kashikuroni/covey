@@ -41,7 +41,7 @@ struct SplitPickerView: View {
 
     private func row(_ item: SplitPickerItem, selected: Bool) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: item.kind == .terminal ? "terminal" : "app.dashed")
+            Image(systemName: "app.dashed")
                 .frame(width: 16)
             Text(item.label).lineLimit(1)
             Spacer()

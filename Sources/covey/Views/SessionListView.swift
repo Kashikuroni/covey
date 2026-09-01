@@ -86,7 +86,7 @@ struct SessionListView: View {
     /// в приложении к сайдбару).
     private func groupHeader(_ group: SidebarGroup) -> some View {
         let title = group.dir.map { model.displayName(forDir: $0) }
-            ?? SidebarLayout.splitTitle
+            ?? SidebarLayout.splitTitle(leaves: group.sessions.map(\.name))
         return HStack(spacing: 6) {
             Text(title.uppercased())
                 .font(.system(size: 11, weight: .semibold))

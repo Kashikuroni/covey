@@ -12,7 +12,7 @@ struct TerminalPaneView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if model.visibleSplitTree != nil || model.companionShell != nil {
+            if (model.activeView?.isSplit ?? false) || model.activeView?.terminal != nil {
                 splitBody
             } else if let name = model.selected {
                 VStack(spacing: 0) {
@@ -36,8 +36,8 @@ struct TerminalPaneView: View {
             // поэтому `selected` идёт в геометрию отдельным листом.
             let frames = PanelLayout.splitFrames(
                 tree: model.visibleSplitTree, soloAgent: model.selected,
-                companionShell: model.companionShell,
-                companionRatio: model.companionRatio,
+                companionShell: model.activeView?.terminal?.shellSession,
+                companionRatio: model.activeView?.agentAreaRatio ?? 0.6,
                 size: geo.size, gutter: Tokens.gutter)
             ZStack(alignment: .topLeading) {
                 ForEach(leaves(frames)) { leaf in
@@ -52,7 +52,7 @@ struct TerminalPaneView: View {
                         .frame(width: area.width, height: area.height)
                         .offset(x: area.minX, y: area.minY)
                 }
-                if let shell = model.companionShell, let frame = frames.companion {
+                if let shell = model.activeView?.terminal?.shellSession, let frame = frames.companion {
                     paneStack(shell, zone: .terminalSplit, label: "Terminal")
                         .frame(width: frame.width, height: frame.height)
                         .offset(x: frame.minX, y: frame.minY)
@@ -60,7 +60,7 @@ struct TerminalPaneView: View {
                 ForEach(frames.dividers.indices, id: \.self) { i in
                     divider(for: frames.dividers[i])
                 }
-                if model.companionShell != nil, let area = frames.agentArea,
+                if model.activeView?.terminal != nil, let area = frames.agentArea,
                    let col = frames.companion {
                     columnDivider(areaWidth: area.width, colMinX: col.minX,
                                   height: geo.size.height)

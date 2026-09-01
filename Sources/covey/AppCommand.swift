@@ -10,6 +10,7 @@ enum AppCommand: String, CaseIterable, Hashable {
     case createGitHubIssue, openIssueList, promoteWorktree, deleteSessionBranch
     case cleanupMergedBranches, returnToRepositoryRoot
     case splitTerminalVertically, splitTerminalHorizontally, closeTerminalSplit
+    case toggleViewTerminal
     case toggleSessionsPanel, toggleInspector, toggleAgentTrace
     case toggleStatusBar, toggleTopBar, toggleTheme, cycleUsagePlacement
     case showLimitsDetail, focusSessionList, focusAgent, focusIssues
@@ -166,9 +167,11 @@ enum CommandCatalog {
         descriptor(.splitTerminalHorizontally, "Split Terminal Horizontally", .terminal,
                    ["horizontal split", "split below", "горизонтальный сплит", "разделить терминал горизонтально"],
                    .init(key: "d", modifiers: commandShift, display: "⌘⇧D")),
-        descriptor(.closeTerminalSplit, "Close Terminal Split", .terminal,
+        descriptor(.closeTerminalSplit, "Close Pane / Terminal", .terminal,
                    ["close split", "remove shell", "закрыть сплит", "убрать разделение терминала"],
                    .init(key: "w", modifiers: command, display: "⌘W")),
+        descriptor(.toggleViewTerminal, "Open Terminal", .terminal,
+                   ["terminal", "shell", "open terminal", "терминал", "оболочка"]),
 
         descriptor(.toggleSessionsPanel, "Toggle Sessions Panel", .view,
                    ["show hide sessions", "панель сессий", "показать сессии", "скрыть сессии"]),
