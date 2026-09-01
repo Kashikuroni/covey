@@ -379,24 +379,18 @@ public final class AppModel {
         Task { await relinkOrRespawnShells() }
     }
 
+    /// Selection only — does not move keyboard focus into the pane (j/k walks
+    /// the list, Enter / ⌃2 focuses the agent). Setting `selected` re-picks the
+    /// active view, so selecting any leaf of a hidden split brings its whole
+    /// grid back.
     public func select(_ name: String?) async {
         guard let name else { await clearSelection(); return }
-        // Сессия сплита: фокус в её панель, вместе с ней возвращается вся
-        // раскладка её View (спека «Сайдбар и фокус»).
-        if viewForSession(name)?.isSplit == true {
-            focusPane(name)
-            await syncPaneAttachments()
-            if inspectorMode == .trace { await subscribeTrace() }
-            return
-        }
         guard name != selected else { return }
         selected = name
         selectedProjectRoot = nil
         focusedPane = name
         lastFocusedAgent = name
         historyMode = false
-        // `selected` только что переопределил, какая сетка на экране, —
-        // attach приводится к ней целиком, а не по одной панели.
         await syncPaneAttachments()
         if inspectorMode == .trace { await subscribeTrace() }
     }

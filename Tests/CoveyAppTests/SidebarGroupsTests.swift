@@ -81,8 +81,8 @@ final class SidebarGroupsTests: XCTestCase {
         XCTAssertEqual(g[1].dir, "/mentor")
     }
 
-    func testSplitTitleJoinsLeafNames() {
-        XCTAssertEqual(SidebarLayout.splitTitle(leaves: ["a", "b", "c"]), "a+b+c")
+    func testSplitViewGroupTitleIsConstant() {
+        XCTAssertEqual(SidebarLayout.splitTitle, "Split View")
     }
 
     // MARK: - Model-level

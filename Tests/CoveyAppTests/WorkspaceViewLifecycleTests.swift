@@ -100,6 +100,19 @@ import CoveyKit
         XCTAssertEqual(model.viewOfSession["a2"], "view-1")
     }
 
+    func testSelectingASplitLeafDoesNotGrabTerminalFocus() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let model = try await splitAB(daemon)   // active view {a,b}, focus b
+        model.setFocus(.sessions)
+        await model.select("a")                  // j/k lands on the other leaf
+        XCTAssertEqual(model.selected, "a")
+        XCTAssertEqual(model.activeView?.leaves.sorted(), ["a", "b"], "grid still shown")
+        XCTAssertEqual(model.focus, .sessions, "keyboard stays in the list")
+        model.perform(.focusAgent)               // Enter / ⌃2
+        XCTAssertEqual(model.focus, .terminal)
+        XCTAssertEqual(model.focusedPane, "a")
+    }
+
     func testTwoSessionsGetSeparateViews() async throws {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)

@@ -32,9 +32,7 @@ struct SidebarGroup: Identifiable, Equatable {
 /// A view's leaves leave their projects and return on teardown — the user's
 /// `order` is never touched.
 enum SidebarLayout {
-    static func splitTitle(leaves: [String]) -> String {
-        leaves.joined(separator: "+")
-    }
+    static let splitTitle = "Split View"
 
     static func groups(projects: [(dir: String, sessions: [Session])],
                        views: [WorkspaceView]) -> [SidebarGroup] {
