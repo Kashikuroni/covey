@@ -58,10 +58,6 @@ final class TerminalPaneRemountTests: XCTestCase {
     }
 
     func testSplitToggleKeepsAgentAltBufferAndKittyKeyboardState() async throws {
-        // BLOCKED until Task 8 (recursive tree rendering): the interim view
-        // renders a single pane, so the split-open remount has no view to
-        // exercise. Unskip in Task 8.
-        try XCTSkipIf(true, "blocked by Task 8 tree rendering")
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
         await model.start()
