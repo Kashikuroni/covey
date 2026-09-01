@@ -9,6 +9,8 @@ extension AppModel {
 
     var activeViewID: ViewID? { selected.flatMap { viewOfSession[$0] } }
     var activeView: WorkspaceView? { activeViewID.flatMap { views[$0] } }
+    /// The active view's terminal shell session, if the zone is open and linked.
+    var activeShell: String? { activeView?.terminal?.shellSession }
 
     func viewForSession(_ name: String) -> WorkspaceView? {
         viewOfSession[name].flatMap { views[$0] }
@@ -22,12 +24,13 @@ extension AppModel {
         mutateForView(id, body)
     }
 
-    /// Mutate a view by id in place and persist.
-    func mutateForView(_ id: ViewID, _ body: (inout WorkspaceView) -> Void) {
+    /// Mutate a view by id in place. Persists unless `persist` is false (callers
+    /// doing several map edits at once pass false and persist once at the end).
+    func mutateForView(_ id: ViewID, persist: Bool = true, _ body: (inout WorkspaceView) -> Void) {
         guard var v = views[id] else { return }
         body(&v)
         views[id] = v
-        persistWorkspaceViews()
+        if persist { persistWorkspaceViews() }
     }
 
     /// New standalone single-leaf view for a session that has none.
@@ -38,71 +41,79 @@ extension AppModel {
         viewOfSession[session] = id
     }
 
-    /// Detaches a session from its current view (for a split-merge move). The
-    /// caller re-maps `viewOfSession` afterwards. Deletes an emptied view and
-    /// kills its shell.
-    func dropView(of session: String) async {
-        guard let id = viewOfSession[session], var v = views[id] else { return }
-        let r = v.removeLeaf(session)
-        viewOfSession[session] = nil
-        if r.emptied {
-            if let shell = v.terminal?.shellSession { await kill(shell) }
-            views[id] = nil
-        } else {
-            views[id] = v
-        }
-        persistWorkspaceViews()
-    }
-
-    /// A session vanished (kill / `.exited`). Drop its leaf; delete the view
-    /// (killing its shell) when it empties. Returns the focus successor within a
-    /// surviving multi-leaf view.
-    @discardableResult
-    func removeSessionFromView(_ name: String) -> String? {
-        guard let id = viewOfSession[name], var v = views[id] else { return nil }
+    /// Pull one leaf out of its view: prune the tree, clear the `viewOfSession`
+    /// entry, and delete an emptied view. Returns the focus successor within a
+    /// surviving multi-leaf view and the shell that now needs killing (the
+    /// emptied view's, if any). Does not persist — the caller does.
+    func detachLeaf(_ name: String) -> (successor: String?, shellToKill: String?) {
+        guard let id = viewOfSession[name], var v = views[id] else { return (nil, nil) }
         let r = v.removeLeaf(name)
         viewOfSession[name] = nil
         if r.emptied {
-            if let shell = v.terminal?.shellSession { Task { await kill(shell) } }
             views[id] = nil
-        } else {
-            views[id] = v
+            return (nil, v.terminal?.shellSession)
         }
-        persistWorkspaceViews()
-        return r.successor
+        views[id] = v
+        return (r.successor, nil)
     }
 
-    /// Rename a leaf: rewrite the tree and move the `viewOfSession` key.
+    /// A session left its view for a split-merge (it stays alive; the caller
+    /// re-maps it). Deletes an emptied source view and kills its shell.
+    func dropView(of session: String) async {
+        let d = detachLeaf(session)
+        if let shell = d.shellToKill { await kill(shell) }
+        persistWorkspaceViews()
+    }
+
+    /// A session vanished (kill / `.exited`). Returns the focus successor within
+    /// a surviving multi-leaf view.
+    @discardableResult
+    func removeSessionFromView(_ name: String) -> String? {
+        let d = detachLeaf(name)
+        if let shell = d.shellToKill { Task { await kill(shell) } }
+        persistWorkspaceViews()
+        return d.successor
+    }
+
+    /// Rename a leaf: rewrite the tree and move the `viewOfSession` key. Does not
+    /// persist — the rename flow's `persist()` covers workspace views too.
     func renameSessionInView(_ old: String, to new: String) {
-        guard let id = viewOfSession[old], var v = views[id] else { return }
-        v.renameLeaf(old, to: new)
-        views[id] = v
+        guard let id = viewOfSession[old] else { return }
+        mutateForView(id, persist: false) { $0.renameLeaf(old, to: new) }
         viewOfSession[old] = nil
         viewOfSession[new] = id
-        persistWorkspaceViews()
     }
 
-    /// Close the active view's terminal zone and kill its shell. The view lives.
+    /// Close the active view's terminal zone and kill its shell. The view lives;
+    /// if focus was on the shell it falls back to an agent pane.
     func closeActiveTerminal() {
         guard let id = activeViewID, let v = views[id], v.terminal != nil else { return }
         let shell = v.terminal?.shellSession
+        let refocus = focusedPane == shell
+        let agent = lastFocusedAgent ?? v.leaves.first
         mutateForView(id) { $0.terminal = nil }
         if let shell { Task { await kill(shell) } }
+        if refocus, let agent { focusPane(agent) }
+    }
+
+    /// Copy the view maps into the persisted struct (id-sorted for stable JSON).
+    /// Does not write to disk.
+    func snapshotWorkspaceViews() {
+        persisted.workspaceViews = views.values.sorted { $0.id < $1.id }.map(\.persisted)
+        persisted.viewOfSession = viewOfSession
     }
 
     func persistWorkspaceViews() {
-        persisted.workspaceViews = views.values
-            .sorted { $0.id < $1.id }
-            .map(\.persisted)
-        persisted.viewOfSession = viewOfSession
+        snapshotWorkspaceViews()
         store.save(persisted)
     }
 
     // MARK: - Startup: load / migrate / sanitize
 
-    /// Load persisted views, or migrate the legacy layout on first run. Then
-    /// sanitize dead leaves / shells.
-    func loadOrMigrateViews() {
+    /// Load persisted views, or migrate the legacy layout on first run.
+    /// `legacyShell` is the companion shell name that `restoreLegacySplitAxes`
+    /// kept from an even older `splitAxes` payload, if any.
+    func loadOrMigrateViews(legacyShell: String? = nil) {
         if let pv = persisted.workspaceViews {
             for p in pv {
                 let v = WorkspaceView(persisted: p)
@@ -110,66 +121,44 @@ extension AppModel {
                 for leaf in v.leaves { viewOfSession[leaf] = v.id }
             }
         } else {
-            migrateLegacyLayout()
+            migrateLegacyLayout(shell: legacyShell ?? persisted.companionShell)
         }
         sanitizeViews()
         persistWorkspaceViews()
     }
 
-    private func migrateLegacyLayout() {
+    private func migrateLegacyLayout(shell: String?) {
         let live = Set(sessions.filter { $0.companionOf == nil && $0.hidden != true }.map(\.name))
         for name in live { ensureView(for: name) }
 
-        guard let legacy = persisted.splitTree.map(PaneNode.init(persisted:)) else {
-            attachLegacyShell(toViewOf: legacyShellParent())
-            clearLegacyFields()
-            return
-        }
-        let leaves = legacy.leaves.filter { live.contains($0) }
-        guard leaves.count >= 2 else {
-            attachLegacyShell(toViewOf: legacyShellParent())
-            clearLegacyFields()
-            return
-        }
-        // Merge the legacy tree's leaves into one view.
-        let id = newViewID()
-        for leaf in leaves {
-            if let old = viewOfSession[leaf], old != id { views[old] = nil }
-            viewOfSession[leaf] = id
-        }
-        var v = WorkspaceView(id: id,
-                              agentTree: sanitizedTree(legacy, live: Set(leaves)),
-                              terminal: nil,
-                              inspector: persisted.showInspector == true
-                                ? .shown(mode: persisted.inspectorMode == "trace" ? .trace : .issues)
-                                : .hidden,
-                              agentAreaRatio: persisted.companionRatio ?? 1.0)
-        if let shell = persisted.companionShell,
-           sessions.contains(where: { $0.name == shell }) {
-            v.terminal = TerminalZone(shellSession: shell)
-        }
-        views[id] = v
-        clearLegacyFields()
-    }
+        let legacyTree = persisted.splitTree.map(PaneNode.init(persisted:))
+        let liveLeaves = legacyTree?.leaves.filter { live.contains($0) } ?? []
+        let shellIsLive = shell.map { s in sessions.contains { $0.name == s } } ?? false
 
-    /// The agent session a legacy `companionShell` was anchored to.
-    private func legacyShellParent() -> String? {
-        guard let shell = persisted.companionShell else { return nil }
-        return sessions.first { $0.name == shell }?.companionOf
-    }
-
-    private func attachLegacyShell(toViewOf parent: String?) {
-        guard let shell = persisted.companionShell,
-              sessions.contains(where: { $0.name == shell }) else { return }
-        let target = parent.flatMap { viewOfSession[$0] } ?? activeViewID
-        guard let target else { return }
-        mutateForView(target) {
-            $0.terminal = TerminalZone(shellSession: shell)
-            $0.agentAreaRatio = persisted.companionRatio ?? 1.0
+        if let legacyTree, liveLeaves.count >= 2 {
+            // Merge the legacy tree's leaves into one view (sanitizeViews prunes
+            // any dead leaf afterwards).
+            let id = newViewID()
+            for leaf in liveLeaves {
+                if let old = viewOfSession[leaf], old != id { views[old] = nil }
+                viewOfSession[leaf] = id
+            }
+            views[id] = WorkspaceView(
+                id: id, agentTree: legacyTree,
+                terminal: shellIsLive ? TerminalZone(shellSession: shell) : nil,
+                inspector: persisted.showInspector == true
+                    ? InspectorZone(persistedString: persisted.inspectorMode ?? "issues") : .hidden,
+                agentAreaRatio: persisted.companionRatio)
+        } else if shellIsLive {
+            // Old single-pane + shell layout: attach the shell to its anchor's view.
+            let parent = shell.flatMap { s in sessions.first { $0.name == s }?.companionOf }
+            if let target = parent.flatMap({ viewOfSession[$0] }) ?? activeViewID {
+                mutateForView(target, persist: false) {
+                    $0.terminal = TerminalZone(shellSession: shell)
+                    $0.agentAreaRatio = persisted.companionRatio
+                }
+            }
         }
-    }
-
-    private func clearLegacyFields() {
         persisted.splitTree = nil
         persisted.companionShell = nil
         persisted.companionRatio = nil
@@ -177,20 +166,13 @@ extension AppModel {
         persisted.inspectorMode = nil
     }
 
-    private func sanitizedTree(_ tree: PaneNode, live: Set<String>) -> PaneNode {
-        var t: PaneNode? = tree
-        for dead in tree.leaves where !live.contains(dead) {
-            t = t?.removing(session: dead).tree ?? t
-        }
-        return t ?? tree
-    }
-
     func sanitizeViews() {
         let live = Set(sessions.map(\.name))
-        for (id, var v) in views {
+        for (id, initial) in views {
+            var v = initial
             var emptied = false
             for dead in v.leaves where !live.contains(dead) {
-                if v.removeLeaf(dead).emptied { emptied = true }
+                emptied = emptied || v.removeLeaf(dead).emptied
             }
             if emptied {
                 if let shell = v.terminal?.shellSession { Task { await kill(shell) } }
@@ -198,14 +180,13 @@ extension AppModel {
                 continue
             }
             if let shell = v.terminal?.shellSession, !live.contains(shell) {
-                v.terminal = TerminalZone(shellSession: nil)   // keep zone open, relink pending
+                v.terminal = TerminalZone(shellSession: nil)   // zone open, relink pending
             }
             views[id] = v
         }
-        for name in Array(viewOfSession.keys) where views[viewOfSession[name]!] == nil {
-            viewOfSession[name] = nil
-        }
-        for name in viewOfSession.keys where !(views[viewOfSession[name]!]?.leaves.contains(name) ?? false) {
+        // `viewOfSession` must map exactly the leaves of existing views.
+        for name in Array(viewOfSession.keys)
+        where !(views[viewOfSession[name]!]?.leaves.contains(name) ?? false) {
             viewOfSession[name] = nil
         }
         for s in sessions where s.companionOf == nil && s.hidden != true
@@ -222,37 +203,47 @@ extension AppModel {
         if v.terminal != nil { closeActiveTerminal(); return }
         mutateForView(id) { $0.terminal = TerminalZone(shellSession: nil) }
         await spawnShell(for: id)
+        if let shell = views[id]?.terminal?.shellSession { focusPane(shell) }
     }
 
     /// Spawn a hidden shell at the project root for a view whose terminal zone
-    /// is open but unlinked.
+    /// is open but unlinked. Links from the create response — no shared pending
+    /// slot, so relinking several views in a row is race-free.
     func spawnShell(for viewID: ViewID) async {
         guard let v = views[viewID], v.terminal != nil, v.terminal?.shellSession == nil
         else { return }
-        let anchorName = (focusedAgentPane.map { [$0] } ?? []) + v.leaves
-        guard let anchor = anchorName.lazy.compactMap({ n in self.sessions.first { $0.name == n } }).first
+        let candidates = (focusedAgentPane.map { [$0] } ?? []) + v.leaves
+        guard let anchor = candidates.lazy
+            .compactMap({ n in self.sessions.first { $0.name == n } }).first
         else { return }
-        let root = projectRoot(sessionRoot(anchor))
-        pendingShellForView = viewID
         do {
-            _ = try await client.create(dir: root, agent: "sh", terminal: true, hidden: true)
+            let shell = try await client.create(dir: sessionRoot(anchor), agent: "sh",
+                                                terminal: true, hidden: true)
+            guard views[viewID]?.terminal != nil else {   // view closed while awaiting
+                await kill(shell.name); return
+            }
+            mutateForView(viewID) { $0.terminal?.shellSession = shell.name }
+            await attachPane(shell.name)
         } catch {
-            pendingShellForView = nil
             toast = errorText(error)
             mutateForView(viewID) { $0.terminal = nil }
         }
     }
 
     /// Relink surviving shells; respawn any whose daemon session is gone.
+    /// Fired off the main `start()` path so the window paints first.
     func relinkOrRespawnShells() async {
         let live = Set(sessions.map(\.name))
-        for (id, v) in views {
-            guard v.terminal != nil else { continue }
-            if let shell = v.terminal?.shellSession, live.contains(shell) {
-                await attachPane(shell)
-            } else {
-                mutateForView(id) { $0.terminal?.shellSession = nil }
-                await spawnShell(for: id)
+        await withTaskGroup(of: Void.self) { group in
+            for (id, v) in views where v.terminal != nil {
+                group.addTask { @MainActor in
+                    if let shell = v.terminal?.shellSession, live.contains(shell) {
+                        await self.attachPane(shell)
+                    } else {
+                        self.mutateForView(id) { $0.terminal?.shellSession = nil }
+                        await self.spawnShell(for: id)
+                    }
+                }
             }
         }
     }

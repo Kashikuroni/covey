@@ -17,9 +17,6 @@ final class SidebarGroupsTests: XCTestCase {
     private var projects: [(dir: String, sessions: [Session])] {
         [("/covey", covey), ("/mentor", mentor)]
     }
-    private var byName: [String: Session] {
-        Dictionary((covey + mentor).map { ($0.name, $0) }, uniquingKeysWith: { a, _ in a })
-    }
 
     private func splitView(_ id: ViewID, _ leaves: [String]) -> WorkspaceView {
         var tree: PaneNode = .agent(session: leaves[0])
@@ -32,8 +29,7 @@ final class SidebarGroupsTests: XCTestCase {
 
     private func groups(_ views: [WorkspaceView],
                         _ projects: [(dir: String, sessions: [Session])]? = nil) -> [SidebarGroup] {
-        SidebarLayout.groups(projects: projects ?? self.projects,
-                             views: views, sessionsByName: byName)
+        SidebarLayout.groups(projects: projects ?? self.projects, views: views)
     }
 
     func testNoSplitViewsLeavesTheProjectsUntouched() {

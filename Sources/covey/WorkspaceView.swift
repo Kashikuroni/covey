@@ -21,6 +21,12 @@ enum InspectorZone: Equatable {
 
     var isShown: Bool { if case .shown = self { return true }; return false }
     var mode: AppModel.InspectorMode? { if case .shown(let m) = self { return m }; return nil }
+
+    /// Persisted form: `InspectorMode.rawValue` when open, nil when hidden.
+    init(persistedString s: String?) {
+        self = s.flatMap(AppModel.InspectorMode.init(rawValue:)).map(InspectorZone.shown) ?? .hidden
+    }
+    var persistedString: String? { mode?.rawValue }
 }
 
 /// One workspace view: the agent-pane tree plus its optional terminal and
@@ -31,13 +37,13 @@ struct WorkspaceView: Identifiable, Equatable {
     var agentTree: PaneNode
     var terminal: TerminalZone?
     var inspector: InspectorZone
-    /// Width share of the agent zone vs. the terminal column (0.15…0.85);
-    /// unused while `terminal == nil`.
-    var agentAreaRatio: Double
+    /// Width share of the agent zone vs. the terminal column (0.15…0.85).
+    /// nil = never sized for a terminal; the renderer falls back to a default.
+    var agentAreaRatio: Double?
 
     static func single(_ session: String, id: ViewID) -> WorkspaceView {
         WorkspaceView(id: id, agentTree: .agent(session: session),
-                      terminal: nil, inspector: .hidden, agentAreaRatio: 1.0)
+                      terminal: nil, inspector: .hidden, agentAreaRatio: nil)
     }
 
     var leaves: [String] { agentTree.leaves }
@@ -66,38 +72,22 @@ struct WorkspaceView: Identifiable, Equatable {
 
 extension WorkspaceView {
     init(persisted p: PersistedWorkspaceView) {
-        let inspector: InspectorZone
-        switch p.inspector {
-        case "issues": inspector = .shown(mode: .issues)
-        case "trace":  inspector = .shown(mode: .trace)
-        default:       inspector = .hidden
-        }
-        let terminal: TerminalZone?
-        if p.terminalShell != nil || p.terminalOpen == true {
-            terminal = TerminalZone(shellSession: p.terminalShell)
-        } else {
-            terminal = nil
-        }
+        let terminal = (p.terminalShell != nil || p.terminalOpen == true)
+            ? TerminalZone(shellSession: p.terminalShell) : nil
         self.init(id: p.id,
                   agentTree: PaneNode(persisted: p.agentTree),
                   terminal: terminal,
-                  inspector: inspector,
-                  agentAreaRatio: p.agentAreaRatio ?? 1.0)
+                  inspector: InspectorZone(persistedString: p.inspector),
+                  agentAreaRatio: p.agentAreaRatio)
     }
 
     var persisted: PersistedWorkspaceView {
-        let inspectorStr: String?
-        switch inspector {
-        case .hidden:         inspectorStr = nil
-        case .shown(.issues): inspectorStr = "issues"
-        case .shown(.trace):  inspectorStr = "trace"
-        }
-        return PersistedWorkspaceView(
+        PersistedWorkspaceView(
             id: id,
             agentTree: agentTree.persisted,
             terminalShell: terminal?.shellSession,
             terminalOpen: terminal != nil ? true : nil,
-            inspector: inspectorStr,
+            inspector: inspector.persistedString,
             agentAreaRatio: agentAreaRatio)
     }
 }

@@ -70,14 +70,12 @@ public final class AppModel {
     var viewOfSession: [String: ViewID] = [:]
     /// Test seam for deterministic view ids.
     @ObservationIgnored var newViewID: () -> ViewID = { UUID().uuidString }
-    /// The view awaiting a `hidden` shell session from a pending `client.create`.
-    @ObservationIgnored var pendingShellForView: ViewID?
     /// Последняя фокусная agent-панель: цель замены кликом по сайдбару, пока
     /// фокус стоит на шелл-колонке.
-    @ObservationIgnored private var lastFocusedAgent: String?
+    @ObservationIgnored var lastFocusedAgent: String?
     /// Панель-цель операций сплита: фокусная agent-панель (не колонка).
     var focusedAgentPane: String? {
-        if let focusedPane, focusedPane != activeView?.terminal?.shellSession { return focusedPane }
+        if let focusedPane, focusedPane != activeShell { return focusedPane }
         return lastFocusedAgent ?? selected
     }
     /// Дерево agent-панелей активной View, когда их ≥2; иначе nil.
@@ -171,7 +169,7 @@ public final class AppModel {
         return selectedProjectRoot != nil
     }
     /// The right drawer shows either GitHub Issues or the selected agent's trace.
-    public enum InspectorMode: Equatable { case issues, trace }
+    public enum InspectorMode: String, Equatable { case issues, trace }
     public var inspectorMode: InspectorMode { activeView?.inspector.mode ?? .issues }
     /// Agent trace for the selected session (streamed from the daemon).
     public private(set) var traceEvents: [TraceEvent] = []
@@ -334,15 +332,15 @@ public final class AppModel {
             modelByName = models
             connected = true
             toast = nil
-            // Legacy migration: splitAxes → splitTree (writes persisted.splitTree
-            // in place, which the workspace-view migration then consumes).
+            // Legacy: the oldest `splitAxes` payload keeps one companion shell;
+            // the workspace-view migration then folds it into a view.
+            var legacyShell: String?
             if let axes = persisted.splitAxes, !axes.isEmpty {
-                await restoreLegacySplitAxes(axes)
+                legacyShell = await restoreLegacySplitAxes(axes)
             }
-            // Workspace Views: load the persisted views, or migrate the legacy
-            // splitTree + companionShell + inspector on first run. Sanitize
-            // dead leaves / shells; shell relink happens once the event loop is up.
-            loadOrMigrateViews()
+            // Workspace Views: load persisted views, or migrate the legacy
+            // splitTree + companionShell + inspector on first run.
+            loadOrMigrateViews(legacyShell: legacyShell)
             if let lost, !lost.isEmpty {
                 // Sessions a dead daemon lost: surface them as relaunchable
                 // recents, oldest first so the newest ends on top.
@@ -376,8 +374,9 @@ public final class AppModel {
         }
         usageStore.startPolling()
         usageStore.startCodexServerIfNeeded()
-        // Event loop is up: relink each view's shell, respawning any the daemon lost.
-        await relinkOrRespawnShells()
+        // Event loop is up: relink / respawn each view's shell without blocking
+        // the first paint.
+        Task { await relinkOrRespawnShells() }
     }
 
     public func select(_ name: String?) async {
@@ -387,6 +386,7 @@ public final class AppModel {
         if viewForSession(name)?.isSplit == true {
             focusPane(name)
             await syncPaneAttachments()
+            if inspectorMode == .trace { await subscribeTrace() }
             return
         }
         guard name != selected else { return }
@@ -398,7 +398,6 @@ public final class AppModel {
         // `selected` только что переопределил, какая сетка на экране, —
         // attach приводится к ней целиком, а не по одной панели.
         await syncPaneAttachments()
-        if let comp = companion(of: name) { await attachPane(comp.name) }        // legacy shim (Task 6)
         if inspectorMode == .trace { await subscribeTrace() }
     }
 
@@ -418,7 +417,7 @@ public final class AppModel {
     /// жизнью и в расчёт входит как есть.
     private func syncPaneAttachments() async {
         var wanted = Set(agentPanes)
-        if let shell = activeView?.terminal?.shellSession { wanted.insert(shell) }
+        if let shell = activeShell { wanted.insert(shell) }
         for name in wanted where !attachedNames.contains(name) {
             await attachPane(name)
         }
@@ -498,7 +497,7 @@ public final class AppModel {
 
     public func focusPane(_ name: String) {
         focusedPane = name
-        if name == activeView?.terminal?.shellSession {
+        if name == activeShell {
             // Инвариант: фокус на колонке не меняет selected.
             setFocus(.terminal)
         } else {
@@ -528,27 +527,23 @@ public final class AppModel {
         mutateActiveView { $0.agentAreaRatio = min(0.85, max(0.15, ratio)) }
     }
 
-    /// Legacy `splitAxes` → `persisted.splitTree` / `persisted.companionShell`
-    /// (спека «Миграция»): первая живая companion-пара по порядку сайдбара
-    /// становится 1-панельным деревом с шелл-колонкой, остальные шеллы
-    /// закрываются. Однократно: `splitAxes` стираются. `loadOrMigrateViews`
-    /// затем разбирает это в View.
-    func restoreLegacySplitAxes(_ axes: [String: String]) async {
-        guard !axes.isEmpty else { return }
+    /// Oldest legacy format (`splitAxes`): keep the first live companion pair by
+    /// sidebar order as a single shell, close the rest. Returns the surviving
+    /// shell name for `loadOrMigrateViews` to fold into a view; clears `splitAxes`.
+    func restoreLegacySplitAxes(_ axes: [String: String]) async -> String? {
+        guard !axes.isEmpty else { return nil }
         let pairs = sessions.compactMap { s -> (parent: String, companion: String)? in
             guard let parent = s.companionOf else { return nil }
             return (parent: parent, companion: s.name)
         }
         let ordered = orderedSessions().flatMap(\.sessions).map(\.name)
+        persisted.splitAxes = nil
         guard let choice = splitMigrationChoice(parentCompanions: pairs,
                                                 orderedParentNames: ordered) else {
-            persisted.splitAxes = nil
-            return
+            return nil
         }
-        persisted.companionShell = choice.keep.companion
         for shell in choice.close { await kill(shell) }
-        persisted.splitAxes = nil
-        store.save(persisted)
+        return choice.keep.companion
     }
 
     @discardableResult
@@ -829,10 +824,7 @@ public final class AppModel {
     /// Группы сайдбара: Split View сверху отдельной сущностью, ниже проекты
     /// без уехавших в сплит сессий (`SidebarLayout`).
     func sidebarGroups() -> [SidebarGroup] {
-        SidebarLayout.groups(projects: orderedSessions(),
-                             views: Array(views.values),
-                             sessionsByName: Dictionary(sessions.map { ($0.name, $0) },
-                                                        uniquingKeysWith: { a, _ in a }))
+        SidebarLayout.groups(projects: orderedSessions(), views: Array(views.values))
     }
 
     public func setFilter(_ s: String) { filter = s }
@@ -1080,7 +1072,7 @@ public final class AppModel {
             canMoveSessionDown: canMoveDown,
             terminalFocused: focus == .terminal && inputMode == .normal,
             agentPaneCount: agentPaneCount,
-            canCloseFocusedPane: focusedPane == activeView?.terminal?.shellSession
+            canCloseFocusedPane: focusedPane == activeShell
                 || (visibleSplitTree?.contains(session: focusedPane ?? "") ?? false))
     }
 
@@ -1417,7 +1409,7 @@ public final class AppModel {
             case .glm: setGlmUsageEnabled(false)
             }
         case .splitFocusToggle:
-            guard let shell = activeView?.terminal?.shellSession else { return }
+            guard let shell = activeShell else { return }
             focusPane(focusedPane == shell ? (focusedAgentPane ?? shell) : shell)
         case .cycleFocus(let forward):
             cycleFocus(forward: forward)
@@ -1445,7 +1437,7 @@ public final class AppModel {
             setFocus(.inspector)
             activateIssues()
         case .terminalSplit:
-            guard let shell = activeView?.terminal?.shellSession else {
+            guard let shell = activeShell else {
                 toast = "no terminal — Command-P › Open Terminal"
                 return
             }
@@ -1472,7 +1464,7 @@ public final class AppModel {
         } else if let selected {
             zones.append(("pane:\(selected)", { self.focusPane(selected) }))
         }
-        if let shell = activeView?.terminal?.shellSession {
+        if let shell = activeShell {
             zones.append(("pane:\(shell)", { self.focusPane(shell) }))
         }
         if showInspector {
@@ -1531,7 +1523,7 @@ public final class AppModel {
                                             axis: axis, newSession: newSession)
         else { return }
         await dropView(of: newSession)                 // kills its shell, clears mapping
-        mutateForView(active.id) { $0.agentTree = tree }
+        mutateForView(active.id, persist: false) { $0.agentTree = tree }
         viewOfSession[newSession] = active.id
         persistWorkspaceViews()
         focusPane(newSession)
@@ -1542,20 +1534,16 @@ public final class AppModel {
     /// agent-панель сплита — вернуть сессию в свою отдельную View; единственная
     /// панель — no-op (спека «Разбор сплита»).
     func closeFocusedPane() {
-        if let active = activeView, focusedPane == active.terminal?.shellSession {
+        if let shell = activeShell, focusedPane == shell {
             closeActiveTerminal()
             return
         }
         guard let active = activeView, active.isSplit,
               let focused = focusedAgentPane, active.leaves.contains(focused) else { return }
-        var v = active
-        let r = v.removeLeaf(focused)
-        views[active.id] = v
-        let newID = newViewID()
-        views[newID] = .single(focused, id: newID)
-        viewOfSession[focused] = newID
+        let successor = detachLeaf(focused).successor   // never emptied: isSplit ⇒ ≥2 leaves
+        ensureView(for: focused)                        // the closed pane returns as its own view
         persistWorkspaceViews()
-        if let successor = r.successor { focusPane(successor) }
+        if let successor { focusPane(successor) }
     }
 
     private func selectedSession() -> Session? {
@@ -1775,6 +1763,7 @@ public final class AppModel {
         persisted.codexPlan = codexPlan
         persisted.glmUsageEnabled = glmUsageEnabled
         persisted.glmUsage = glmUsage.map(PersistedUsage.init)
+        snapshotWorkspaceViews()
         store.save(persisted)
     }
 
@@ -1799,17 +1788,8 @@ public final class AppModel {
             sessions.removeAll { $0.name == session.name }
             sessions.append(session)
             sessions.sort { $0.created < $1.created }
-            // A pending hidden shell for a workspace view's terminal zone.
-            if session.hidden == true, let vid = pendingShellForView {
-                pendingShellForView = nil
-                mutateForView(vid) { $0.terminal = TerminalZone(shellSession: session.name) }
-                Task {
-                    await attachPane(session.name)
-                    focusPane(session.name)
-                }
-                return
-            }
             // Every visible session belongs to exactly one workspace view.
+            // (Hidden shells are linked directly from `spawnShell`'s response.)
             if session.companionOf == nil, session.hidden != true {
                 ensureView(for: session.name)
                 persistWorkspaceViews()

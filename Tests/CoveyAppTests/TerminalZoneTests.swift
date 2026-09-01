@@ -28,6 +28,17 @@ import CoveyKit
         XCTAssertNil(model.viewOfSession[shell])  // the shell is not a workspace-view session
     }
 
+    func testToggleGivesTheColumnRoomAndFocusesIt() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let model = try await modelWithWorktreeSession(daemon)
+        await model.toggleActiveTerminal()
+        _ = await eventually { model.activeView?.terminal?.shellSession != nil }
+        // Unsized (nil) resolves to a default that leaves room for the column;
+        // a stored 1.0 would collapse it to zero width.
+        XCTAssertLessThanOrEqual(model.activeView!.agentAreaRatio ?? 0.6, 0.85)
+        XCTAssertEqual(model.focusedPane, model.activeView?.terminal?.shellSession)
+    }
+
     func testToggleTwiceClosesAndKillsShell() async throws {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let model = try await modelWithWorktreeSession(daemon)

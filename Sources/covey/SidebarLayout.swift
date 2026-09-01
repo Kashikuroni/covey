@@ -37,15 +37,28 @@ enum SidebarLayout {
     }
 
     static func groups(projects: [(dir: String, sessions: [Session])],
-                       views: [WorkspaceView],
-                       sessionsByName: [String: Session]) -> [SidebarGroup] {
-        let splitViews = views.filter { $0.isSplit }.sorted { $0.id < $1.id }
+                       views: [WorkspaceView]) -> [SidebarGroup] {
+        let splitViews = views.filter(\.isSplit)
+        guard !splitViews.isEmpty else {
+            return projects.map { SidebarGroup(kind: .project(dir: $0.dir), sessions: $0.sessions) }
+        }
+
+        let flat = projects.flatMap(\.sessions)
+        let byName = Dictionary(flat.map { ($0.name, $0) }, uniquingKeysWith: { a, _ in a })
+        let position = Dictionary(uniqueKeysWithValues: flat.enumerated().map { ($1.name, $0) })
         let taken = Set(splitViews.flatMap(\.leaves))
 
-        var result = splitViews.map { v in
-            SidebarGroup(kind: .splitView(id: v.id),
-                         sessions: v.leaves.compactMap { sessionsByName[$0] })
+        // Split views ride above the projects, each ordered by its earliest
+        // member's sidebar position so a split stays near where its sessions were.
+        func earliest(_ v: WorkspaceView) -> Int {
+            v.leaves.compactMap { position[$0] }.min() ?? Int.max
         }
+        var result = splitViews
+            .sorted { earliest($0) < earliest($1) }
+            .map { v in
+                SidebarGroup(kind: .splitView(id: v.id),
+                             sessions: v.leaves.compactMap { byName[$0] })
+            }
 
         for project in projects {
             let rest = project.sessions.filter { !taken.contains($0.name) }

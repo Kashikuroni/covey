@@ -212,8 +212,28 @@ import CoveyKit
 
         let view = try XCTUnwrap(model.views.values.first { $0.leaves.sorted() == ["a", "b"] })
         XCTAssertEqual(view.terminal?.shellSession, "a+sh")
-        XCTAssertEqual(view.agentAreaRatio, 0.55, accuracy: 0.0001)
+        XCTAssertEqual(view.agentAreaRatio ?? 0, 0.55, accuracy: 0.0001)
         XCTAssertNil(model.persisted.splitTree)
         XCTAssertNil(model.persisted.companionShell)
+    }
+
+    /// Oldest `splitAxes` format: the surviving companion becomes its agent's
+    /// terminal zone; the extra shell is closed.
+    func testLegacySplitAxesKeepsFirstPairClosesTheRest() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        var seed = PersistedState()
+        seed.splitAxes = ["a": "v", "b": "h"]
+        let (model, _) = try makeModel(daemon, seed: seed)
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"], name: "a")
+        _ = try daemon.registry.create(dir: "/tmp", agent: "sh", argv: ["/bin/cat"],
+                                       name: "a+sh", companionOf: "a")
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"], name: "b")
+        _ = try daemon.registry.create(dir: "/tmp", agent: "sh", argv: ["/bin/cat"],
+                                       name: "b+sh", companionOf: "b")
+        await model.start()
+
+        XCTAssertEqual(model.viewForSession("a")?.terminal?.shellSession, "a+sh")
+        _ = await eventually { daemon.registry.get(name: "b+sh") == nil }
+        XCTAssertNil(model.persisted.splitAxes)
     }
 }
