@@ -65,6 +65,7 @@ struct ContentView: View {
                 case .kill(let name): KillSheet(model: model, name: name)
                 case .rename(let name): RenameSheet(model: model, name: name)
                 case .renameProject(let dir): RenameProjectSheet(model: model, dir: dir)
+                case .splitPicker(let axis): SplitPickerView(model: model, axis: axis)
                 case .promote(let name): PromoteSheet(model: model, name: name)
                 case .deleteBranch(let name): DeleteBranchSheet(model: model, name: name)
                 case .cleanup(let dir): CleanupSheet(model: model, dir: dir)

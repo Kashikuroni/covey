@@ -19,6 +19,7 @@ extension AppModel.Modal: Identifiable {
         case .themeRestart: return "theme-restart"
         case .addProject: return "add-project"
         case .logSearch: return "log-search"
+        case .splitPicker(let axis): return "split-picker-\(axis.rawValue)"
         }
     }
 }

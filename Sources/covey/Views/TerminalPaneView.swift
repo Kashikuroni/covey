@@ -11,9 +11,9 @@ struct TerminalPaneView: View {
     var body: some View {
         VStack(spacing: 0) {
             if let name = model.selected {
-                if let comp = model.companion(of: name) {
-                    splitBody(main: name, companion: comp.name,
-                              vertical: model.splitAxis(for: name) == "v")
+                if let comp = model.companion(of: name)?.name ?? model.companionShell {
+                    splitBody(main: name, companion: comp,
+                              vertical: true)   // Task 8 заменит на рекурсивное дерево
                 } else {
                     VStack(spacing: 0) {
                         paneHeader("Agent", zone: .agent, name: name)

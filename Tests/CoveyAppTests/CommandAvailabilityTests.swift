@@ -15,7 +15,7 @@ final class CommandAvailabilityTests: XCTestCase {
         XCTAssertEqual(CommandRules.availability(
             for: .closeTerminalSplit,
             context: .init(hasSelectedSession: true)),
-                       .disabled(reason: "No terminal split"))
+                       .disabled(reason: "Nothing to close"))
     }
 
     func testSessionCyclingRequiresVisibleSessions() {
@@ -31,7 +31,8 @@ final class CommandAvailabilityTests: XCTestCase {
 
     func testCloseSplitRequiresTerminalFocus() {
         var context = CommandContext(hasSelectedSession: true,
-                                     hasTerminalSplit: true)
+                                     hasTerminalSplit: true,
+                                     canCloseFocusedPane: true)
 
         XCTAssertEqual(CommandRules.availability(for: .closeTerminalSplit,
                                                  context: context),

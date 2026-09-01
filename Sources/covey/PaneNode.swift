@@ -2,8 +2,9 @@ import Foundation
 import CoveyKit
 
 /// Axis of a `.split` node: vertical = side-by-side (новая панель справа),
-/// horizontal = stacked (новая панель снизу).
-enum PaneAxis: String, Codable, Equatable {
+/// horizontal = stacked (новая панель снизу). Public: живёт в case публичного
+/// `AppModel.Modal.splitPicker`.
+public enum PaneAxis: String, Codable, Equatable {
     case vertical, horizontal
 }
 

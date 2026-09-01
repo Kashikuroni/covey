@@ -2,112 +2,6 @@ import XCTest
 @testable import covey
 import CoveyKit
 
-@MainActor
-final class SplitTests: XCTestCase {
-    func testSplitGuardsAndLifecycle() async throws {
-        let daemon = try TestDaemon(); defer { daemon.stop() }
-        let (model, _) = try makeModel(daemon)
-        await model.start()
-
-        // Guard: no selection -> disabled, nothing created.
-        model.perform(.splitTerminalVertically)
-        XCTAssertEqual(model.commandAvailability(.splitTerminalVertically),
-                       .disabled(reason: "No session selected"))
-        XCTAssertNil(model.toast)
-        XCTAssertTrue(daemon.registry.list().isEmpty)
-
-        _ = try daemon.registry.create(dir: "/tmp", agent: "claude",
-                                       argv: ["/bin/cat"], name: "agent")
-        _ = await eventually { model.sessions.contains { $0.name == "agent" } }
-        await model.select("agent")
-        XCTAssertEqual(model.focusedPane, "agent")
-
-        model.perform(.splitTerminalVertically)
-        let created = await eventually { model.companion(of: "agent") != nil }
-        XCTAssertTrue(created)
-        XCTAssertEqual(model.companion(of: "agent")?.name, "agent+sh")
-
-        // Companions are invisible to cards, numbers and counts.
-        XCTAssertFalse(model.visibleSessionNames().contains("agent+sh"))
-        XCTAssertEqual(model.counts.total, 1)
-        XCTAssertFalse(model.orderedSessions().flatMap(\.sessions)
-            .contains { $0.companionOf != nil })
-
-        // The fresh companion takes the pane focus.
-        let focused = await eventually { model.focusedPane == "agent+sh" }
-        XCTAssertTrue(focused)
-
-        // A second split request must not create a second companion.
-        model.perform(.splitTerminalVertically)
-        let grew = await eventually(timeout: 0.6) { daemon.registry.list().count > 2 }
-        XCTAssertFalse(grew, "split with a live companion only refocuses")
-
-        // ⌃\ toggles between parent and companion.
-        model.apply(.splitFocusToggle)
-        XCTAssertEqual(model.focusedPane, "agent")
-        model.apply(.splitFocusToggle)
-        XCTAssertEqual(model.focusedPane, "agent+sh")
-
-        // A transient overlay owns the keyboard even though terminal focus is
-        // retained logically so it can be restored when the overlay closes.
-        model.perform(.showLimitsDetail)
-        XCTAssertEqual(model.commandAvailability(.closeTerminalSplit),
-                       .disabled(reason: "Terminal is not focused"))
-        model.perform(.closeTerminalSplit)
-        XCTAssertEqual(model.inputMode, .limits)
-        let closedBehindLimits = await eventually(timeout: 0.6) {
-            model.companion(of: "agent") == nil
-        }
-        XCTAssertFalse(closedBehindLimits)
-        model.apply(.closeOverlay)
-        XCTAssertEqual(model.commandAvailability(.closeTerminalSplit), .enabled)
-
-        // Close: the companion dies, the split collapses, focus returns.
-        model.perform(.closeTerminalSplit)
-        let closed = await eventually { model.companion(of: "agent") == nil }
-        XCTAssertTrue(closed)
-        XCTAssertEqual(model.focusedPane, "agent")
-        // The dead shell is not a recent.
-        XCTAssertFalse(model.recents.contains { $0.name == "agent+sh" })
-
-        daemon.registry.kill(name: "agent")
-    }
-
-    func testSplitAxisPersists() async throws {
-        let daemon = try TestDaemon(); defer { daemon.stop() }
-        let statePath = "\(NSTemporaryDirectory())covey-split-\(UInt32.random(in: 0..<UInt32.max)).json"
-        let path = daemon.path
-        func newModel() throws -> AppModel {
-            let client = IPCClient(path: path)
-            try client.connect()
-            return AppModel(
-                client: client,
-                makeClient: { let c = IPCClient(path: path); try c.connect(); return c },
-                store: StateStore(path: statePath, debounce: 0))
-        }
-        let model = try newModel()
-        await model.start()
-        _ = try daemon.registry.create(dir: "/tmp", agent: "claude",
-                                       argv: ["/bin/cat"], name: "agent")
-        _ = await eventually { model.sessions.contains { $0.name == "agent" } }
-        await model.select("agent")
-        model.perform(.splitTerminalHorizontally)
-        XCTAssertEqual(model.splitAxis(for: "agent"), "h")
-        XCTAssertEqual(model.splitAxis(for: "other"), "v", "default axis is vertical")
-
-        // The axis survives into a fresh model over the same store.
-        let saved = await eventually {
-            StateStore(path: statePath).load().splitAxes?["agent"] == "h"
-        }
-        XCTAssertTrue(saved)
-        let model2 = try newModel()
-        await model2.start()
-        XCTAssertEqual(model2.splitAxis(for: "agent"), "h")
-
-        daemon.registry.kill(name: "agent")
-    }
-}
-
 // MARK: - Pane tree state (Split Session)
 
 @MainActor final class PaneTreeStateTests: XCTestCase {
@@ -183,5 +77,169 @@ final class SplitTests: XCTestCase {
         model.sanitizeSplitTree()
         XCTAssertNil(model.splitTree, "мёртвый лист схлопнул дерево до одного листа → nil")
         XCTAssertNil(model.companionShell, "мёртвая колонка сброшена")
+    }
+}
+
+// MARK: - Picker model (чистая логика)
+
+@MainActor final class SplitPickerModelTests: XCTestCase {
+    private func session(_ name: String, dir: String = "/tmp",
+                         companionOf: String? = nil) -> Session {
+        Session(name: name, dir: dir, cwd: dir, agent: "claude", created: 0,
+                companionOf: companionOf)
+    }
+
+    func testItemsTerminalFirstThenProjectSessionsExcludingTreeAndHidden() {
+        let sessions = [
+            session("a", dir: "/p"), session("b", dir: "/p"),
+            session("other", dir: "/p"), session("foreign", dir: "/q"),
+            session("hidden", dir: "/p", companionOf: "a"),
+        ]
+        let tree = PaneNode.split(axis: .vertical, ratio: 0.5,
+                                  first: .agent(session: "a"), second: .agent(session: "b"))
+        let items = SplitPicker.items(projectSessions: sessions, tree: tree,
+                                      companionShell: nil, companionRoot: nil,
+                                      projectRoot: "/p")
+        XCTAssertEqual(items.map(\.kind), [.terminal, .session("other")],
+                       "a и b уже в дереве, hidden невидим, /q чужой проект")
+    }
+
+    func testTerminalDecisionFocusCreateReplace() {
+        XCTAssertEqual(SplitPicker.terminalDecision(
+            companionShell: "s", companionRoot: "/p", projectRoot: "/p"), .focusExisting)
+        XCTAssertEqual(SplitPicker.terminalDecision(
+            companionShell: nil, companionRoot: nil, projectRoot: "/p"), .create)
+        XCTAssertEqual(SplitPicker.terminalDecision(
+            companionShell: "s", companionRoot: "/q", projectRoot: "/p"),
+            .replaceForeign(oldShell: "s"))
+    }
+}
+
+// MARK: - Split flow (интеграция с демоном)
+
+@MainActor final class SplitFlowTests: XCTestCase {
+    func testPickerSplitFocusesNewPaneAndAttaches() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"], name: "a")
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"], name: "b")
+        _ = await eventually { model.sessions.count == 2 }
+        await model.select("a")
+        model.perform(.splitTerminalVertically)   // открывает модалку
+        XCTAssertEqual(model.modal, .splitPicker(.vertical))
+        await model.splitPickerChosen(.init(kind: .session("b"), label: "b"))
+        guard case .split(_, _, let first, let second)? = model.splitTree else {
+            return XCTFail("expected tree")
+        }
+        XCTAssertEqual(first, .agent(session: "a"))
+        XCTAssertEqual(second, .agent(session: "b"))
+        XCTAssertEqual(model.focusedPane, "b")
+        XCTAssertEqual(model.selected, "b")
+        XCTAssertTrue(model.attachedNames.contains("b"))
+    }
+
+    func testTerminalChoiceCreatesShellAtProjectRootAndTakesColumn() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"], name: "a")
+        _ = await eventually { model.sessions.count == 1 }
+        await model.select("a")
+        model.perform(.splitTerminalHorizontally)
+        await model.splitPickerChosen(.init(kind: .terminal, label: "Терминал"))
+        let shellAppeared = await eventually {
+            model.companionShell == "a+sh" && model.focusedPane == "a+sh"
+        }
+        XCTAssertTrue(shellAppeared)
+        XCTAssertEqual(daemon.registry.get(name: "a+sh")?.dir,
+                       daemon.registry.get(name: "a")?.dir,
+                       "шелл в корне проекта (тестовый корень = dir сессии)")
+    }
+
+    func testSecondTerminalChoiceRefocusesInsteadOfDuplicating() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"], name: "a")
+        _ = await eventually { model.sessions.count == 1 }
+        await model.select("a")
+        model.perform(.splitTerminalVertically)
+        await model.splitPickerChosen(.init(kind: .terminal, label: "Терминал"))
+        _ = await eventually { model.companionShell == "a+sh" }
+        await model.focusPane("a")                        // фокус с колонки на агента
+        model.perform(.splitTerminalVertically)
+        await model.splitPickerChosen(.init(kind: .terminal, label: "Терминал"))
+        _ = await eventually(timeout: 0.6) { model.focusedPane == "a+sh" }
+        XCTAssertEqual(daemon.registry.list().count, 2, "второй шелл не создаётся")
+    }
+
+    func testCmdWRemovesAgentFromTreeSessionStaysAlive() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"], name: "a")
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"], name: "b")
+        _ = await eventually { model.sessions.count == 2 }
+        await model.select("a")
+        await model.splitPickerChosen(.init(kind: .session("b"), label: "b"))
+        // фокус на b: закрыть — b возвращается в список живой
+        await model.focusPane("b")
+        model.perform(.closeTerminalSplit)
+        let collapsed = await eventually { model.splitTree == nil }
+        XCTAssertTrue(collapsed)
+        XCTAssertEqual(model.focusedPane, "a")
+        XCTAssertEqual(model.selected, "a")
+        XCTAssertNotNil(daemon.registry.get(name: "b"), "сессия жива")
+        XCTAssertTrue(model.visibleSessionNames().contains("b"))
+    }
+
+    func testExitedSessionAutoRepairsTree() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"], name: "a")
+        _ = try daemon.registry.create(dir: "/tmp", agent: "sleep", argv: ["/bin/sleep", "0.2"], name: "b")
+        _ = await eventually { model.sessions.count == 2 }
+        await model.select("a")
+        await model.splitPickerChosen(.init(kind: .session("b"), label: "b"))
+        let died = await eventually { model.sessions.first { $0.name == "b" } == nil }
+        XCTAssertTrue(died, "sleep завершается и тянет .exited")
+        let repaired = await eventually { model.splitTree == nil && model.focusedPane == "a" }
+        XCTAssertTrue(repaired, "дерево схлопнулось, фокус у наследника")
+    }
+
+    func testRenameMigratesTreeNodes() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"], name: "a")
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"], name: "b")
+        _ = await eventually { model.sessions.count == 2 }
+        await model.select("a")
+        await model.splitPickerChosen(.init(kind: .session("b"), label: "b"))
+        await model.rename("b", to: "bb")
+        XCTAssertEqual(model.splitTree?.leaves, ["a", "bb"])
+        XCTAssertEqual(model.focusedPane, "bb")
+    }
+
+    func testLimitEightDisablesSplitCommands() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"], name: "s1")
+        _ = await eventually { model.sessions.count == 1 }
+        await model.select("s1")
+        for i in 2...8 {
+            _ = try daemon.registry.create(dir: "/tmp", agent: "claude",
+                                           argv: ["/bin/cat"], name: "s\(i)")
+        }
+        _ = await eventually { model.sessions.count == 8 }
+        for i in 2...8 {
+            await model.splitPickerChosen(.init(kind: .session("s\(i)"), label: "s\(i)"))
+        }
+        XCTAssertEqual(model.agentPaneCount, 8)
+        XCTAssertEqual(model.commandAvailability(.splitTerminalVertically),
+                       .disabled(reason: "Split limit reached (8 panes)"))
     }
 }

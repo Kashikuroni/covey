@@ -45,6 +45,7 @@ public final class AppModel {
         case themeRestart
         case addProject
         case logSearch
+        case splitPicker(PaneAxis)
     }
 
     public enum Focus { case sessions, terminal, inspector }
@@ -93,6 +94,9 @@ public final class AppModel {
             }
         }
     }
+    /// Ось, с которой открыта модалка сплита (выбор «Терминал» ось не
+    /// касается — хранится на время модалки).
+    @ObservationIgnored private var pendingSplitAxis: PaneAxis?
     @ObservationIgnored private var offerThemeRestartAfterModalDismiss = false
     @ObservationIgnored private var toastDismiss: Task<Void, Never>?
     /// How long a transient toast stays before auto-dismissing (test-tunable).
@@ -465,9 +469,8 @@ public final class AppModel {
             // Инвариант: фокус на колонке не меняет selected.
             setFocus(.terminal)
         } else {
-            if splitTree?.contains(session: name) == true || selected == nil {
-                selected = name
-            }
+            // Инвариант спеки: selected = сессия фокусной agent-панели.
+            selected = name
             lastFocusedAgent = name
             setFocus(.terminal)
         }
@@ -615,14 +618,19 @@ public final class AppModel {
         do { try await client.rename(name: name, newName: newName) }
         catch { toast = errorText(error); return }
         // Migrate name-keyed state so a rename doesn't orphan it.
-        if var axes = persisted.splitAxes, let axis = axes.removeValue(forKey: name) {
-            axes[newName] = axis
-            persisted.splitAxes = axes
-        }
         if var map = persisted.issueBySession, let issue = map.removeValue(forKey: name) {
             map[newName] = issue
             persisted.issueBySession = map
         }
+        // Pane identities are session names: migrate the tree and the column.
+        if let tree = splitTree, tree.contains(session: name) {
+            splitTree = tree.replacing(session: name, with: newName)
+        }
+        // Якорь переименовали: демон переименовал и его шелл (<new>+sh).
+        if companionShell == "\(name)+sh" { companionShell = "\(newName)+sh" }
+        if focusedPane == name { focusedPane = newName }
+        if lastFocusedAgent == name { lastFocusedAgent = newName }
+        persistSplitLayout()
         persist()
         if name == selected {
             selected = nil            // select() guard: force the re-attach chain
@@ -755,10 +763,6 @@ public final class AppModel {
 
     public func companion(of name: String) -> Session? {
         sessions.first { $0.companionOf == name }
-    }
-
-    public func splitAxis(for name: String) -> String {
-        persisted.splitAxes?[name] ?? "v"
     }
 
     public var counts: (total: Int, running: Int, waiting: Int) {
@@ -1030,7 +1034,10 @@ public final class AppModel {
             visibleSessionCount: visibleSessionNames().count,
             canMoveSessionUp: index.map { $0 > 0 } ?? false,
             canMoveSessionDown: canMoveDown,
-            terminalFocused: focus == .terminal && inputMode == .normal)
+            terminalFocused: focus == .terminal && inputMode == .normal,
+            agentPaneCount: agentPaneCount,
+            canCloseFocusedPane: focusedPane == companionShell
+                || (splitTree?.contains(session: focusedPane ?? "") ?? false))
     }
 
     func perform(_ command: AppCommand) {
@@ -1103,13 +1110,11 @@ public final class AppModel {
             }
 
         case .splitTerminalVertically:
-            openSplit(axis: "v")
+            openSplitPicker(axis: .vertical)
         case .splitTerminalHorizontally:
-            openSplit(axis: "h")
+            openSplitPicker(axis: .horizontal)
         case .closeTerminalSplit:
-            if let companion = selected.flatMap(companion(of:)) {
-                Task { await kill(companion.name) }
-            }
+            closeFocusedPane()
 
         case .toggleSessionsPanel:
             setShowSessions(!showSessions)
@@ -1361,8 +1366,8 @@ public final class AppModel {
             case .glm: setGlmUsageEnabled(false)
             }
         case .splitFocusToggle:
-            guard let selected, let comp = companion(of: selected) else { return }
-            focusPane(focusedPane == comp.name ? selected : comp.name)
+            guard let shell = companionShell else { return }
+            focusPane(focusedPane == shell ? (focusedAgentPane ?? shell) : shell)
         case .cycleFocus(let forward):
             cycleFocus(forward: forward)
         }
@@ -1378,8 +1383,8 @@ public final class AppModel {
             sendTerminalCommand(.blur)
             setFocus(.sessions)
         case .agent:
-            guard let selected else { toast = "no session"; return }
-            focusPane(selected)
+            guard let target = focusedAgentPane else { toast = "no session"; return }
+            focusPane(target)
         case .issues:
             guard showInspector else {
                 toast = "inspector hidden — Command-P › Toggle Inspector"
@@ -1389,11 +1394,11 @@ public final class AppModel {
             setFocus(.inspector)
             activateIssues()
         case .terminalSplit:
-            guard let selected, let comp = companion(of: selected) else {
+            guard let shell = companionShell else {
                 toast = "no split — Command-P › Split Terminal Vertically or Horizontally"
                 return
             }
-            focusPane(comp.name)
+            focusPane(shell)
         case .trace:
             guard showInspector else {
                 toast = "inspector hidden — Command-P › Toggle Inspector"
@@ -1409,11 +1414,15 @@ public final class AppModel {
         var zones: [(id: String, activate: () -> Void)] = [
             ("sessions", { self.sendTerminalCommand(.blur); self.setFocus(.sessions) })
         ]
-        if let selected {
-            zones.append(("pane:\(selected)", { self.focusPane(selected) }))
-            if let comp = companion(of: selected) {
-                zones.append(("pane:\(comp.name)", { self.focusPane(comp.name) }))
+        if let tree = splitTree {
+            for leaf in tree.leaves {
+                zones.append(("pane:\(leaf)", { self.focusPane(leaf) }))
             }
+        } else if let selected {
+            zones.append(("pane:\(selected)", { self.focusPane(selected) }))
+        }
+        if let shell = companionShell {
+            zones.append(("pane:\(shell)", { self.focusPane(shell) }))
         }
         if showInspector {
             zones.append(("inspector", {
@@ -1433,23 +1442,93 @@ public final class AppModel {
         zones[next].activate()
     }
 
-    private func openSplit(axis: String) {
+    private func openSplitPicker(axis: PaneAxis) {
         inputMode = .normal
-        guard let s = selectedSession() else { toast = "no session"; return }
-        if let comp = companion(of: s.name) {
-            focusPane(comp.name)
+        guard selectedSession() != nil else { toast = "no session"; return }
+        pendingSplitAxis = axis
+        modal = .splitPicker(axis)
+    }
+
+    /// Пункты модалки: «Терминал» первым, ниже сессии проекта `selected`
+    /// в порядке `orderedSessions()` (спека «Модалка выбора»).
+    func splitPickerItems(for axis: PaneAxis) -> [SplitPickerItem] {
+        let root = selectedSession().map(sessionRoot)
+        let shellRoot = companionShell
+            .flatMap { shell in sessions.first { $0.name == shell } }
+            .map(sessionRoot)
+        return SplitPicker.items(projectSessions: sessions, tree: splitTree,
+                                 companionShell: companionShell,
+                                 companionRoot: shellRoot, projectRoot: root)
+    }
+
+    /// Выбор в модалке (SplitPickerView).
+    func splitPickerChosen(_ item: SplitPickerItem) async {
+        let axis = pendingSplitAxis ?? .vertical
+        modal = nil
+        pendingSplitAxis = nil
+        switch item.kind {
+        case .terminal:
+            await chooseTerminalPane()
+        case .session(let name):
+            await splitFocusedPane(axis: axis, newSession: name)
+        }
+    }
+
+    /// Сплит фокусной agent-панели по оси; фокус и selected — в новую панель.
+    private func splitFocusedPane(axis: PaneAxis, newSession: String) async {
+        guard agentPaneCount < PaneNode.maxLeaves else {
+            toast = "split limit reached"; return
+        }
+        guard let focused = focusedAgentPane, focused != newSession else { return }
+        guard let tree = PaneNode.splitting(splitTree, focused: focused,
+                                            axis: axis, newSession: newSession)
+        else { return }
+        splitTree = tree
+        persistSplitLayout()
+        focusPane(newSession)
+        await attachPane(newSession)
+    }
+
+    /// «Терминал»: фокус существующей колонки / создать / заменить чужую.
+    private func chooseTerminalPane() async {
+        guard let root = selectedSession().map(sessionRoot) else { return }
+        let shellRoot = companionShell
+            .flatMap { shell in sessions.first { $0.name == shell } }
+            .map(sessionRoot)
+        let decision = SplitPicker.terminalDecision(companionShell: companionShell,
+                                                    companionRoot: shellRoot,
+                                                    projectRoot: root)
+        switch decision {
+        case .focusExisting:
+            if let shell = companionShell { focusPane(shell) }
+        case .create, .replaceForeign:
+            if case .replaceForeign(let old) = decision {
+                companionShell = nil
+                await kill(old)
+            }
+            guard let parent = selected else { return }
+            do {
+                _ = try await client.create(dir: root, agent: "sh", terminal: true,
+                                            companionOf: parent)
+            } catch { toast = errorText(error) }
+            // companionShell и фокус придут в sessionAdded (companionOf == parent).
+        }
+    }
+
+    /// Cmd+W: колонка — kill шелла (единственное место, где он умирает);
+    /// agent-панель в дереве — схлопнуть узел, сессия возвращается в список;
+    /// единственная панель — no-op (спека «Разбор сплита»).
+    private func closeFocusedPane() {
+        if focusedPane == companionShell, let shell = companionShell {
+            Task { await kill(shell) }     // sessionRemoved очистит колонку
             return
         }
-        var axes = persisted.splitAxes ?? [:]
-        axes[s.name] = axis
-        persisted.splitAxes = axes
-        persist()
-        Task {
-            do {
-                _ = try await client.create(dir: s.dir, agent: "sh", terminal: true,
-                                            companionOf: s.name)
-            } catch { toast = errorText(error) }
-        }
+        guard let tree = splitTree, let focused = focusedAgentPane,
+              tree.contains(session: focused) else { return }   // единственная: no-op
+        let (rest, successor) = tree.removing(session: focused)
+        splitTree = rest
+        persistSplitLayout()
+        if let successor { focusPane(successor) }
     }
 
     private func selectedSession() -> Session? {
@@ -1699,9 +1778,11 @@ public final class AppModel {
             sessions.removeAll { $0.name == session.name }
             sessions.append(session)
             sessions.sort { $0.created < $1.created }
-            // A companion born for the selected session: show it and hand it
-            // the keyboard (terminal split command flow).
+            // Companion shell created for the selected session: take the
+            // column, attach, hand it the keyboard (spec «Модалка выбора»).
             if let selected, session.companionOf == selected {
+                companionShell = session.name
+                persistSplitLayout()
                 Task {
                     await attachPane(session.name)
                     focusPane(session.name)
@@ -1711,8 +1792,7 @@ public final class AppModel {
             sessions.removeAll { $0.name == name }
             statusByName[name] = nil
             modelByName[name] = nil
-            dropPaneState(name)
-            if selected == name { selected = nil }
+            repairAfterSessionGone(name)
         case .exited(let name, _):
             // Companions never become recents — a dead shell is not resumable.
             if let s = sessions.first(where: { $0.name == name }), s.companionOf == nil {
@@ -1726,8 +1806,7 @@ public final class AppModel {
             sessions.removeAll { $0.name == name }
             statusByName[name] = nil
             modelByName[name] = nil
-            dropPaneState(name)
-            if selected == name { selected = nil }
+            repairAfterSessionGone(name)
         case let .statusChanged(name, status):
             statusByName[name] = status
         case let .modelChanged(name, model):
@@ -1756,6 +1835,21 @@ public final class AppModel {
     }
 
     /// Forget a dead pane's view plumbing; pane focus falls back to selected.
+    /// Сессия исчезла (kill или .exited): колонка/узел дерева чинятся
+    /// автоматически, фокус — панель-наследник (спека «Kill и смерть сессии»).
+    private func repairAfterSessionGone(_ name: String) {
+        if companionShell == name { companionShell = nil }
+        if let tree = splitTree, tree.contains(session: name) {
+            let (rest, successor) = tree.removing(session: name)
+            splitTree = rest
+            if selected == name { selected = nil }
+            if let successor { focusPane(successor) }
+        } else if selected == name {
+            selected = nil
+        }
+        dropPaneState(name)
+    }
+
     private func dropPaneState(_ name: String) {
         outputSinks[name] = nil
         outputBuffers[name] = nil

@@ -20,6 +20,9 @@ struct CommandContext: Equatable {
     var canMoveSessionUp = false
     var canMoveSessionDown = false
     var terminalFocused = false
+    var agentPaneCount = 0
+    /// Cmd+W сейчас что-то закроет: фокус на колонке или agent-панель в дереве.
+    var canCloseFocusedPane = false
 }
 
 enum CommandRules {
@@ -119,15 +122,18 @@ enum CommandRules {
                 ? .enabled : .disabled(reason: "Worktree is still available")
 
         case .splitTerminalVertically, .splitTerminalHorizontally:
-            return context.hasSelectedSession
-                ? .enabled : .disabled(reason: "No session selected")
+            guard context.hasSelectedSession else {
+                return .disabled(reason: "No session selected")
+            }
+            return context.agentPaneCount < 8
+                ? .enabled : .disabled(reason: "Split limit reached (8 panes)")
 
         case .closeTerminalSplit:
             guard context.hasSelectedSession else {
                 return .disabled(reason: "No session selected")
             }
-            guard context.hasTerminalSplit else {
-                return .disabled(reason: "No terminal split")
+            guard context.canCloseFocusedPane else {
+                return .disabled(reason: "Nothing to close")
             }
             return context.terminalFocused
                 ? .enabled : .disabled(reason: "Terminal is not focused")
