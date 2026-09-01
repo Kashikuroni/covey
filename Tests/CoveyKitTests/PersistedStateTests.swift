@@ -30,6 +30,31 @@ final class PersistedStateTests: XCTestCase {
         XCTAssertEqual(back.splitAxes, ["agent": "h"])
     }
 
+    func testWorkspaceViewsRoundTrip() throws {
+        var st = PersistedState()
+        st.workspaceViews = [
+            PersistedWorkspaceView(
+                id: "v1",
+                agentTree: .split(axis: "vertical", ratio: 0.5,
+                                  first: .agent(session: "a"), second: .agent(session: "b")),
+                terminalShell: "s-9", terminalOpen: true,
+                inspector: "trace", agentAreaRatio: 0.6),
+            PersistedWorkspaceView(id: "v2", agentTree: .agent(session: "c"))
+        ]
+        st.viewOfSession = ["a": "v1", "b": "v1", "c": "v2"]
+        let back = try JSONDecoder().decode(PersistedState.self,
+                                            from: JSONEncoder().encode(st))
+        XCTAssertEqual(back.workspaceViews, st.workspaceViews)
+        XCTAssertEqual(back.viewOfSession, st.viewOfSession)
+    }
+
+    func testStateWithoutWorkspaceViewsDecodesToNil() throws {
+        let json = #"{"recents":[],"order":[],"projectOrder":[],"projectNames":{},"drafts":{},"sessions":{}}"#
+        let back = try JSONDecoder().decode(PersistedState.self, from: Data(json.utf8))
+        XCTAssertNil(back.workspaceViews)
+        XCTAssertNil(back.viewOfSession)
+    }
+
     func testIssueDraftsRoundTrip() throws {
         var st = PersistedState()
         st.issueDrafts = ["/repo": IssueDraft(title: "t", body: "b", assignMe: true)]

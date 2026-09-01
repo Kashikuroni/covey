@@ -207,6 +207,33 @@ public func splitMigrationChoice(
     return (keep: ranked[0], close: ranked.dropFirst().map(\.companion))
 }
 
+/// One persisted workspace view (Workspace Views). `id`/`agentTree` are always
+/// present; every other field is optional so older / partial payloads decode.
+public struct PersistedWorkspaceView: Codable, Equatable {
+    public var id: String
+    public var agentTree: PersistedPaneNode
+    /// Hidden shell session name; nil when the zone is closed or its shell is
+    /// unlinked (see `terminalOpen`).
+    public var terminalShell: String?
+    /// true when the terminal zone is open even though `terminalShell` is nil —
+    /// keeps the column after a daemon restart dropped the shell, pending relink.
+    public var terminalOpen: Bool?
+    /// "issues" | "trace"; nil = inspector hidden.
+    public var inspector: String?
+    public var agentAreaRatio: Double?
+
+    public init(id: String, agentTree: PersistedPaneNode, terminalShell: String? = nil,
+                terminalOpen: Bool? = nil, inspector: String? = nil,
+                agentAreaRatio: Double? = nil) {
+        self.id = id
+        self.agentTree = agentTree
+        self.terminalShell = terminalShell
+        self.terminalOpen = terminalOpen
+        self.inspector = inspector
+        self.agentAreaRatio = agentAreaRatio
+    }
+}
+
 /// Persisted UI state (`~/.covey/state.json`). Owned by the GUI. Optional scalars
 /// are omitted from JSON when nil (Swift synthesizes `encodeIfPresent`); empty
 /// collections round-trip as `[]`/`{}`.
@@ -226,11 +253,17 @@ public struct PersistedState: Codable, Equatable {
     public var fontScale: Int?
     public var sbWidth: Int?
     /// Agent-pane tree of the window (Split Session); nil = single pane.
+    /// Legacy: read once by the Workspace Views migration, then nulled.
     public var splitTree: PersistedPaneNode?
-    /// Project companion shell pane name; nil = no shell column.
+    /// Project companion shell pane name; nil = no shell column. Legacy: see
+    /// `splitTree`.
     public var companionShell: String?
-    /// Agent-area : shell-column width share (0.15...0.85).
+    /// Agent-area : shell-column width share (0.15...0.85). Legacy: see `splitTree`.
     public var companionRatio: Double?
+    /// Workspace Views: every view keyed by id; nil until first migration.
+    public var workspaceViews: [PersistedWorkspaceView]?
+    /// Workspace Views: session name → owning view id.
+    public var viewOfSession: [String: String]?
     public var showSessions: Bool?
     public var showFooter: Bool?
     public var showHeader: Bool?
@@ -297,7 +330,9 @@ public struct PersistedState: Codable, Equatable {
         codexUsage: PersistedCodexUsage? = nil,
         codexPlan: String? = nil,
         glmUsageEnabled: Bool? = nil,
-        glmUsage: PersistedUsage? = nil
+        glmUsage: PersistedUsage? = nil,
+        workspaceViews: [PersistedWorkspaceView]? = nil,
+        viewOfSession: [String: String]? = nil
     ) {
         self.theme = theme; self.provider = provider
         self.splitPct = splitPct; self.recents = recents
@@ -327,5 +362,7 @@ public struct PersistedState: Codable, Equatable {
         self.codexPlan = codexPlan
         self.glmUsageEnabled = glmUsageEnabled
         self.glmUsage = glmUsage
+        self.workspaceViews = workspaceViews
+        self.viewOfSession = viewOfSession
     }
 }
