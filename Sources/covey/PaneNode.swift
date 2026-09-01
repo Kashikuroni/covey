@@ -106,6 +106,26 @@ indirect enum PaneNode: Equatable {
             return nil
         }
     }
+
+    /// Пишет ratio узла по index-path (пустой путь — этот узел); путь в лист
+    /// или мимо дерева — no-op.
+    static func setRatio(_ tree: PaneNode?, path: [Int], ratio: Double) -> PaneNode? {
+        guard let tree else { return tree }
+        guard case .split(let axis, let old, let first, let second) = tree else {
+            return tree
+        }
+        guard let head = path.first else {
+            return .split(axis: axis, ratio: ratio, first: first, second: second)
+        }
+        let tail = Array(path.dropFirst())
+        if head == 0 {
+            return .split(axis: axis, ratio: old,
+                          first: setRatio(first, path: tail, ratio: ratio) ?? first,
+                          second: second)
+        }
+        return .split(axis: axis, ratio: old, first: first,
+                      second: setRatio(second, path: tail, ratio: ratio) ?? second)
+    }
 }
 
 extension PaneNode {

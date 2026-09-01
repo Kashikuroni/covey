@@ -107,3 +107,81 @@ final class SplitTests: XCTestCase {
         daemon.registry.kill(name: "agent")
     }
 }
+
+// MARK: - Pane tree state (Split Session)
+
+@MainActor final class PaneTreeStateTests: XCTestCase {
+    func testSelectPerformsPointSwapNotDetachAll() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"], name: "a")
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"], name: "b")
+        _ = await eventually { model.sessions.count == 2 }
+        await model.select("a")
+        await model.select("b")
+        XCTAssertEqual(model.selected, "b")
+        XCTAssertEqual(model.attachedNames, ["b"], "старая панель отвязана точечно")
+    }
+
+    func testFocusPaneKeepsSelectedInvariantOnAgentAndShell() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"], name: "a")
+        _ = try daemon.registry.create(dir: "/tmp", agent: "sh", argv: ["/bin/cat"],
+                                       name: "a+sh", companionOf: "a")
+        _ = await eventually { model.sessions.count == 2 }
+        await model.select("a")
+        model.splitTree = .split(axis: .vertical, ratio: 0.5,
+                                 first: .agent(session: "a"), second: .agent(session: "x"))
+        model.companionShell = "a+sh"
+        model.focusPane("a+sh")
+        XCTAssertEqual(model.focusedPane, "a+sh")
+        XCTAssertEqual(model.selected, "a", "фокус на колонке не меняет selected")
+        model.focusPane("x")
+        XCTAssertEqual(model.selected, "x", "selected следует за фокусной agent-панелью")
+    }
+
+    func testSetSplitRatioWalksThePathAndClamps() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        model.splitTree = .split(axis: .vertical, ratio: 0.5,
+                                 first: .agent(session: "a"),
+                                 second: .split(axis: .horizontal, ratio: 0.5,
+                                                first: .agent(session: "b"),
+                                                second: .agent(session: "c")))
+        model.setSplitRatio(path: [], ratio: 0.99)   // пустой путь — корень
+        guard case .split(_, let root, _, _) = model.splitTree! else {
+            return XCTFail("not a split")
+        }
+        XCTAssertEqual(root, 0.85, accuracy: 0.0001)
+        model.setSplitRatio(path: [1], ratio: 0.01)  // вложенный узел
+        guard case .split(_, _, _, let second) = model.splitTree! else {
+            return XCTFail("not a split")
+        }
+        guard case .split(_, let inner, _, _) = second else {
+            return XCTFail("second not a split")
+        }
+        XCTAssertEqual(inner, 0.15, accuracy: 0.0001)
+        model.setCompanionRatio(0.01)
+        XCTAssertEqual(model.companionRatio, 0.15, accuracy: 0.0001)
+    }
+
+    func testSanitizeDropsDeadLeavesFromRestoredTree() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"], name: "a")
+        _ = await eventually { model.sessions.count == 1 }
+        // Как будто восстановили из state.json дерево с мёртвым листом
+        // "x" и мёртвой колонкой "x+sh".
+        model.splitTree = .split(axis: .vertical, ratio: 0.5,
+                                 first: .agent(session: "a"), second: .agent(session: "x"))
+        model.companionShell = "x+sh"
+        model.sanitizeSplitTree()
+        XCTAssertNil(model.splitTree, "мёртвый лист схлопнул дерево до одного листа → nil")
+        XCTAssertNil(model.companionShell, "мёртвая колонка сброшена")
+    }
+}

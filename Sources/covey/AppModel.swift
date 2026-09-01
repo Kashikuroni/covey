@@ -62,6 +62,25 @@ public final class AppModel {
     /// Terminal pane that owns the keyboard while focus == .terminal:
     /// the selected session or its companion shell.
     public private(set) var focusedPane: String?
+    /// Agent-pane grid of the window (Split Session); nil = single pane.
+    /// Internal: tests drive it directly; GUI code goes through операции.
+    var splitTree: PaneNode?
+    /// Project companion shell pane name; nil = колонки нет.
+    var companionShell: String?
+    /// Agent-area : shell-column width share.
+    public private(set) var companionRatio: Double = 0.6
+    /// Последняя фокусная agent-панель: цель замены кликом по сайдбару, пока
+    /// фокус стоит на шелл-колонке.
+    @ObservationIgnored private var lastFocusedAgent: String?
+    /// Панель-цель операций сплита: фокусная agent-панель (не колонка).
+    var focusedAgentPane: String? {
+        if let focusedPane, focusedPane != companionShell { return focusedPane }
+        return lastFocusedAgent ?? selected
+    }
+    /// Сколько agent-панелей сейчас в окне (лимит 8).
+    var agentPaneCount: Int {
+        max(splitTree?.leafCount ?? 0, selected != nil ? 1 : 0)
+    }
     public var modal: Modal? {
         didSet {
             // A sheet lives in its own key window; its dismissal reshuffles
@@ -187,8 +206,9 @@ public final class AppModel {
     private var terminalCommands: [String: (TerminalCommand) -> Void] = [:]
     @ObservationIgnored
     private var terminalResizeOwnership = TerminalResizeOwnership()
-    /// Names this client is attached to (selected + visible companion).
-    private var attachedNames: Set<String> = []
+    /// Names this client is attached to (все панели дерева + колонка):
+    /// инвариант спеки — под ним стоит гард доставки `.output`.
+    internal private(set) var attachedNames: Set<String> = []
 
     public func setTerminalSink(for name: String, _ sink: (([UInt8]) -> Void)?) {
         if let sink {
@@ -296,6 +316,13 @@ public final class AppModel {
             modelByName = models
             connected = true
             toast = nil
+            // Restore pane layout (Split Session): persisted tree may name
+            // sessions a dead daemon lost — collapse those leaves.
+            splitTree = persisted.splitTree.map(PaneNode.init(persisted:))
+            companionShell = persisted.companionShell
+            companionRatio = persisted.companionRatio ?? 0.6
+            sanitizeSplitTree()
+            persistSplitLayout()
             if let lost, !lost.isEmpty {
                 // Sessions a dead daemon lost: surface them as relaunchable
                 // recents, oldest first so the newest ends on top.
@@ -332,19 +359,42 @@ public final class AppModel {
     }
 
     public func select(_ name: String?) async {
+        guard let name else { await clearSelection(); return }
+        // Уже в сетке: клик = фокус в её панель (спека «Сайдбар и фокус»).
+        if splitTree?.contains(session: name) == true { focusPane(name); return }
         guard name != selected else { return }
+        let replaced = focusedAgentPane
+        if let replaced, replaced != name {
+            await detachPane(replaced)
+            if let comp = companion(of: replaced) { await detachPane(comp.name) } // legacy shim (Task 6)
+        }
+        selected = name
+        selectedProjectRoot = nil
+        focusedPane = name
+        lastFocusedAgent = name
+        historyMode = false
+        await attachPane(name)
+        if let comp = companion(of: name) { await attachPane(comp.name) }        // legacy shim (Task 6)
+        if inspectorMode == .trace { await subscribeTrace() }
+    }
+
+    /// Выход из воркспейса: единственное место с полным detach (спека).
+    private func clearSelection() async {
         for n in attachedNames { try? await client.detach(name: n) }
         attachedNames = []
-        outputBuffers = [:]        // drop any bytes buffered for old sessions
-        selected = name
-        if name != nil { selectedProjectRoot = nil }
-        focusedPane = name
+        outputBuffers = [:]
+        selected = nil
+        focusedPane = nil
+        lastFocusedAgent = nil
         historyMode = false
-        if let name {
-            await attachPane(name)
-            if let comp = companion(of: name) { await attachPane(comp.name) }
-        }
-        if inspectorMode == .trace { await subscribeTrace() }
+    }
+
+    /// Точечная отвязка панели: буфер чистится только у неё (спека «Attach-цикл»).
+    private func detachPane(_ name: String) async {
+        guard attachedNames.contains(name) else { return }
+        attachedNames.remove(name)
+        outputBuffers[name] = nil
+        try? await client.detach(name: name)
     }
 
     public func setInspectorMode(_ mode: InspectorMode) {
@@ -411,13 +461,56 @@ public final class AppModel {
 
     public func focusPane(_ name: String) {
         focusedPane = name
-        setFocus(.terminal)
+        if name == companionShell {
+            // Инвариант: фокус на колонке не меняет selected.
+            setFocus(.terminal)
+        } else {
+            if splitTree?.contains(session: name) == true || selected == nil {
+                selected = name
+            }
+            lastFocusedAgent = name
+            setFocus(.terminal)
+        }
         terminalCommands[name]?(.focus)
     }
 
     public func create(dir: String, agent: String) async {
         do { _ = try await client.create(dir: dir, agent: agent) }
         catch { toast = errorText(error) }
+    }
+
+    /// Драг деляты узла: путь из `PanelLayout.SplitDivider.path` (пустой
+    /// путь — корневой узел дерева).
+    func setSplitRatio(path: [Int], ratio: Double) {
+        splitTree = PaneNode.setRatio(splitTree, path: path,
+                                      ratio: min(0.85, max(0.15, ratio)))
+        persistSplitLayout()
+    }
+
+    func setCompanionRatio(_ ratio: Double) {
+        companionRatio = min(0.85, max(0.15, ratio))
+        persistSplitLayout()
+    }
+
+    /// Драг пишет модель сразу; state.json — через debounce StateStore (0.5s),
+    /// так что кадры драга коалесцируют в одну запись.
+    private func persistSplitLayout() {
+        persisted.splitTree = splitTree?.persisted
+        persisted.companionShell = companionShell
+        persisted.companionRatio = companionRatio
+        store.save(persisted)
+    }
+
+    /// Схлопывает листья дерева, чьи сессии не живут, и сбрасывает мёртвую
+    /// колонку. Вызывается из `start()` после получения списка сессий.
+    func sanitizeSplitTree() {
+        let live = Set(sessions.map(\.name))
+        if let tree = splitTree {
+            for dead in tree.leaves where !live.contains(dead) {
+                splitTree = splitTree?.removing(session: dead).tree
+            }
+        }
+        if let shell = companionShell, !live.contains(shell) { companionShell = nil }
     }
 
     @discardableResult
@@ -1568,6 +1661,9 @@ public final class AppModel {
         persisted.showInspector = showInspector
         persisted.inspectorMode = inspectorMode == .trace ? "trace" : "issues"
         persisted.sbWidth = sbWidth
+        persisted.splitTree = splitTree?.persisted
+        persisted.companionShell = companionShell
+        persisted.companionRatio = companionRatio
         persisted.vimMode = vimMode
         persisted.projectNames = projectNames
         persisted.projects = projects
