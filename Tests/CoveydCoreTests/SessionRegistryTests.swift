@@ -62,6 +62,17 @@ final class SessionRegistryTests: XCTestCase {
         reg.kill(name: s.name)
     }
     
+    func testHiddenSessionIsInListButNotInMetas() throws {
+        let reg = SessionRegistry(clock: { 1 })
+        _ = try reg.create(dir: "/tmp", agent: "sh", argv: ["/bin/cat"], name: "s-1")
+        let hidden = try reg.create(dir: "/tmp", agent: "sh", argv: ["/bin/cat"],
+                                    name: "s-2", hidden: true)
+        XCTAssertEqual(hidden.hidden, true)
+        XCTAssertEqual(Set(reg.list().map(\.name)), ["s-1", "s-2"])
+        XCTAssertEqual(reg.snapshotMetasForTesting().map(\.name), ["s-1"])
+        reg.kill(name: "s-1"); reg.kill(name: "s-2")
+    }
+
     func testDuplicateNameThrows() throws {
         let reg = SessionRegistry()
         _ = try reg.create(dir: "/usr", agent: "sh", argv: ["/bin/cat"], name: "dup")

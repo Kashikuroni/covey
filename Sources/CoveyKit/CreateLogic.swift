@@ -29,13 +29,17 @@ public struct CreateSpec: Equatable {
     public var effort: String?
     /// Relaunch: a saved "claude --resume <uuid>" command to run verbatim.
     public var resume: String?
+    /// Covey-owned hidden shell — kept out of GUI lists and daemon metas.
+    public var hidden: Bool
 
     public init(name: String? = nil, dir: String, agent: String,
                 terminal: Bool = false, worktree: WorktreeSpec? = nil,
-                model: String? = nil, effort: String? = nil, resume: String? = nil) {
+                model: String? = nil, effort: String? = nil, resume: String? = nil,
+                hidden: Bool = false) {
         self.name = name; self.dir = dir; self.agent = agent
         self.terminal = terminal; self.worktree = worktree
         self.model = model; self.effort = effort; self.resume = resume
+        self.hidden = hidden
     }
 }
 

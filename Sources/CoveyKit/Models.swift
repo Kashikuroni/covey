@@ -105,12 +105,16 @@ public struct Session: Codable, Equatable {
     /// Claude-compatible provider used to create this session; nil means
     /// Anthropic or a payload written before provider identity was persisted.
     public var providerId: String?
+    /// Covey-owned hidden shell (a workspace-view terminal zone). Excluded from
+    /// GUI lists and from the daemon's persisted/lost metas; still returned by
+    /// `list()` so covey can relink it after its own restart. nil == visible.
+    public var hidden: Bool?
 
     public init(
         name: String, dir: String, cwd: String, agent: String,
         created: Int64, git: GitInfo? = nil, worktreeRepo: String? = nil,
         resumeCmd: String? = nil, companionOf: String? = nil,
-        providerId: String? = nil
+        providerId: String? = nil, hidden: Bool? = nil
     ) {
         self.name = name
         self.dir = dir
@@ -122,6 +126,7 @@ public struct Session: Codable, Equatable {
         self.resumeCmd = resumeCmd
         self.companionOf = companionOf
         self.providerId = providerId
+        self.hidden = hidden
     }
 }
 

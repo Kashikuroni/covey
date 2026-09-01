@@ -79,13 +79,16 @@ public final class SessionRegistry {
         return Self.metas(of: entries)
     }
 
-    /// Live (non-companion) metas built from `entries`. Companions are excluded:
-    /// a dead shell is not worth resurfacing as lost after a daemon restart.
+    /// Live (non-companion, non-hidden) metas built from `entries`. Companions
+    /// and covey's hidden workspace shells are excluded: a dead shell is not
+    /// worth resurfacing as lost after a daemon restart.
     private static func metas(of entries: [String: (session: Session, process: any SessionRuntime,
                               screen: ScreenModel, argv: [String], env: [String: String]?,
                               size: (cols: UInt16, rows: UInt16))])
         -> [SessionMeta] {
-        entries.values.filter { $0.session.companionOf == nil }.map {
+        entries.values.filter {
+            $0.session.companionOf == nil && $0.session.hidden != true
+        }.map {
             SessionMeta(name: $0.session.name, dir: $0.session.dir,
                         agent: $0.session.agent, argv: $0.argv,
                         created: $0.session.created,
@@ -104,7 +107,8 @@ public final class SessionRegistry {
         resumeCmd: String? = nil,
         companionOf: String? = nil,
         env: [String: String]? = nil,
-        providerId: String? = nil
+        providerId: String? = nil,
+        hidden: Bool = false
     ) throws -> Session {
         lock.lock()
         var autoNumber: Int?
@@ -126,7 +130,7 @@ public final class SessionRegistry {
             name: id, dir: dir, cwd: dir, agent: agent,
             created: clock(), git: nil, worktreeRepo: worktreeRepo,
             resumeCmd: resumeCmd, companionOf: companionOf,
-            providerId: providerId
+            providerId: providerId, hidden: hidden ? true : nil
         )
         let proc = PTYSessionRuntime()
         // Identify the entry by process, not by name: the exit may arrive

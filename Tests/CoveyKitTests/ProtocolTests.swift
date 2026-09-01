@@ -19,19 +19,19 @@ final class ProtocolTests: XCTestCase {
             .list,
             .create(dir: "/work", agent: "claude", argv: ["claude"], name: nil,
                     terminal: nil, worktree: nil, model: nil, effort: nil, resume: nil, companionOf: nil,
-                    env: nil, providerId: nil),
+                    env: nil, providerId: nil, hidden: nil),
             .create(dir: "/work", agent: "claude", argv: nil, name: "s9",
                     terminal: true, worktree: .new(branch: "b", base: "main"),
                     model: "opus", effort: "max", resume: "claude --resume u", companionOf: nil,
-                    env: ["ANTHROPIC_AUTH_TOKEN": "k"], providerId: "glm"),
+                    env: ["ANTHROPIC_AUTH_TOKEN": "k"], providerId: "glm", hidden: true),
             .create(dir: "/work", agent: "claude", argv: nil, name: nil,
                     terminal: nil, worktree: .checkout(branch: "feat"),
                     model: nil, effort: nil, resume: nil, companionOf: nil,
-                    env: nil, providerId: nil),
+                    env: nil, providerId: nil, hidden: nil),
             .create(dir: "/work", agent: "claude", argv: nil, name: nil,
                     terminal: nil, worktree: .checkoutNew(branch: "feat", base: "main"),
                     model: nil, effort: nil, resume: nil, companionOf: nil,
-                    env: nil, providerId: nil),
+                    env: nil, providerId: nil, hidden: nil),
             .kill(name: "s-1", removeWorktree: nil, deleteBranch: nil),
             .kill(name: "s-1", removeWorktree: true, deleteBranch: nil),
             .kill(name: "s-1", removeWorktree: true, deleteBranch: true),
@@ -60,7 +60,7 @@ final class ProtocolTests: XCTestCase {
         let op = Request.Op.create(dir: "/tmp", agent: "sh", argv: nil, name: nil,
                                    terminal: true, worktree: nil, model: nil,
                                    effort: nil, resume: nil, companionOf: "agent-1",
-                                   env: nil, providerId: nil)
+                                   env: nil, providerId: nil, hidden: nil)
         try roundTrip(Request(id: 7, op: op))
 
         var s = Session(name: "agent-1+sh", dir: "/tmp", cwd: "/tmp",
@@ -69,6 +69,29 @@ final class ProtocolTests: XCTestCase {
         let data = try encoder().encode(s)
         let back = try JSONDecoder().decode(Session.self, from: data)
         XCTAssertEqual(back.companionOf, "agent-1")
+    }
+
+    func testCreateOpRoundTripsHiddenFlag() throws {
+        let op = Request.Op.create(dir: "/tmp", agent: "sh", argv: nil, name: nil,
+                                   terminal: true, worktree: nil, model: nil,
+                                   effort: nil, resume: nil, companionOf: nil,
+                                   env: nil, providerId: nil, hidden: true)
+        try roundTrip(Request(id: 1, op: op))
+
+        var s = Session(name: "s-1", dir: "/tmp", cwd: "/tmp", agent: "sh", created: 1)
+        s.hidden = true
+        let back = try JSONDecoder().decode(Session.self, from: try encoder().encode(s))
+        XCTAssertEqual(back.hidden, true)
+    }
+
+    func testCreateOpDecodesLegacyPayloadWithoutHidden() throws {
+        // A payload written before `hidden` existed must still decode (hidden == nil).
+        let json = #"{"id":3,"op":{"create":{"agent":"claude","dir":"/w"}}}"#
+        let back = try JSONDecoder().decode(Request.self, from: Data(json.utf8))
+        XCTAssertEqual(back.op, .create(dir: "/w", agent: "claude", argv: nil, name: nil,
+                                       terminal: nil, worktree: nil, model: nil,
+                                       effort: nil, resume: nil, companionOf: nil,
+                                       env: nil, providerId: nil, hidden: nil))
     }
 
     func testServerMessageRoundTrip() throws {
@@ -119,7 +142,7 @@ final class ProtocolTests: XCTestCase {
                 Request(id: 3, op: .create(dir: "/w", agent: "claude", argv: nil, name: nil,
                                            terminal: nil, worktree: nil, model: nil,
                                            effort: nil, resume: nil, companionOf: nil,
-                                           env: nil, providerId: nil))
+                                           env: nil, providerId: nil, hidden: nil))
             ), #"{"id":3,"op":{"create":{"agent":"claude","dir":"/w"}}}"#
         )
     }

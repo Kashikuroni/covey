@@ -139,7 +139,7 @@ public final class IPCServer {
         case .clearLost:
             registry.clearLost(); reply(.ok)
 
-        case let .create(dir, agent, argv, name, terminal, worktree, model, effort, resume, companionOf, env, providerId):
+        case let .create(dir, agent, argv, name, terminal, worktree, model, effort, resume, companionOf, env, providerId, hidden):
             do {
                 // A companion's name is derived, never client-chosen.
                 let effectiveName = companionOf.map { "\($0)+sh" } ?? name
@@ -147,11 +147,13 @@ public final class IPCServer {
                 if let argv {   // explicit argv: the raw path (tests, compatibility)
                     s = try registry.create(dir: dir, agent: agent, argv: argv,
                                             name: effectiveName, companionOf: companionOf,
-                                            env: env, providerId: providerId)
+                                            env: env, providerId: providerId,
+                                            hidden: hidden ?? false)
                 } else {
                     let spec = CreateSpec(name: effectiveName, dir: expandTilde(dir), agent: agent,
                                           terminal: terminal ?? false, worktree: worktree,
-                                          model: model, effort: effort, resume: resume)
+                                          model: model, effort: effort, resume: resume,
+                                          hidden: hidden ?? false)
                     // Git IO runs here, outside any registry lock.
                     let prepared = try CreateService.prepare(spec)
                     s = try registry.create(dir: prepared.finalDir, agent: prepared.label,
@@ -159,7 +161,8 @@ public final class IPCServer {
                                             worktreeRepo: prepared.worktreeRepo,
                                             resumeCmd: prepared.resumeCmd,
                                             companionOf: companionOf,
-                                            env: env, providerId: providerId)
+                                            env: env, providerId: providerId,
+                                            hidden: hidden ?? false)
                 }
                 attachOutputFanout(for: s.name)
                 // The card's git line should not wait out the poll interval.

@@ -12,7 +12,7 @@ public struct Request: Codable, Equatable {
         case create(dir: String, agent: String, argv: [String]?, name: String?,
                     terminal: Bool?, worktree: WorktreeSpec?, model: String?,
                     effort: String?, resume: String?, companionOf: String?,
-                    env: [String: String]?, providerId: String?)
+                    env: [String: String]?, providerId: String?, hidden: Bool?)
         case kill(name: String, removeWorktree: Bool?, deleteBranch: Bool?)
         // Kill the child and respawn it in place; `dir` overrides the respawn
         // directory (return-to-root). claude resumes, other agents rerun argv.
