@@ -146,6 +146,67 @@ public struct PersistedCodexUsage: Codable, Equatable {
     }
 }
 
+/// Persistence mirror of the GUI's pane tree (`covey` target owns the live
+/// `PaneNode`; this target cannot depend on it — same split as
+/// `PersistedUsage`). `axis` — "vertical" | "horizontal".
+public indirect enum PersistedPaneNode: Codable, Equatable {
+    case agent(session: String)
+    case split(axis: String, ratio: Double,
+               first: PersistedPaneNode, second: PersistedPaneNode)
+
+    // Явный Codable с дискриминатором "type", чтобы формат JSON был
+    // самоописанным и стабильным между версиями.
+    private enum CodingKeys: String, CodingKey {
+        case type, session, axis, ratio, first, second
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        switch try c.decode(String.self, forKey: .type) {
+        case "agent":
+            self = .agent(session: try c.decode(String.self, forKey: .session))
+        case "split":
+            self = .split(axis: try c.decode(String.self, forKey: .axis),
+                          ratio: try c.decode(Double.self, forKey: .ratio),
+                          first: try c.decode(PersistedPaneNode.self, forKey: .first),
+                          second: try c.decode(PersistedPaneNode.self, forKey: .second))
+        case let other:
+            throw DecodingError.dataCorruptedError(forKey: .type, in: c,
+                debugDescription: "unknown PaneNode type: \(other)")
+        }
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .agent(let session):
+            try c.encode("agent", forKey: .type)
+            try c.encode(session, forKey: .session)
+        case .split(let axis, let ratio, let first, let second):
+            try c.encode("split", forKey: .type)
+            try c.encode(axis, forKey: .axis)
+            try c.encode(ratio, forKey: .ratio)
+            try c.encode(first, forKey: .first)
+            try c.encode(second, forKey: .second)
+        }
+    }
+}
+
+/// Which legacy split pair survives migration to the pane tree and which
+/// companion shells close (spec: один шелл на проект; первая пара по порядку
+/// сайдбара; остальные шеллы закрываются однократно). nil — живых пар нет.
+public func splitMigrationChoice(
+    parentCompanions: [(parent: String, companion: String)],
+    orderedParentNames: [String]
+) -> (keep: (parent: String, companion: String), close: [String])? {
+    guard !parentCompanions.isEmpty else { return nil }
+    let ranked = parentCompanions.sorted { a, b in
+        let ia = orderedParentNames.firstIndex(of: a.parent) ?? Int.max
+        let ib = orderedParentNames.firstIndex(of: b.parent) ?? Int.max
+        if ia != ib { return ia < ib }
+        return a.parent < b.parent
+    }
+    return (keep: ranked[0], close: ranked.dropFirst().map(\.companion))
+}
+
 /// Persisted UI state (`~/.covey/state.json`). Owned by the GUI. Optional scalars
 /// are omitted from JSON when nil (Swift synthesizes `encodeIfPresent`); empty
 /// collections round-trip as `[]`/`{}`.
@@ -164,12 +225,20 @@ public struct PersistedState: Codable, Equatable {
     public var sessions: [String: PersistedSession]
     public var fontScale: Int?
     public var sbWidth: Int?
+    /// Agent-pane tree of the window (Split Session); nil = single pane.
+    public var splitTree: PersistedPaneNode?
+    /// Project companion shell pane name; nil = no shell column.
+    public var companionShell: String?
+    /// Agent-area : shell-column width share (0.15...0.85).
+    public var companionRatio: Double?
     public var showSessions: Bool?
     public var showFooter: Bool?
     public var showHeader: Bool?
     public var showInspector: Bool?
     public var vimMode: Bool?
     /// Split axis per parent session name ("v"/"h") for the companion pane.
+    /// Legacy, read-only: читается однократной миграцией в `splitTree`, затем
+    /// стирается в nil; осмысленно больше не пишется.
     public var splitAxes: [String: String]?
     /// Issue composer drafts keyed by project root.
     public var issueDrafts: [String: IssueDraft]?
@@ -209,6 +278,8 @@ public struct PersistedState: Codable, Equatable {
         projectNames: [String: String] = [:], drafts: [String: String] = [:],
         sessions: [String: PersistedSession] = [:],
         fontScale: Int? = nil, sbWidth: Int? = nil,
+        splitTree: PersistedPaneNode? = nil,
+        companionShell: String? = nil, companionRatio: Double? = nil,
         showSessions: Bool? = nil, showFooter: Bool? = nil, showHeader: Bool? = nil,
         showInspector: Bool? = nil, vimMode: Bool? = nil,
         splitAxes: [String: String]? = nil,
@@ -234,6 +305,9 @@ public struct PersistedState: Codable, Equatable {
         self.projectNames = projectNames
         self.drafts = drafts; self.sessions = sessions
         self.fontScale = fontScale; self.sbWidth = sbWidth
+        self.splitTree = splitTree
+        self.companionShell = companionShell
+        self.companionRatio = companionRatio
         self.showSessions = showSessions; self.showFooter = showFooter
         self.showHeader = showHeader
         self.showInspector = showInspector; self.vimMode = vimMode

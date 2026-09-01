@@ -207,3 +207,44 @@ final class PersistedStateTests: XCTestCase {
         XCTAssertEqual(back, st)
     }
 }
+
+// MARK: - Pane tree persistence (Split Session)
+
+final class PersistedPaneNodeTests: XCTestCase {
+    func testPaneNodeRoundTrip() throws {
+        let tree = PersistedPaneNode.split(
+            axis: "vertical", ratio: 0.4,
+            first: .agent(session: "a"),
+            second: .split(axis: "horizontal", ratio: 0.7,
+                           first: .agent(session: "b"), second: .agent(session: "c")))
+        let data = try JSONEncoder().encode(PersistedState(splitTree: tree))
+        let back = try JSONDecoder().decode(PersistedState.self, from: data)
+        XCTAssertEqual(back.splitTree, tree)
+    }
+
+    func testLegacyPayloadWithoutTreeDecodesToNil() throws {
+        // Старый state.json: обязательные (не-optional) ключи + splitAxes;
+        // новые поля декодируются в nil.
+        let json = #"{"recents": [], "order": [], "projectOrder": [], "projectNames": {}, "drafts": {}, "sessions": {}, "splitAxes": {"a": "v"}, "theme": "dark"}"#
+        let state = try JSONDecoder().decode(PersistedState.self, from: Data(json.utf8))
+        XCTAssertNil(state.splitTree)
+        XCTAssertNil(state.companionShell)
+        XCTAssertEqual(state.splitAxes, ["a": "v"])
+    }
+
+    func testSplitMigrationChoicePicksFirstOrderedPairClosesRest() {
+        let pairs = [("b", "b+sh"), ("a", "a+sh"), ("c", "c+sh")]
+        let choice = splitMigrationChoice(parentCompanions: pairs,
+                                          orderedParentNames: ["a", "b", "c"])
+        XCTAssertEqual(choice?.keep.parent, "a")
+        XCTAssertEqual(choice?.keep.companion, "a+sh")
+        XCTAssertEqual(Set(choice?.close ?? []), ["b+sh", "c+sh"])
+    }
+
+    func testSplitMigrationChoiceTieBreaksByNameAndHandlesEmpty() {
+        let tied = splitMigrationChoice(parentCompanions: [("z", "z+sh"), ("y", "y+sh")],
+                                        orderedParentNames: [])
+        XCTAssertEqual(tied?.keep.parent, "y")
+        XCTAssertNil(splitMigrationChoice(parentCompanions: [], orderedParentNames: ["a"]))
+    }
+}

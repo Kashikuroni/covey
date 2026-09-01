@@ -1,4 +1,5 @@
 import Foundation
+import CoveyKit
 
 /// Axis of a `.split` node: vertical = side-by-side (новая панель справа),
 /// horizontal = stacked (новая панель снизу).
@@ -103,6 +104,28 @@ indirect enum PaneNode: Equatable {
                 return .split(axis: axis, ratio: ratio, first: first, second: s)
             }
             return nil
+        }
+    }
+}
+
+extension PaneNode {
+    /// Round-trip через персист (spec «Миграция»: PersistedPaneNode в CoveyKit).
+    init(persisted: PersistedPaneNode) {
+        switch persisted {
+        case .agent(let s): self = .agent(session: s)
+        case .split(let axis, let ratio, let first, let second):
+            self = .split(axis: PaneAxis(rawValue: axis) ?? .vertical, ratio: ratio,
+                          first: PaneNode(persisted: first),
+                          second: PaneNode(persisted: second))
+        }
+    }
+
+    var persisted: PersistedPaneNode {
+        switch self {
+        case .agent(let s): return .agent(session: s)
+        case .split(let axis, let ratio, let first, let second):
+            return .split(axis: axis.rawValue, ratio: ratio,
+                          first: first.persisted, second: second.persisted)
         }
     }
 }
