@@ -120,3 +120,92 @@ final class PanelLayoutTests: XCTestCase {
                        "terminal gets the full inner width")
     }
 }
+
+// MARK: - Split tree geometry (Split Session)
+
+final class SplitFrameTests: XCTestCase {
+    private let two = PaneNode.split(axis: .vertical, ratio: 0.5,
+                                     first: .agent(session: "a"),
+                                     second: .agent(session: "b"))
+    private let size = CGSize(width: 1000, height: 500)
+    private let gutter: CGFloat = 8
+
+    func testVerticalSplitGivesRightPaneTheRemainder() {
+        let f = PanelLayout.splitFrames(tree: two, companionShell: nil,
+                                        companionRatio: 0.6, size: size, gutter: gutter)
+        XCTAssertEqual(f.agentArea, CGRect(x: 0, y: 0, width: 1000, height: 500))
+        let a = f.leaves["a"]!, b = f.leaves["b"]!
+        XCTAssertEqual(a.width, b.width, accuracy: 0.5)      // ratio 0.5
+        XCTAssertEqual(a.minX, 0); XCTAssertEqual(b.maxX, 1000, accuracy: 0.5)
+        XCTAssertEqual(f.dividers.count, 1)
+        XCTAssertEqual(f.dividers[0].path, [], "корневой узел — пустой index-path")
+        XCTAssertEqual(f.dividers[0].axis, .vertical)
+    }
+
+    func testDragClampKeepsRatioWithinBounds() {
+        let skewed = PaneNode.split(axis: .vertical, ratio: 0.99,
+                                    first: .agent(session: "a"), second: .agent(session: "b"))
+        let f = PanelLayout.splitFrames(tree: skewed, companionShell: nil,
+                                        companionRatio: 0.6, size: size, gutter: gutter)
+        // 0.85 кламп: a ≤ 85% + паддинги, b ≥ 15%
+        XCTAssertLessThanOrEqual(f.leaves["a"]!.width, 1000 * 0.85 + 0.5)
+        XCTAssertGreaterThanOrEqual(f.leaves["b"]!.width, 1000 * 0.15 - gutter - 0.5)
+    }
+
+    func testLeafFloorEnforcedWhenItFits() {
+        let f = PanelLayout.splitFrames(tree: two, companionShell: nil,
+                                        companionRatio: 0.02, size: size, gutter: gutter)
+        // Даже при ratio→0 первый лист держит пол 120pt.
+        XCTAssertGreaterThanOrEqual(f.leaves["a"]!.width, PanelLayout.minSplitPane - 0.5)
+    }
+
+    func testFloorDegradesToEqualShareWhenPanelsDoNotFit() {
+        // 8 листьев по вертикали в 900pt: равная доля (900-56)/8 ≈ 105.5 < 120
+        // → пол невыполним → равный дележ, ratio игнорируется. Дерево
+        // сбалансированное: у каждого узла по 4 листа в ветке, поэтому
+        // пропорциональный дележ даёт строго равные листья (гуттеры симметричны).
+        let pair: (String, String) -> PaneNode = {
+            .split(axis: .vertical, ratio: 0.5,
+                   first: .agent(session: $0), second: .agent(session: $1))
+        }
+        let eight = PaneNode.split(axis: .vertical, ratio: 0.5,
+                                   first: PaneNode.split(axis: .vertical, ratio: 0.5,
+                                                         first: pair("s1", "s2"),
+                                                         second: pair("s3", "s4")),
+                                   second: PaneNode.split(axis: .vertical, ratio: 0.5,
+                                                          first: pair("s5", "s6"),
+                                                          second: pair("s7", "s8")))
+        let narrow = CGSize(width: 900, height: 500)
+        let f = PanelLayout.splitFrames(tree: eight, companionShell: nil,
+                                        companionRatio: 0.6, size: narrow, gutter: gutter)
+        let widths = (1...8).map { f.leaves["s\($0)"]!.width }
+        for w in widths {
+            XCTAssertEqual(w, widths[0], accuracy: 0.5, "все листья равны")
+            XCTAssertEqual(w, (900 - 7 * gutter) / 8, accuracy: 0.5)
+        }
+    }
+
+    func testCompanionColumnSplitsTheWidthAndCarriesItsOwnRatio() {
+        let f = PanelLayout.splitFrames(tree: two, companionShell: "a+sh",
+                                        companionRatio: 0.6, size: size, gutter: gutter)
+        let area = f.agentArea!, col = f.companion!
+        XCTAssertEqual(area.width + gutter + col.width, 1000, accuracy: 0.5)
+        XCTAssertEqual(area.width / (area.width + col.width), 0.6, accuracy: 0.02)
+        XCTAssertEqual(f.leaves["b"]!.maxX, area.maxX, accuracy: 0.5,
+                       "правый лист дерева упирается в край agent-области")
+    }
+
+    func testFirstBranchSizeDegradationUnit() {
+        // Пол невыполним (равная доля 112.5 < 120) → пропорция листьев 3/8,
+        // ratio игнорируется: 900 × 3/8 = 337.5.
+        XCTAssertEqual(PanelLayout.firstBranchSize(requested: 0.9, available: 900,
+                                                   firstLeaves: 3, secondLeaves: 5,
+                                                   gutter: 0),
+                       337.5, accuracy: 0.5)
+        // Пол выполним → драг-кламп 0.85.
+        XCTAssertEqual(PanelLayout.firstBranchSize(requested: 0.9, available: 2000,
+                                                   firstLeaves: 1, secondLeaves: 1,
+                                                   gutter: 0),
+                       1700, accuracy: 0.5)
+    }
+}

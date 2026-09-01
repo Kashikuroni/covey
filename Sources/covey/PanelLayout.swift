@@ -72,4 +72,97 @@ struct PanelLayout: Equatable {
     static func inspectorWidth(dragX: CGFloat, total: CGFloat) -> Int {
         Int(total - Tokens.edge - dragX)
     }
+
+    // MARK: - Split tree (Split Session)
+
+    /// Пол одной agent-панели сплита; при переполнении деградирует (см. ниже).
+    static let minSplitPane: CGFloat = 120
+    static let minSplitRatio: Double = 0.15
+    static let maxSplitRatio: Double = 0.85
+
+    /// Размер первой ветки узла: драг-кламп 0.15–0.85, затем пол 120pt на лист
+    /// обеих веток; когда пол невыполним (120 × листьев > usable), равный дележ —
+    /// размер пропорционален числу листьев, ratio игнорируется (спека).
+    static func firstBranchSize(requested: Double, available: CGFloat,
+                                firstLeaves: Int, secondLeaves: Int,
+                                gutter: CGFloat) -> CGFloat {
+        let usable = max(0, available - gutter)
+        guard usable > 0 else { return 0 }
+        let total = max(1, firstLeaves + secondLeaves)
+        let leafFloor = min(minSplitPane, usable / CGFloat(total))
+        let minFirst = leafFloor * CGFloat(firstLeaves)
+        let maxFirst = usable - leafFloor * CGFloat(secondLeaves)
+        if minFirst >= maxFirst {
+            return usable * CGFloat(firstLeaves) / CGFloat(total)
+        }
+        let clamped = usable * min(maxSplitRatio, max(minSplitRatio, requested))
+        return min(max(clamped, minFirst), maxFirst)
+    }
+
+    /// Делята дерева: путь узла (index-path) для записи ratio драгом.
+    struct SplitDivider: Equatable {
+        let path: [Int]
+        let axis: PaneAxis
+        /// Прямоугольник всего узла в координатах split-области.
+        let bounds: CGRect
+    }
+
+    struct SplitFrames: Equatable {
+        var leaves: [String: CGRect] = [:]
+        var companion: CGRect?
+        var agentArea: CGRect?
+        var dividers: [SplitDivider] = []
+    }
+
+    /// Геометрия окна: [agent-дерево | шелл-колонка]; внутри дерева — рекурсия
+    /// по `.split`-узлам. Все кадры — в координатной области split-вью.
+    static func splitFrames(tree: PaneNode?, companionShell: String?,
+                            companionRatio: Double, size: CGSize,
+                            gutter: CGFloat) -> SplitFrames {
+        var result = SplitFrames()
+        let agentLeaves = tree?.leafCount ?? 0
+        if companionShell != nil {
+            let columnWidth = size.width - firstBranchSize(
+                requested: companionRatio, available: size.width,
+                firstLeaves: max(agentLeaves, 1), secondLeaves: 1, gutter: gutter)
+            let areaWidth = max(0, size.width - columnWidth - gutter)
+            result.agentArea = CGRect(x: 0, y: 0, width: areaWidth, height: size.height)
+            result.companion = CGRect(x: areaWidth + gutter, y: 0,
+                                      width: max(0, columnWidth), height: size.height)
+        } else {
+            result.agentArea = CGRect(x: 0, y: 0, width: size.width, height: size.height)
+        }
+        if let tree {
+            frames(node: tree, in: result.agentArea!, gutter: gutter,
+                   path: [], into: &result)
+        }
+        return result
+    }
+
+    private static func frames(node: PaneNode, in rect: CGRect, gutter: CGFloat,
+                               path: [Int], into result: inout SplitFrames) {
+        switch node {
+        case .agent(let session):
+            result.leaves[session] = rect
+        case .split(let axis, let ratio, let first, let second):
+            let vertical = axis == .vertical
+            let available = vertical ? rect.width : rect.height
+            let firstSize = firstBranchSize(requested: ratio, available: available,
+                                            firstLeaves: first.leafCount,
+                                            secondLeaves: second.leafCount, gutter: gutter)
+            let firstRect = vertical
+                ? CGRect(x: rect.minX, y: rect.minY, width: firstSize, height: rect.height)
+                : CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: firstSize)
+            let secondRect = vertical
+                ? CGRect(x: rect.minX + firstSize + gutter, y: rect.minY,
+                         width: max(0, rect.width - firstSize - gutter), height: rect.height)
+                : CGRect(x: rect.minX, y: rect.minY + firstSize + gutter,
+                         width: rect.width, height: max(0, rect.height - firstSize - gutter))
+            result.dividers.append(SplitDivider(path: path, axis: axis, bounds: rect))
+            frames(node: first, in: firstRect, gutter: gutter,
+                   path: path + [0], into: &result)
+            frames(node: second, in: secondRect, gutter: gutter,
+                   path: path + [1], into: &result)
+        }
+    }
 }
