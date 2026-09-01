@@ -116,7 +116,13 @@ struct PanelLayout: Equatable {
 
     /// Геометрия окна: [agent-дерево | шелл-колонка]; внутри дерева — рекурсия
     /// по `.split`-узлам. Все кадры — в координатной области split-вью.
-    static func splitFrames(tree: PaneNode?, companionShell: String?,
+    ///
+    /// `soloAgent` — панель одиночного агента: по инварианту дерева один лист
+    /// живёт вне `tree` (`splitTree == nil`), и без него agent-область осталась
+    /// бы пустой, когда рядом стоит шелл-колонка. При не-nil дереве игнорируется:
+    /// источник истины — дерево.
+    static func splitFrames(tree: PaneNode?, soloAgent: String? = nil,
+                            companionShell: String?,
                             companionRatio: Double, size: CGSize,
                             gutter: CGFloat) -> SplitFrames {
         var result = SplitFrames()
@@ -135,6 +141,8 @@ struct PanelLayout: Equatable {
         if let tree {
             frames(node: tree, in: result.agentArea!, gutter: gutter,
                    path: [], into: &result)
+        } else if let soloAgent {
+            result.leaves[soloAgent] = result.agentArea!
         }
         return result
     }

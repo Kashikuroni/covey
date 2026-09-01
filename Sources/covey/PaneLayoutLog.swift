@@ -7,15 +7,10 @@ import Foundation
 /// layout pass that does it has not been reproducible in a test window. This
 /// records every pane layout so the culprit can be read off a real run.
 ///
-/// Writes NDJSON to ~/Library/Logs/Covey/pane-layout.log. Delete this file and
+/// Writes NDJSON to `pane-layout.log` in `LogPaths.directory`. Delete this file and
 /// its call sites once the source is identified.
 enum PaneLayoutLog {
-    static let path: String = {
-        let dir = NSHomeDirectory() + "/Library/Logs/Covey"
-        try? FileManager.default.createDirectory(
-            atPath: dir, withIntermediateDirectories: true)
-        return dir + "/pane-layout.log"
-    }()
+    static let path: String = LogPaths.file("pane-layout.log")
 
     private static let queue = DispatchQueue(label: "covey.panelayoutlog")
     private static var handle: FileHandle?

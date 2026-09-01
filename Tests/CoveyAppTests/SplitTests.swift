@@ -97,11 +97,20 @@ import CoveyKit
         ]
         let tree = PaneNode.split(axis: .vertical, ratio: 0.5,
                                   first: .agent(session: "a"), second: .agent(session: "b"))
-        let items = SplitPicker.items(projectSessions: sessions, tree: tree,
-                                      companionShell: nil, companionRoot: nil,
+        let items = SplitPicker.items(projectSessions: sessions, occupied: tree.leaves,
                                       projectRoot: "/p")
         XCTAssertEqual(items.map(\.kind), [.terminal, .session("other")],
                        "a и b уже в дереве, hidden невидим, /q чужой проект")
+    }
+
+    func testItemsExcludeTheSoloPaneOutsideTheTree() {
+        // Инвариант: при одной панели дерева нет — открытая сессия живёт
+        // в `selected` и всё равно не должна предлагаться к сплиту.
+        let sessions = [session("a", dir: "/p"), session("other", dir: "/p")]
+        let items = SplitPicker.items(projectSessions: sessions, occupied: ["a"],
+                                      projectRoot: "/p")
+        XCTAssertEqual(items.map(\.kind), [.terminal, .session("other")],
+                       "уже открытая панель не предлагается второй раз")
     }
 
     func testTerminalDecisionFocusCreateReplace() {
@@ -137,6 +146,25 @@ import CoveyKit
         XCTAssertEqual(model.focusedPane, "b")
         XCTAssertEqual(model.selected, "b")
         XCTAssertTrue(model.attachedNames.contains("b"))
+    }
+
+    func testPickerFollowsSidebarOrderAndHidesTheOpenPane() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        for name in ["a", "b", "c"] {
+            _ = try daemon.registry.create(dir: "/tmp", agent: "claude",
+                                           argv: ["/bin/cat"], name: name)
+        }
+        _ = await eventually { model.sessions.count == 3 }
+        await model.select("a")
+        // Сайдбар переставлен: c поднят наверх → c, a, b.
+        model.moveSession(inDir: "/tmp", from: IndexSet(integer: 2), to: 0)
+        XCTAssertEqual(model.orderedSessions().first?.sessions.map(\.name),
+                       ["c", "a", "b"], "предусловие: порядок сайдбара")
+        XCTAssertEqual(model.splitPickerItems(for: .vertical).map(\.kind),
+                       [.terminal, .session("c"), .session("b")],
+                       "порядок сайдбара, без открытой панели a")
     }
 
     func testTerminalChoiceCreatesShellAtProjectRootAndTakesColumn() async throws {

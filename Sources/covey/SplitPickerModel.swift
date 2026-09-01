@@ -3,7 +3,7 @@ import CoveyKit
 
 /// Чистая логика модалки сплита (spec «Модалка выбора»): пункт «Терминал»
 /// первым, ниже — сессии проекта в порядке `orderedSessions()`, исключая
-/// участвующие в дереве и невидимые (`companionOf != nil`).
+/// уже открытые панели и невидимые (`companionOf != nil`).
 struct SplitPickerItem: Equatable, Identifiable {
     enum Kind: Equatable { case terminal, session(String) }
     let kind: Kind
@@ -17,14 +17,17 @@ struct SplitPickerItem: Equatable, Identifiable {
 }
 
 enum SplitPicker {
-    static func items(projectSessions: [Session], tree: PaneNode?,
-                      companionShell: String?, companionRoot: String?,
+    /// `occupied` — agent-панели, уже открытые в окне (`AppModel.agentPanes`).
+    /// Не дерево: при одной панели дерева нет, а сессия всё равно занята —
+    /// предлагать её к сплиту нельзя. `projectSessions` приходит в порядке
+    /// сайдбара и этот порядок сохраняется.
+    static func items(projectSessions: [Session], occupied: [String],
                       projectRoot: String?) -> [SplitPickerItem] {
         var items = [SplitPickerItem(kind: .terminal, label: "Терминал")]
         guard let projectRoot else { return items }
-        let inTree = tree?.leaves ?? []
+        let taken = Set(occupied)
         for s in projectSessions where s.companionOf == nil {
-            guard sessionRoot(s) == projectRoot, !inTree.contains(s.name) else { continue }
+            guard sessionRoot(s) == projectRoot, !taken.contains(s.name) else { continue }
             items.append(SplitPickerItem(kind: .session(s.name), label: s.name))
         }
         return items

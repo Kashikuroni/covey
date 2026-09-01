@@ -32,8 +32,11 @@ struct TerminalPaneView: View {
     /// делят (`PanelLayout.splitFrames`), ZStack раскладывает панели по кадрам.
     private var splitBody: some View {
         GeometryReader { geo in
+            // Одиночная панель живёт вне дерева (инвариант: дерево ⇔ ≥2 листа),
+            // поэтому `selected` идёт в геометрию отдельным листом.
             let frames = PanelLayout.splitFrames(
-                tree: model.splitTree, companionShell: model.companionShell,
+                tree: model.splitTree, soloAgent: model.selected,
+                companionShell: model.companionShell,
                 companionRatio: model.companionRatio,
                 size: geo.size, gutter: Tokens.gutter)
             ZStack(alignment: .topLeading) {
@@ -41,6 +44,13 @@ struct TerminalPaneView: View {
                     paneStack(leaf.name, zone: .agent, label: "Agent")
                         .frame(width: leaf.frame.width, height: leaf.frame.height)
                         .offset(x: leaf.frame.minX, y: leaf.frame.minY)
+                }
+                // Шелл-колонка пережила закрытие своего агента: agent-область
+                // не должна оставаться пустой.
+                if frames.leaves.isEmpty, let area = frames.agentArea {
+                    placeholder(model.selectedProjectRoot)
+                        .frame(width: area.width, height: area.height)
+                        .offset(x: area.minX, y: area.minY)
                 }
                 if let shell = model.companionShell, let frame = frames.companion {
                     paneStack(shell, zone: .terminalSplit, label: "Terminal")

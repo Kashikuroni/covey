@@ -1,7 +1,8 @@
 import AppKit
+import CoveyKit
 import SwiftUI
 
-/// Live-grep over the app's log directory (~/Library/Logs/Covey), Telescope-
+/// Live-grep over the app's log directory (`LogPaths.directory`), Telescope-
 /// style: type and results refine as you go, newest file and newest line
 /// first. The query is a case-insensitive regex; an invalid pattern degrades
 /// to a literal search. Read-only — debugging aid; `c` copies `file:line:`.
@@ -150,7 +151,7 @@ struct LogSearchSheet: View {
                 LazyVStack(alignment: .leading, spacing: 1) {
                     if hits.isEmpty {
                         Text(files.isEmpty
-                             ? "no logs in ~/Library/Logs/Covey"
+                             ? "no logs in \(collapseHome(LogPaths.directory))"
                              : "no matches")
                             .font(.caption).foregroundStyle(tk.t4)
                             .frame(maxWidth: .infinity, minHeight: 80)
@@ -199,7 +200,7 @@ struct LogSearchSheet: View {
     }
 
     private func reload() {
-        files = logFiles(in: NSHomeDirectory() + "/Library/Logs/Covey")
+        files = logFiles(in: LogPaths.directory)
             .map { (name: ($0 as NSString).lastPathComponent, content: readLogFile($0)) }
         // Keep the file filter across reloads (rotation moves usage.log to
         // usage.log.1); a vanished file quietly resets to "All".

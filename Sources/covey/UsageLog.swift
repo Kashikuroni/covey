@@ -2,17 +2,12 @@ import Foundation
 
 /// Persistent diagnostic log for the usage/limit subsystem (Claude, Codex,
 /// GLM). NDJSON, one event per line, appended to
-/// ~/Library/Logs/Covey/usage.log and rotated at 1 MB (one `.1` generation
+/// `usage.log` in `LogPaths.directory`, rotated at 1 MB (one `.1` generation
 /// kept). Records every poll outcome, RPC error, and parse failure so a
 /// stalled chip can be diagnosed after the fact. Never logs tokens or key
 /// material — only endpoints, status codes, and short body excerpts.
 enum UsageLog {
-    static let path: String = {
-        let dir = NSHomeDirectory() + "/Library/Logs/Covey"
-        try? FileManager.default.createDirectory(
-            atPath: dir, withIntermediateDirectories: true)
-        return dir + "/usage.log"
-    }()
+    static let path: String = LogPaths.file("usage.log")
 
     private static let queue = DispatchQueue(label: "covey.usagelog")
     private static var handle: FileHandle?

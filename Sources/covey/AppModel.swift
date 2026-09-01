@@ -78,10 +78,14 @@ public final class AppModel {
         if let focusedPane, focusedPane != companionShell { return focusedPane }
         return lastFocusedAgent ?? selected
     }
-    /// Сколько agent-панелей сейчас в окне (лимит 8).
-    var agentPaneCount: Int {
-        max(splitTree?.leafCount ?? 0, selected != nil ? 1 : 0)
+    /// Agent-панели окна. Дерево — источник истины, когда оно есть; при nil
+    /// единственная панель живёт в `selected` (инвариант: дерево ⇔ ≥2 листа).
+    var agentPanes: [String] {
+        if let splitTree { return splitTree.leaves }
+        return selected.map { [$0] } ?? []
     }
+    /// Сколько agent-панелей сейчас в окне (лимит 8).
+    var agentPaneCount: Int { agentPanes.count }
     public var modal: Modal? {
         didSet {
             // A sheet lives in its own key window; its dismissal reshuffles
@@ -1482,13 +1486,11 @@ public final class AppModel {
     /// Пункты модалки: «Терминал» первым, ниже сессии проекта `selected`
     /// в порядке `orderedSessions()` (спека «Модалка выбора»).
     func splitPickerItems(for axis: PaneAxis) -> [SplitPickerItem] {
-        let root = selectedSession().map(sessionRoot)
-        let shellRoot = companionShell
-            .flatMap { shell in sessions.first { $0.name == shell } }
-            .map(sessionRoot)
-        return SplitPicker.items(projectSessions: sessions, tree: splitTree,
-                                 companionShell: companionShell,
-                                 companionRoot: shellRoot, projectRoot: root)
+        // `sessions` отсортирован по created — модалка должна повторять
+        // порядок сайдбара, поэтому источник списка тот же, что у списка слева.
+        SplitPicker.items(projectSessions: orderedSessions().flatMap(\.sessions),
+                          occupied: agentPanes,
+                          projectRoot: selectedSession().map(sessionRoot))
     }
 
     /// Выбор в модалке (SplitPickerView).

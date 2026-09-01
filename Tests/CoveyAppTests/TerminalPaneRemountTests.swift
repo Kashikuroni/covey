@@ -32,6 +32,12 @@ final class TerminalPaneRemountTests: XCTestCase {
             .first { $0.name == name }
     }
 
+    private func view(named name: String, in root: NSView) -> CoveyTerminalView? {
+        terminalViews(in: root).first {
+            ($0.terminalDelegate as? TerminalRepresentable.Coordinator)?.name == name
+        }
+    }
+
     private func restoredAgentView(in root: NSView) -> CoveyTerminalView? {
         terminalViews(in: root).first {
             $0.getTerminal().isCurrentBufferAlternate
@@ -222,6 +228,117 @@ final class TerminalPaneRemountTests: XCTestCase {
         XCTAssertTrue(
             model.isTerminalViewLeaseCurrent(replacementCoordinator.lease)
         )
+
+        daemon.registry.kill(name: "agent-a")
+        daemon.registry.kill(name: "agent-b")
+    }
+
+    /// ⌘[ / ⌘] переключают сессию через `select()`. Заголовок панели при этом
+    /// загорается (focus == .terminal, focusedPane == новая панель), поэтому
+    /// клавиатура обязана уехать в новую панель — иначе панель «в фокусе», но
+    /// не принимает ввод, и приходится доводить фокус вручную через ⌃2.
+    func testSessionSwitchHandsTheKeyboardToTheNewPane() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        for name in ["agent-a", "agent-b"] {
+            _ = try daemon.registry.create(dir: "/usr", agent: "cat",
+                                           argv: ["/bin/cat"], name: name)
+        }
+        _ = await eventually { model.sessions.count == 2 }
+        await model.select("agent-a")
+
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let root = NSHostingView(rootView: TerminalPaneView(model: model))
+        window.contentView = root
+        _ = await eventually { self.view(named: "agent-a", in: root) != nil }
+
+        model.perform(.focusAgent)                       // ⌃2
+        let a = try XCTUnwrap(view(named: "agent-a", in: root))
+        XCTAssertIdentical(window.firstResponder, a, "предусловие: клавиатура в панели a")
+
+        await model.select("agent-b")                    // ⌘]
+        let mounted = await eventually { self.view(named: "agent-b", in: root) != nil }
+        XCTAssertTrue(mounted)
+        XCTAssertEqual(model.focusedPane, "agent-b", "модель считает панель b фокусной")
+        XCTAssertEqual(model.focus, .terminal, "зона фокуса осталась терминальной")
+
+        let b = try XCTUnwrap(view(named: "agent-b", in: root))
+        let grabbed = await eventually(timeout: 1) { window.firstResponder === b }
+        XCTAssertTrue(grabbed, "новая панель должна забрать клавиатуру без ⌃2")
+
+        daemon.registry.kill(name: "agent-a")
+        daemon.registry.kill(name: "agent-b")
+    }
+
+    /// Та же проверка, но в конфигурации со скриншота: рядом стоит
+    /// шелл-колонка (`companionShell`), agent-панель одна.
+    func testSessionSwitchHandsTheKeyboardOverWithAShellColumn() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        for name in ["agent-a", "agent-b"] {
+            _ = try daemon.registry.create(dir: "/usr", agent: "cat",
+                                           argv: ["/bin/cat"], name: name)
+        }
+        _ = await eventually { model.sessions.count == 2 }
+        await model.select("agent-a")
+        model.perform(.splitTerminalVertically)
+        await model.splitPickerChosen(.init(kind: .terminal, label: "Терминал"))
+        _ = await eventually { model.companionShell == "agent-a+sh" }
+
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let root = NSHostingView(rootView: TerminalPaneView(model: model))
+        window.contentView = root
+        _ = await eventually { self.view(named: "agent-a", in: root) != nil }
+
+        model.perform(.focusAgent)                       // ⌃2
+        let a = try XCTUnwrap(view(named: "agent-a", in: root))
+        XCTAssertIdentical(window.firstResponder, a, "предусловие: клавиатура в панели a")
+
+        await model.select("agent-b")                    // ⌘]
+        let mounted = await eventually { self.view(named: "agent-b", in: root) != nil }
+        XCTAssertTrue(mounted, "панель b смонтирована")
+        let b = try XCTUnwrap(view(named: "agent-b", in: root))
+        let grabbed = await eventually(timeout: 1) { window.firstResponder === b }
+        XCTAssertTrue(grabbed, "новая панель должна забрать клавиатуру без ⌃2")
+
+        daemon.registry.kill(name: "agent-a")
+        daemon.registry.kill(name: "agent-b")
+    }
+
+    /// То же переключение, но в полном окне (сайдбар + панель), как в приложении.
+    func testSessionSwitchHandsKeyboardOverInTheFullWindow() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        for name in ["agent-a", "agent-b"] {
+            _ = try daemon.registry.create(dir: "/usr", agent: "cat",
+                                           argv: ["/bin/cat"], name: name)
+        }
+        _ = await eventually { model.sessions.count == 2 }
+        await model.select("agent-a")
+
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 700),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let root = NSHostingView(rootView: ContentView(model: model))
+        window.contentView = root
+        window.makeKeyAndOrderFront(nil)
+        _ = await eventually { self.view(named: "agent-a", in: root) != nil }
+
+        model.perform(.focusAgent)                       // ⌃2
+        let a = try XCTUnwrap(view(named: "agent-a", in: root))
+        XCTAssertIdentical(window.firstResponder, a, "предусловие: клавиатура в панели a")
+
+        model.perform(.selectNextSession)                // ⌘]
+        let mounted = await eventually { self.view(named: "agent-b", in: root) != nil }
+        XCTAssertTrue(mounted, "панель b смонтирована")
+        let b = try XCTUnwrap(view(named: "agent-b", in: root))
+        let grabbed = await eventually(timeout: 1) { window.firstResponder === b }
+        XCTAssertTrue(grabbed,
+                      "клавиатура должна уехать в b; responder=\(String(describing: window.firstResponder))")
 
         daemon.registry.kill(name: "agent-a")
         daemon.registry.kill(name: "agent-b")

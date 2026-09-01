@@ -195,6 +195,31 @@ final class SplitFrameTests: XCTestCase {
                        "правый лист дерева упирается в край agent-области")
     }
 
+    func testSoloAgentFillsTheAreaWhenTreeIsNil() {
+        // Инвариант дерева: один лист ⇒ splitTree == nil. Панель всё равно
+        // должна быть отрисована — иначе agent-область пустая (регрессия).
+        let f = PanelLayout.splitFrames(tree: nil, soloAgent: "a",
+                                        companionShell: "a+sh",
+                                        companionRatio: 0.6, size: size, gutter: gutter)
+        XCTAssertEqual(f.leaves["a"], f.agentArea,
+                       "одиночная панель занимает всю agent-область")
+        XCTAssertTrue(f.dividers.isEmpty, "делят внутри дерева нет")
+    }
+
+    func testSoloAgentWithoutCompanionTakesTheWholeSize() {
+        let f = PanelLayout.splitFrames(tree: nil, soloAgent: "a", companionShell: nil,
+                                        companionRatio: 0.6, size: size, gutter: gutter)
+        XCTAssertEqual(f.leaves["a"], CGRect(origin: .zero, size: size))
+        XCTAssertNil(f.companion)
+    }
+
+    func testSoloAgentIsIgnoredWhenTreeExists() {
+        let f = PanelLayout.splitFrames(tree: two, soloAgent: "zzz", companionShell: nil,
+                                        companionRatio: 0.6, size: size, gutter: gutter)
+        XCTAssertNil(f.leaves["zzz"], "дерево — источник истины при не-nil")
+        XCTAssertEqual(f.leaves.count, 2)
+    }
+
     func testFirstBranchSizeDegradationUnit() {
         // Пол невыполним (равная доля 112.5 < 120) → пропорция листьев 3/8,
         // ratio игнорируется: 900 × 3/8 = 337.5.
