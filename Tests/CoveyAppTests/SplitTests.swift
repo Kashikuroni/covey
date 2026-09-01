@@ -167,6 +167,103 @@ import CoveyKit
                        "порядок сайдбара, без открытой панели a")
     }
 
+    /// Сессия вне сплита показывается одна: сетка прячется, но помнится.
+    func testSelectingASessionOutsideTheSplitHidesTheGrid() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        for name in ["a", "b", "c"] {
+            _ = try daemon.registry.create(dir: "/tmp", agent: "claude",
+                                           argv: ["/bin/cat"], name: name)
+        }
+        _ = await eventually { model.sessions.count == 3 }
+        await model.select("a")
+        model.perform(.splitTerminalVertically)
+        await model.splitPickerChosen(.init(kind: .session("b"), label: "b"))
+        _ = await eventually { model.splitTree?.leafCount == 2 }
+
+        await model.select("c")
+
+        XCTAssertEqual(model.agentPanes, ["c"], "на экране одна панель")
+        XCTAssertNil(model.visibleSplitTree, "сетка скрыта")
+        XCTAssertEqual(model.splitTree?.leaves, ["a", "b"], "сплит помнится целиком")
+        XCTAssertFalse(model.attachedNames.contains("a"), "скрытые панели отвязаны")
+        XCTAssertFalse(model.attachedNames.contains("b"))
+        XCTAssertTrue(model.attachedNames.contains("c"))
+    }
+
+    /// Клик по сессии спрятанного сплита возвращает всю сетку.
+    func testSelectingASplitSessionRestoresTheWholeGrid() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        for name in ["a", "b", "c"] {
+            _ = try daemon.registry.create(dir: "/tmp", agent: "claude",
+                                           argv: ["/bin/cat"], name: name)
+        }
+        _ = await eventually { model.sessions.count == 3 }
+        await model.select("a")
+        model.perform(.splitTerminalVertically)
+        await model.splitPickerChosen(.init(kind: .session("b"), label: "b"))
+        _ = await eventually { model.splitTree?.leafCount == 2 }
+        await model.select("c")
+
+        await model.select("a")
+
+        XCTAssertEqual(model.agentPanes, ["a", "b"], "сетка вернулась целиком")
+        XCTAssertEqual(model.focusedPane, "a", "фокус в выбранной панели")
+        XCTAssertTrue(model.attachedNames.contains("a"))
+        XCTAssertTrue(model.attachedNames.contains("b"), "соседняя панель снова привязана")
+        XCTAssertFalse(model.attachedNames.contains("c"), "ушедшая сессия отвязана")
+    }
+
+    /// Пока сплит спрятан, его группа никуда не девается из сайдбара —
+    /// иначе к нему нечем вернуться.
+    func testHiddenSplitKeepsItsSidebarGroup() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        for name in ["a", "b", "c"] {
+            _ = try daemon.registry.create(dir: "/tmp", agent: "claude",
+                                           argv: ["/bin/cat"], name: name)
+        }
+        _ = await eventually { model.sessions.count == 3 }
+        await model.select("a")
+        model.perform(.splitTerminalVertically)
+        await model.splitPickerChosen(.init(kind: .session("b"), label: "b"))
+        _ = await eventually { model.splitTree?.leafCount == 2 }
+
+        await model.select("c")
+
+        let groups = model.sidebarGroups()
+        XCTAssertEqual(groups.map(\.id), ["splitview", "project:/tmp"])
+        XCTAssertEqual(groups[0].sessions.map(\.name), ["a", "b"])
+        XCTAssertEqual(groups[1].sessions.map(\.name), ["c"])
+    }
+
+    /// Новый сплит из сессии вне стеша заменяет запомненный: Split View один.
+    func testSplittingOutsideTheStashReplacesIt() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        for name in ["a", "b", "c", "d"] {
+            _ = try daemon.registry.create(dir: "/tmp", agent: "claude",
+                                           argv: ["/bin/cat"], name: name)
+        }
+        _ = await eventually { model.sessions.count == 4 }
+        await model.select("a")
+        model.perform(.splitTerminalVertically)
+        await model.splitPickerChosen(.init(kind: .session("b"), label: "b"))
+        _ = await eventually { model.splitTree?.leafCount == 2 }
+        await model.select("c")
+
+        model.perform(.splitTerminalVertically)
+        await model.splitPickerChosen(.init(kind: .session("d"), label: "d"))
+
+        XCTAssertEqual(model.splitTree?.leaves, ["c", "d"], "стеш заменён новым сплитом")
+        XCTAssertEqual(model.agentPanes, ["c", "d"])
+    }
+
     func testTerminalChoiceCreatesShellAtProjectRootAndTakesColumn() async throws {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)

@@ -78,10 +78,21 @@ public final class AppModel {
         if let focusedPane, focusedPane != companionShell { return focusedPane }
         return lastFocusedAgent ?? selected
     }
-    /// Agent-панели окна. Дерево — источник истины, когда оно есть; при nil
-    /// единственная панель живёт в `selected` (инвариант: дерево ⇔ ≥2 листа).
+    /// Сетка на экране. Split View — запоминаемая сущность: она показывается
+    /// ровно тогда, когда `selected` — один из её листьев. Выбор сессии вне
+    /// сплита прячет сетку (дерево при этом живёт), клик по любой её сессии
+    /// возвращает целиком. Отдельного флага видимости нет намеренно: одно
+    /// состояние — `selected` — не может разъехаться само с собой.
+    var visibleSplitTree: PaneNode? {
+        guard let splitTree, let selected, splitTree.contains(session: selected) else {
+            return nil
+        }
+        return splitTree
+    }
+
+    /// Agent-панели, которые сейчас на экране.
     var agentPanes: [String] {
-        if let splitTree { return splitTree.leaves }
+        if let tree = visibleSplitTree { return tree.leaves }
         return selected.map { [$0] } ?? []
     }
     /// Сколько agent-панелей сейчас в окне (лимит 8).
@@ -374,20 +385,22 @@ public final class AppModel {
 
     public func select(_ name: String?) async {
         guard let name else { await clearSelection(); return }
-        // Уже в сетке: клик = фокус в её панель (спека «Сайдбар и фокус»).
-        if splitTree?.contains(session: name) == true { focusPane(name); return }
-        guard name != selected else { return }
-        let replaced = focusedAgentPane
-        if let replaced, replaced != name {
-            await detachPane(replaced)
-            if let comp = companion(of: replaced) { await detachPane(comp.name) } // legacy shim (Task 6)
+        // Сессия сплита: фокус в её панель, а вместе с ней возвращается вся
+        // сетка, если она была спрятана (спека «Сайдбар и фокус»).
+        if splitTree?.contains(session: name) == true {
+            focusPane(name)
+            await syncPaneAttachments()
+            return
         }
+        guard name != selected else { return }
         selected = name
         selectedProjectRoot = nil
         focusedPane = name
         lastFocusedAgent = name
         historyMode = false
-        await attachPane(name)
+        // `selected` только что переопределил, какая сетка на экране, —
+        // attach приводится к ней целиком, а не по одной панели.
+        await syncPaneAttachments()
         if let comp = companion(of: name) { await attachPane(comp.name) }        // legacy shim (Task 6)
         if inspectorMode == .trace { await subscribeTrace() }
     }
@@ -401,6 +414,20 @@ public final class AppModel {
         focusedPane = nil
         lastFocusedAgent = nil
         historyMode = false
+    }
+
+    /// Приводит attach к тому, что показано: панели ушедшей с экрана сетки
+    /// отвязываются, вернувшиеся — привязываются. Шелл-колонка живёт своей
+    /// жизнью и в расчёт входит как есть.
+    private func syncPaneAttachments() async {
+        var wanted = Set(agentPanes)
+        if let shell = companionShell { wanted.insert(shell) }
+        for name in wanted where !attachedNames.contains(name) {
+            await attachPane(name)
+        }
+        for name in attachedNames.subtracting(wanted) {
+            await detachPane(name)
+        }
     }
 
     /// Точечная отвязка панели: буфер чистится только у неё (спека «Attach-цикл»).
@@ -829,6 +856,13 @@ public final class AppModel {
         }
     }
 
+    /// Группы сайдбара: Split View сверху отдельной сущностью, ниже проекты
+    /// без уехавших в сплит сессий (`SidebarLayout`).
+    func sidebarGroups() -> [SidebarGroup] {
+        SidebarLayout.groups(projects: orderedSessions(),
+                             splitLeaves: splitTree?.leaves ?? [])
+    }
+
     public func setFilter(_ s: String) { filter = s }
     /// Esc in the footer filter: clear and give the list back its keys.
     public func filterEscape() {
@@ -1071,7 +1105,7 @@ public final class AppModel {
             terminalFocused: focus == .terminal && inputMode == .normal,
             agentPaneCount: agentPaneCount,
             canCloseFocusedPane: focusedPane == companionShell
-                || (splitTree?.contains(session: focusedPane ?? "") ?? false))
+                || (visibleSplitTree?.contains(session: focusedPane ?? "") ?? false))
     }
 
     func perform(_ command: AppCommand) {
@@ -1273,9 +1307,11 @@ public final class AppModel {
         return dirs
     }
 
-    /// Flat visible ordering: orderedSessions() narrowed by the fuzzy filter.
+    /// Flat visible ordering: sidebarGroups() narrowed by the fuzzy filter.
+    /// Источник — тот же, что рисует список, иначе j/k и ⌘1…9 ходят не по
+    /// тем карточкам, что видит пользователь (Split View стоит сверху).
     public func visibleSessionNames() -> [String] {
-        orderedSessions().flatMap { group in
+        sidebarGroups().flatMap { group in
             group.sessions.map(\.name).filter { fuzzyMatch(filter, $0) }
         }
     }
@@ -1289,10 +1325,13 @@ public final class AppModel {
     /// Flat visible ordering including ghost rows — what j/k walks. Ghosts
     /// hide while the fuzzy filter is active (it matches session names only).
     public func visibleRows() -> [ListRow] {
-        orderedSessions().flatMap { group -> [ListRow] in
+        sidebarGroups().flatMap { group -> [ListRow] in
             let names = group.sessions.map(\.name).filter { fuzzyMatch(filter, $0) }
             if !names.isEmpty { return names.map(ListRow.session) }
-            if group.sessions.isEmpty, filter.isEmpty { return [.ghost(group.dir)] }
+            // Ghost — только у настоящего проекта; Split View пустым не бывает.
+            if let dir = group.dir, group.sessions.isEmpty, filter.isEmpty {
+                return [.ghost(dir)]
+            }
             return []
         }
     }
@@ -1448,7 +1487,7 @@ public final class AppModel {
         var zones: [(id: String, activate: () -> Void)] = [
             ("sessions", { self.sendTerminalCommand(.blur); self.setFocus(.sessions) })
         ]
-        if let tree = splitTree {
+        if let tree = visibleSplitTree {
             for leaf in tree.leaves {
                 zones.append(("pane:\(leaf)", { self.focusPane(leaf) }))
             }
@@ -1512,7 +1551,9 @@ public final class AppModel {
             toast = "split limit reached"; return
         }
         guard let focused = focusedAgentPane, focused != newSession else { return }
-        guard let tree = PaneNode.splitting(splitTree, focused: focused,
+        // Сплитится сетка на экране: ⌘D поверх спрятанного Split View
+        // собирает новый — Split View в окне один.
+        guard let tree = PaneNode.splitting(visibleSplitTree, focused: focused,
                                             axis: axis, newSession: newSession)
         else { return }
         splitTree = tree
@@ -1555,7 +1596,7 @@ public final class AppModel {
             Task { await kill(shell) }     // sessionRemoved очистит колонку
             return
         }
-        guard let tree = splitTree, let focused = focusedAgentPane,
+        guard let tree = visibleSplitTree, let focused = focusedAgentPane,
               tree.contains(session: focused) else { return }   // единственная: no-op
         let (rest, successor) = tree.removing(session: focused)
         splitTree = rest

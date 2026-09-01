@@ -12,7 +12,7 @@ struct TerminalPaneView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if model.splitTree != nil || model.companionShell != nil {
+            if model.visibleSplitTree != nil || model.companionShell != nil {
                 splitBody
             } else if let name = model.selected {
                 VStack(spacing: 0) {
@@ -35,7 +35,7 @@ struct TerminalPaneView: View {
             // Одиночная панель живёт вне дерева (инвариант: дерево ⇔ ≥2 листа),
             // поэтому `selected` идёт в геометрию отдельным листом.
             let frames = PanelLayout.splitFrames(
-                tree: model.splitTree, soloAgent: model.selected,
+                tree: model.visibleSplitTree, soloAgent: model.selected,
                 companionShell: model.companionShell,
                 companionRatio: model.companionRatio,
                 size: geo.size, gutter: Tokens.gutter)
@@ -165,11 +165,20 @@ struct TerminalPaneView: View {
         .panelCard(tk, surface: tk.termBg)
     }
 
-    /// Tiny per-pane tab: the focused pane's label lights up in accent.
+    /// Tiny per-pane tab: the focused pane's label lights up in accent, the
+    /// session name behind it tells two agent panes apart.
     private func paneHeader(_ label: String, zone: FocusZone, name: String) -> some View {
         let active = model.focus == .terminal && model.focusedPane == name
-        return HStack {
-            zoneTitle(label, zone: zone, active: active, tk: tk)
+        let parts = paneHeaderParts(label: label, name: name)
+        return HStack(spacing: 6) {
+            zoneTitle(parts.zone, zone: zone, active: active, tk: tk)
+            if let session = parts.session {
+                Text(session)
+                    .font(.system(size: 12))
+                    .foregroundStyle(panelLabelColor(.paneSession, tk: tk))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
             Spacer()
         }
         .padding(.horizontal, 8)

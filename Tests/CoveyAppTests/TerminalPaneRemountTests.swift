@@ -344,6 +344,46 @@ final class TerminalPaneRemountTests: XCTestCase {
         daemon.registry.kill(name: "agent-b")
     }
 
+    /// Сессия вне сплита показывается одна; клик по сессии сплита
+    /// возвращает всю сетку на экран.
+    func testSplitHidesForAnOutsideSessionAndComesBack() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        for name in ["agent-a", "agent-b", "agent-c"] {
+            _ = try daemon.registry.create(dir: "/usr", agent: "cat",
+                                           argv: ["/bin/cat"], name: name)
+        }
+        _ = await eventually { model.sessions.count == 3 }
+        await model.select("agent-a")
+        model.perform(.splitTerminalVertically)
+        await model.splitPickerChosen(.init(kind: .session("agent-b"), label: "agent-b"))
+        _ = await eventually { model.splitTree?.leafCount == 2 }
+
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 700),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let root = NSHostingView(rootView: TerminalPaneView(model: model))
+        window.contentView = root
+        _ = await eventually { self.terminalViews(in: root).count == 2 }
+
+        await model.select("agent-c")
+
+        let hidden = await eventually { self.terminalViews(in: root).count == 1 }
+        XCTAssertTrue(hidden, "на экране одна панель")
+        XCTAssertNotNil(view(named: "agent-c", in: root))
+        XCTAssertNil(view(named: "agent-a", in: root), "сетка убрана с экрана")
+
+        await model.select("agent-a")
+
+        let restored = await eventually { self.terminalViews(in: root).count == 2 }
+        XCTAssertTrue(restored, "сетка вернулась целиком")
+        XCTAssertNotNil(view(named: "agent-a", in: root))
+        XCTAssertNotNil(view(named: "agent-b", in: root))
+        XCTAssertNil(view(named: "agent-c", in: root))
+
+        for n in ["agent-a", "agent-b", "agent-c"] { daemon.registry.kill(name: n) }
+    }
+
     func testTerminalPaneSeparatesContentAndScrollerInsets() async throws {
         let daemon = try TestDaemon()
         defer { daemon.stop() }

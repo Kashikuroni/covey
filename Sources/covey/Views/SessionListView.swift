@@ -25,17 +25,17 @@ struct SessionListView: View {
     }
 
     private var activeList: some View {
-        let groups = model.orderedSessions()
+        let groups = model.sidebarGroups()
         let filtering = !model.filter.isEmpty
         // No List(selection:): the system paints its own (blue) selection
         // under the card — the card renders selection itself, clicks select.
         return List {
-            ForEach(groups, id: \.dir) { group in
+            ForEach(groups) { group in
                 let rows = group.sessions.filter { fuzzyMatch(model.filter, $0.name) }
                 let showGroup = !rows.isEmpty || (group.sessions.isEmpty && !filtering)
 
                 if showGroup {
-                    projectHeader(group: group)
+                    groupHeader(group)
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                         .listRowInsets(EdgeInsets(top: 8, leading: 0,
@@ -61,12 +61,14 @@ struct SessionListView: View {
                                 Button("Kill…", role: .destructive) { model.modal = .kill(session.name) }
                             }
                     }
+                    // Порядок панелей в Split View задаёт геометрия сплита,
+                    // а не список, — драг переставляет только внутри проекта.
                     .onMove { from, to in
-                        guard !filtering else { return }
-                        model.moveSession(inDir: group.dir, from: from, to: to)
+                        guard !filtering, let dir = group.dir else { return }
+                        model.moveSession(inDir: dir, from: from, to: to)
                     }
-                } else if group.sessions.isEmpty, !filtering {
-                    ghostRow(dir: group.dir)
+                } else if let dir = group.dir, group.sessions.isEmpty, !filtering {
+                    ghostRow(dir: dir)
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                         .listRowInsets(EdgeInsets(top: 4, leading: 0,
@@ -79,9 +81,14 @@ struct SessionListView: View {
         .background(tk.surface)
     }
 
-    private func projectHeader(group: (dir: String, sessions: [Session])) -> some View {
-        HStack(spacing: 6) {
-            Text(model.displayName(forDir: group.dir).uppercased())
+    /// Подпись группы: имя проекта либо «Split View» — псевдо-проект стоит
+    /// над остальными и оформляется ровно так же (спека «Дизайн модалки»
+    /// в приложении к сайдбару).
+    private func groupHeader(_ group: SidebarGroup) -> some View {
+        let title = group.dir.map { model.displayName(forDir: $0) }
+            ?? SidebarLayout.splitTitle
+        return HStack(spacing: 6) {
+            Text(title.uppercased())
                 .font(.system(size: 11, weight: .semibold))
                 .kerning(0.8)
                 .foregroundStyle(panelLabelColor(.project, tk: tk))
