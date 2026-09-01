@@ -152,10 +152,8 @@ public final class SessionRegistry {
     }
     
     public func kill(name: String) {
-        // A parent takes its companion shell down with it.
-        if let comp = companionName(of: name) {
-            withEntry(comp)?.process.kill()
-        }
+        // Спека Split Session: шелл принадлежит проекту и закрывается только
+        // явно (Cmd+W на колонке) — каскад «родитель тянет companion» убран.
         withEntry(name)?.process.kill()
     }
 

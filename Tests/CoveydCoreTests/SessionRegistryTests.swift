@@ -387,7 +387,7 @@ final class SessionRegistryTests: XCTestCase {
         var last: [SessionMeta]? { lock.lock(); defer { lock.unlock() }; return snapshots.last }
     }
 
-    func testCompanionCreateCascadeKillAndRename() throws {
+    func testCompanionCreateSurvivesKillAndRename() throws {
         let spy = PersistSpy()
         let reg = SessionRegistry(onPersist: spy.record)
         let parent = try reg.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"],
@@ -405,9 +405,13 @@ final class SessionRegistryTests: XCTestCase {
         XCTAssertEqual(reg.companionName(of: "renamed"), "renamed+sh")
         XCTAssertEqual(reg.get(name: "renamed+sh")?.companionOf, "renamed")
 
-        // kill cascades to the companion.
+        // Спека Split Session: kill якоря больше не каскадит — шелл живёт.
         reg.kill(name: "renamed")
-        waitUntil({ reg.list().isEmpty }, "cascade kill removes both")
+        waitUntil({ reg.get(name: "renamed") == nil }, "parent exits")
+        XCTAssertNotNil(reg.get(name: "renamed+sh"), "шелл переживает kill якоря")
+        // Cleanup: явный kill шелла освобождает реестр.
+        reg.kill(name: "renamed+sh")
+        waitUntil({ reg.list().isEmpty }, "explicit shell kill empties the registry")
     }
 
     func testPersistCallbackTracksLifecycle() throws {
@@ -470,5 +474,19 @@ final class SessionRegistryTests: XCTestCase {
         XCTAssertEqual(second.lost.map(\.name), ["s1"])
         first.kill(name: "s1")
         waitUntil({ first.list().isEmpty }, "cleanup")
+    }
+}
+
+final class KillCascadeTests: XCTestCase {
+    func testKillParentLeavesCompanionAlive() throws {
+        // Спека Split Session: шелл закрывается только явно (Cmd+W на колонке);
+        // kill якоря больше не тянет companion за собой.
+        let reg = SessionRegistry()
+        _ = try reg.create(dir: "/usr", agent: "sh", argv: ["/bin/cat"], name: "p")
+        _ = try reg.create(dir: "/usr", agent: "sh", argv: ["/bin/cat"],
+                           name: "p+sh", companionOf: "p")
+        reg.kill(name: "p")
+        waitUntil({ reg.list().allSatisfy { $0.name != "p" } }, "parent exits")
+        XCTAssertNotNil(reg.get(name: "p+sh"), "шелл переживает kill якоря")
     }
 }

@@ -197,10 +197,25 @@ public final class IPCServer {
                 } catch {
                     return reply(.error(code: "deleteBranchFailed", message: "\(error)"))
                 }
+                // Worktree teardown safety: the companion shell lives in the
+                // worktree being deleted, so this path takes it down
+                // explicitly — plain kill no longer cascades (Split Session
+                // spec: the project shell outlives sessions). Killed after
+                // scheduling, mirroring the old cascade timing: the deletion
+                // follows the companion's exit so its final writes land
+                // before the clean-tree validation.
+                if let comp = registry.companionName(of: name) {
+                    registry.kill(name: comp)
+                }
                 registry.kill(name: name)
                 return
             } else if removeWorktree == true {
                 registry.markWorktreeRemoval(name: name)
+                // Same teardown safety as deleteBranch: the shell lives in
+                // the worktree being removed.
+                if let comp = registry.companionName(of: name) {
+                    registry.kill(name: comp)
+                }
             }
             registry.kill(name: name); reply(.ok)
 

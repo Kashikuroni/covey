@@ -24,7 +24,7 @@ final class IPCServerTests: XCTestCase {
         server.handle(Request(id: 11, op: .kill(name: "s1", removeWorktree: nil, deleteBranch: nil)), from: sink)
     }
 
-    func testCreateCompanionDerivesNameAndKillCascades() {
+    func testCreateCompanionDerivesNameAndKillSparesIt() {
         let registry = SessionRegistry(clock: { 1 })
         let server = IPCServer(registry: registry,
                                monitor: StatusMonitor(snapshot: { registry.snapshotScreens() }))
@@ -51,8 +51,12 @@ final class IPCServerTests: XCTestCase {
         } }, "companion session derived name")
         server.handle(Request(id: 3, op: .kill(name: "agent", removeWorktree: nil, deleteBranch: nil)), from: sink)
         waitUntil({ sink.captured.contains {
+            if case .event(.exited(name: "agent", _)) = $0 { return true }; return false
+        } }, "parent exits on kill")
+        // Спека Split Session: каскад убран — шелл не умирает вместе с якорем.
+        XCTAssertFalse(sink.captured.contains {
             if case .event(.exited(name: "agent+sh", _)) = $0 { return true }; return false
-        } }, "companion cascades on kill")
+        }, "шелл переживает kill якоря")
     }
 
     func testModelMonitorEventAndListPayload() throws {
