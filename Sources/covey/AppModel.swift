@@ -327,6 +327,12 @@ public final class AppModel {
             companionRatio = persisted.companionRatio ?? 0.6
             sanitizeSplitTree()
             persistSplitLayout()
+            // Legacy migration: splitAxes + live companion pairs → колонка
+            // первой пары по порядку сайдбара; лишние шеллы закрываются
+            // однократно (спека «Миграция»).
+            if let axes = persisted.splitAxes, !axes.isEmpty {
+                await restoreLegacySplitAxes(axes)
+            }
             if let lost, !lost.isEmpty {
                 // Sessions a dead daemon lost: surface them as relaunchable
                 // recents, oldest first so the newest ends on top.
@@ -514,6 +520,30 @@ public final class AppModel {
             }
         }
         if let shell = companionShell, !live.contains(shell) { companionShell = nil }
+    }
+
+    /// Миграция legacy-сплитов (спека «Миграция»): первая пара по порядку
+    /// `orderedSessions()` — её шелл становится колонкой, остальные шеллы
+    /// закрываются, оси не переносятся. Однократная: axes стираются в nil,
+    /// чтобы шеллы, созданные уже новой моделью, не считались legacy-парами.
+    func restoreLegacySplitAxes(_ axes: [String: String]) async {
+        guard !axes.isEmpty else { return }
+        let pairs = sessions.compactMap { s -> (parent: String, companion: String)? in
+            guard let parent = s.companionOf else { return nil }
+            return (parent: parent, companion: s.name)
+        }
+        let ordered = orderedSessions().flatMap(\.sessions).map(\.name)
+        guard let choice = splitMigrationChoice(parentCompanions: pairs,
+                                                orderedParentNames: ordered) else {
+            persisted.splitAxes = nil
+            return
+        }
+        companionShell = choice.keep.companion
+        persistSplitLayout()
+        await attachPane(choice.keep.companion)
+        for shell in choice.close { await kill(shell) }
+        persisted.splitAxes = nil
+        persistSplitLayout()
     }
 
     @discardableResult

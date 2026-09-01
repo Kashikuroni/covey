@@ -243,3 +243,29 @@ import CoveyKit
                        .disabled(reason: "Split limit reached (8 panes)"))
     }
 }
+
+// MARK: - Legacy migration (Split Session)
+
+@MainActor final class SplitMigrationFlowTests: XCTestCase {
+    func testLegacyPairsMigrateToFirstOrderedPairOthersClosed() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"], name: "a")
+        _ = try daemon.registry.create(dir: "/tmp", agent: "sh", argv: ["/bin/cat"],
+                                       name: "a+sh", companionOf: "a")
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"], name: "b")
+        _ = try daemon.registry.create(dir: "/tmp", agent: "sh", argv: ["/bin/cat"],
+                                       name: "b+sh", companionOf: "b")
+        _ = await eventually { model.sessions.count == 4 }
+        // Legacy-состояние: обе пары были сплитнуты (оси не переносим).
+        await model.restoreLegacySplitAxes(["a": "v", "b": "h"])
+        let migrated = await eventually {
+            model.companionShell == "a+sh" && model.splitTree == nil
+        }
+        XCTAssertTrue(migrated, "первая по порядку пара — в колонку, дерево пусто")
+        let closed = await eventually { daemon.registry.get(name: "b+sh") == nil }
+        XCTAssertTrue(closed, "лишний шелл закрыт")
+        XCTAssertNotNil(daemon.registry.get(name: "b"), "родитель лишнего шелла жив")
+    }
+}
