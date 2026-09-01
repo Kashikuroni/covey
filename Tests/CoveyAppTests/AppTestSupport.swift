@@ -61,11 +61,15 @@ final class TestDaemon {
 extension XCTestCase {
     /// Model + the client it talks through (kept for close()-driven tests).
     @MainActor
-    func makeModel(_ daemon: TestDaemon) throws -> (AppModel, IPCClient) {
+    func makeModel(_ daemon: TestDaemon, seed: PersistedState? = nil) throws -> (AppModel, IPCClient) {
         let client = IPCClient(path: daemon.path)
         try client.connect()
         let path = daemon.path
         let statePath = "\(NSTemporaryDirectory())covey-model-\(UInt32.random(in: 0..<UInt32.max)).json"
+        if let seed {
+            let s = StateStore(path: statePath, debounce: 0)
+            s.save(seed); s.flush()   // synchronous write before the model loads it
+        }
         let model = AppModel(
             client: client,
             makeClient: { let c = IPCClient(path: path); try c.connect(); return c },

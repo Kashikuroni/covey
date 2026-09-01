@@ -104,16 +104,18 @@ final class AppModelChromeTests: XCTestCase {
         let model = AppModel(client: client,
                              makeClient: { let c = IPCClient(path: daemon.path); try c.connect(); return c },
                              store: store)
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"], name: "s")
         await model.start()
+        _ = await eventually { model.selected == "s" }
         XCTAssertFalse(model.showInspector)
         XCTAssertEqual(model.sbWidth, 360)
         XCTAssertTrue(model.vimMode, "vim mode is on by default since slice 12")
-        model.setShowInspector(true)
+        model.setShowInspector(true)   // now lives on the active view
         model.setSbWidth(420)
         model.setVimMode(true)
         store.flush()
         let reloaded = store.load()
-        XCTAssertEqual(reloaded.showInspector, true)
+        XCTAssertEqual(reloaded.workspaceViews?.first?.inspector, "issues")
         XCTAssertEqual(reloaded.sbWidth, 420)
         XCTAssertEqual(reloaded.vimMode, true)
         // A fresh model over the same store loads them back.
@@ -122,6 +124,7 @@ final class AppModelChromeTests: XCTestCase {
                               makeClient: { let c = IPCClient(path: daemon.path); try c.connect(); return c },
                               store: StateStore(path: path, debounce: 0.05))
         await model2.start()
+        _ = await eventually { model2.selected == "s" }
         XCTAssertTrue(model2.showInspector)
         XCTAssertEqual(model2.sbWidth, 420)
         XCTAssertTrue(model2.vimMode)
@@ -569,6 +572,9 @@ final class AppModelChromeTests: XCTestCase {
         XCTAssertEqual(model.showHeader, !headerShown)
 
         // Hiding the inspector while focused inside returns to sessions.
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"], name: "s")
+        _ = await eventually { model.sessions.count == 1 }
+        await model.select("s")
         model.setShowInspector(true)
         model.setFocus(.inspector)
         model.perform(.toggleInspector)
@@ -766,8 +772,7 @@ final class AppModelChromeTests: XCTestCase {
         model.focusZone(.issues)
         XCTAssertEqual(model.toast, "inspector hidden — Command-P › Toggle Inspector")
         model.focusZone(.terminalSplit)
-        XCTAssertEqual(model.toast,
-                       "no split — Command-P › Split Terminal Vertically or Horizontally")
+        XCTAssertEqual(model.toast, "no terminal — Command-P › Open Terminal")
         XCTAssertNotEqual(model.focus, .inspector)   // guards never move focus
     }
 

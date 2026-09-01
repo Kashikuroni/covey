@@ -50,7 +50,9 @@ final class AppModelTraceTests: XCTestCase {
         let daemon = try TestDaemon()
         defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"], name: "s")
         await model.start()
+        _ = await eventually { model.selected == "s" }
         model.setShowInspector(true)
         model.focusZone(.trace)
         XCTAssertEqual(model.inspectorMode, .trace)
@@ -61,7 +63,9 @@ final class AppModelTraceTests: XCTestCase {
         let daemon = try TestDaemon()
         defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"], name: "s")
         await model.start()
+        _ = await eventually { model.selected == "s" }
         XCTAssertFalse(model.showInspector)
 
         model.perform(.toggleAgentTrace)   // open
@@ -78,7 +82,9 @@ final class AppModelTraceTests: XCTestCase {
         let daemon = try TestDaemon()
         defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"], name: "s")
         await model.start()
+        _ = await eventually { model.selected == "s" }
         model.setShowInspector(true)
         XCTAssertEqual(model.inspectorMode, .issues)
 
