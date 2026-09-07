@@ -77,8 +77,8 @@ final class CodexUsageTests: XCTestCase {
         let snap = parseCodexRateLimits(json)
 
         XCTAssertEqual(snap?.buckets.keys.sorted(), ["codex", "codex_bengalfox"])
-        XCTAssertEqual(snap?.windows.map(\.label), ["7d", "Spark 5h", "Spark 7d"])
-        XCTAssertEqual(snap?.windows.map(\.window.utilization), [7, 18, 4])
+        XCTAssertEqual(snap?.windows.map(\.label), ["7d"])
+        XCTAssertEqual(snap?.windows.map(\.window.utilization), [7])
     }
 
     func testParseRateLimitsBucketWithoutWrapper() {

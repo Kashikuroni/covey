@@ -31,7 +31,7 @@ final class UsageHeaderTests: XCTestCase {
         XCTAssertEqual(codexHeaderWindow(snap)?.utilization, 22)
     }
 
-    func testCodexHeaderWindowUsesHighestUtilizationAcrossBuckets() {
+    func testCodexHeaderWindowIgnoresSparkBucket() {
         let snap = CodexRateLimitsSnapshot(buckets: [
             "codex": CodexRateLimitBucket(
                 id: "codex", name: nil,
@@ -46,7 +46,17 @@ final class UsageHeaderTests: XCTestCase {
                                          window: UsageWindow(utilization: 4, resetUnix: 3))),
         ])
 
-        XCTAssertEqual(codexHeaderWindow(snap)?.utilization, 38)
+        XCTAssertEqual(codexHeaderWindow(snap)?.utilization, 7)
+    }
+
+    func testSparkOnlySnapshotDoesNotDisplayOrAlertEvenWithoutName() {
+        let snapshot = CodexRateLimitsSnapshot(buckets: [
+            "codex_bengalfox": CodexRateLimitBucket(id: "codex_bengalfox",
+                primary: LabeledWindow(label: "5h", window: UsageWindow(utilization: 99)))
+        ])
+        XCTAssertTrue(snapshot.windows.isEmpty)
+        XCTAssertNil(codexHeaderWindow(snapshot))
+        XCTAssertNil(codexChip(snapshot: snapshot, plan: "Pro"))
     }
 
     func testCodexHeaderWindowHandlesArbitraryLabelsAndMissingWindows() {

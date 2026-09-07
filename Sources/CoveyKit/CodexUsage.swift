@@ -40,12 +40,16 @@ public struct CodexRateLimitBucket: Codable, Equatable, Sendable {
     private var windowPrefix: String? {
         guard id != "codex" else { return nil }
         guard let name, !name.isEmpty else { return id }
-        if name.localizedCaseInsensitiveContains("spark") { return "Spark" }
         return name
     }
 
     public var windows: [LabeledWindow] {
-        [primary, secondary].compactMap { labeled in
+        // Keep upstream data for partial updates, but omit Spark everywhere
+        // consuming visible windows: panels, compact titles, and alerts.
+        guard id != "codex_bengalfox",
+              !id.localizedCaseInsensitiveContains("spark"),
+              name?.localizedCaseInsensitiveContains("spark") != true else { return [] }
+        return [primary, secondary].compactMap { labeled in
             guard let labeled else { return nil }
             guard let windowPrefix else { return labeled }
             return LabeledWindow(label: "\(windowPrefix) \(labeled.label)",
