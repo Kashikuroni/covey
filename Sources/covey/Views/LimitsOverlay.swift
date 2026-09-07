@@ -22,35 +22,52 @@ struct LimitsOverlay: View {
     let error: String?
     let codexUsage: CodexRateLimitsSnapshot?
     let codexPlan: String?
-    let glmUsage: Usage?
-    let glmError: String?
     let claudeUsageEnabled: Bool
     let codexUsageEnabled: Bool
-    let glmUsageEnabled: Bool
     let onSetClaudeUsageEnabled: (Bool) -> Void
     let onSetCodexUsageEnabled: (Bool) -> Void
-    let onSetGlmUsageEnabled: (Bool) -> Void
     let selectedProvider: AppModel.LimitsProvider
     let tk: Tokens
+    var menuBarLimitsEnabled = false
+    var onSetMenuBarLimitsEnabled: (Bool) -> Void = { _ in }
+    var codexError: String?
+    var connectionError: String?
+    var settingsPending = false
+    var settingsAvailable = true
 
     private let cardWidth: CGFloat = 320
 
     private var rows: [LimitsRowModel] {
         limitsRows(usage: usage, plan: plan, error: error,
                    codexUsage: codexUsage, codexPlan: codexPlan,
-                   glmUsage: glmUsage, glmError: glmError,
                    claudeEnabled: claudeUsageEnabled,
                    codexEnabled: codexUsageEnabled,
-                   glmEnabled: glmUsageEnabled)
+                   codexError: codexError)
     }
 
     var body: some View {
         TimelineView(.everyMinute) { ctx in
             VStack(alignment: .leading, spacing: 0) {
                 cardHeader(now: ctx.date)
+                if let connectionError {
+                    Text(connectionError)
+                        .font(.system(size: 12))
+                        .foregroundStyle(tk.warn)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 18).padding(.bottom, 12)
+                }
                 ForEach(rows) { row in
                     providerSection(row: row, now: ctx.date)
                 }
+                Toggle("Show in macOS menu bar", isOn: Binding(
+                    get: { menuBarLimitsEnabled }, set: onSetMenuBarLimitsEnabled))
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .tint(tk.accent)
+                    .font(.system(size: 12))
+                    .foregroundStyle(tk.t1)
+                    .padding(18)
+                    .overlay(alignment: .top) { Rectangle().fill(tk.bd2).frame(height: 1) }
             }
             .frame(width: cardWidth)
             // Tinted with our own surface color so whatever sits behind the
@@ -94,6 +111,7 @@ struct LimitsOverlay: View {
                 if row.stale { Text("*").foregroundStyle(tk.warn) }
                 Spacer()
                 Toggle("", isOn: Binding(get: { row.enabled }, set: onSetEnabled))
+                    .disabled(settingsPending || !settingsAvailable)
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .tint(tk.accent)
@@ -120,7 +138,6 @@ struct LimitsOverlay: View {
         switch provider {
         case .claude: return selectedProvider == .claude
         case .codex: return selectedProvider == .codex
-        case .glm: return selectedProvider == .glm
         }
     }
 
@@ -128,13 +145,12 @@ struct LimitsOverlay: View {
         switch provider {
         case .claude: return onSetClaudeUsageEnabled
         case .codex: return onSetCodexUsageEnabled
-        case .glm: return onSetGlmUsageEnabled
         }
     }
 
     private func windowRow(_ w: LabeledWindow, now: Date) -> some View {
-        let pct = Int(w.window.utilization.rounded())
-        let color = levelColor(usageLevel(pct), tk: tk)
+        let pct = displayUsagePercent(w.window.utilization)
+        let color = pct.map { levelColor(usageLevel($0), tk: tk) } ?? tk.t3
         return VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
                 Text(w.label)
@@ -146,14 +162,14 @@ struct LimitsOverlay: View {
                         .foregroundStyle(tk.t2)
                 }
                 Spacer()
-                Text("\(pct)%")
+                Text(pct.map { "\($0)%" } ?? "—")
                     .font(.system(size: 14, weight: .bold, design: .monospaced))
                     .foregroundStyle(color)
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule().fill(tk.surf2)
-                    Capsule().fill(color).frame(width: geo.size.width * CGFloat(pct) / 100)
+                    Capsule().fill(color).frame(width: geo.size.width * CGFloat(min(100, pct ?? 0)) / 100)
                 }
             }
             .frame(height: 6)

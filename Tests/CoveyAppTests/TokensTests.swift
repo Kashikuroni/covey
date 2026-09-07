@@ -23,13 +23,6 @@ final class TokensTests: XCTestCase {
         XCTAssertEqual(Tokens.light.accent, Color(hex: 0xF29718))
     }
 
-    func testGlmBrandMatchesOtherAgentBrands() {
-        // Brand marks are a single neutral grey shared across all agents
-        // (claudeBrand == codexBrand today) — glm follows the same tone.
-        XCTAssertEqual(Tokens.dark.glmBrand, Tokens.dark.codexBrand)
-        XCTAssertEqual(Tokens.light.glmBrand, Tokens.light.codexBrand)
-    }
-
     func testAppBackgroundGradientUsesLighterAdjacentSurfacesFromLeftToRight() {
         let dark = AppBackgroundStyle(tokens: .dark)
         XCTAssertEqual(dark.leadingColor, Color(hex: 0x282E3B))

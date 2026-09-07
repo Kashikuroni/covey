@@ -32,7 +32,7 @@ struct TopBar: View {
         UsageChip(usage: model.claudeUsageEnabled ? model.usage : nil,
                   usageError: model.claudeUsageEnabled ? model.usageError : nil,
                   codexUsage: model.codexUsageEnabled ? model.codexUsage : nil,
-                  glmUsage: model.glmUsageEnabled ? model.glmUsage : nil, tk: tk)
+                  tk: tk)
             .font(.system(size: topBarFontSize, design: topBarFontDesign))
             .frame(maxWidth: .infinity, alignment: topBarAlignment(model.usagePlacement))
             // Room for the traffic lights overlaid by the hidden title bar:

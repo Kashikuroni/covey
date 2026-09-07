@@ -2,12 +2,15 @@
 public struct Request: Codable, Equatable {
     public var id: Int
     public var op: Op
-    
+
     public init(id: Int, op: Op) {
         self.id = id; self.op = op
     }
     public enum Op: Codable, Equatable{
         case list
+        case usageSubscribe
+        case usageSetEnabled(provider: UsageProvider, enabled: Bool)
+        case usageRefresh(provider: UsageProvider)
         case clearLost
         case create(dir: String, agent: String, argv: [String]?, name: String?,
                     terminal: Bool?, worktree: WorktreeSpec?, model: String?,
@@ -45,9 +48,10 @@ public struct Request: Codable, Equatable {
 public enum ServerMessage: Codable, Equatable{
     case response(id: Int, result: Result)
     case event(DaemonEvent)
-    
+
     public enum Result: Codable, Equatable {
         case ok
+        case usageSnapshot(UsageSnapshot)
         case session(Session)
         // `lost` and `models` are optional so payloads from older daemons decode.
         case sessions(sessions: [Session], statuses: [String: Status], lost: [Session]?,
@@ -65,6 +69,7 @@ public enum ServerMessage: Codable, Equatable{
 }
 
 public enum DaemonEvent: Codable, Equatable {
+    case usageChanged(snapshot: UsageSnapshot)
     case output(name: String, seq: Int, bytesB64: String)
     case sessionAdded(session: Session)
     case sessionRemoved(name: String)

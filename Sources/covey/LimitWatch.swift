@@ -25,7 +25,7 @@ func limitAlerts(agent: String,
     let prefix = agent.lowercased()
     for (key, window) in windows {
         let markKey = "\(prefix):\(key)"
-        guard let w = window else { continue }   // network gap: keep markers
+        guard let w = window, let pct = displayUsagePercent(w.utilization) else { continue }
         if w.utilization < limitAlertThreshold {
             marks[markKey] = nil
             continue
@@ -33,7 +33,6 @@ func limitAlerts(agent: String,
         let mark = w.resetUnix ?? 0
         guard marks[markKey] != mark else { continue }
         marks[markKey] = mark
-        let pct = Int(w.utilization.rounded())
         var body = "\(max(0, 100 - pct))% left"
         if let reset = w.resetUnix {
             body += " · resets in \(remainingLabel(resetUnix: reset, now: now))"

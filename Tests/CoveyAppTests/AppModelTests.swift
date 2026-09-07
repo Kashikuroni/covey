@@ -4,19 +4,6 @@ import CoveyKit
 import CoveydCore
 
 final class AppModelTests: XCTestCase {
-    func testResolveProviderLaunchForClaudeGlm() {
-        XCTAssertTrue(ProviderKeychain.write(account: "covey.provider.glm", value: "TESTKEY"))
-        defer { _ = ProviderKeychain.delete(account: "covey.provider.glm") }
-
-        let (launch, error) = AppModel.resolveProviderLaunch(
-            agent: "claude", selectedProviderId: "glm"
-        )
-
-        XCTAssertNil(error)
-        XCTAssertEqual(launch?.providerId, "glm")
-        XCTAssertEqual(launch?.env?["ANTHROPIC_AUTH_TOKEN"], "TESTKEY")
-    }
-
     func testResolveProviderLaunchDefaultsClaudeToAnthropic() {
         let (launch, error) = AppModel.resolveProviderLaunch(
             agent: "claude", selectedProviderId: nil
@@ -27,7 +14,7 @@ final class AppModelTests: XCTestCase {
 
     func testResolveProviderLaunchNeverInjectsIntoNonClaude() {
         let (launch, error) = AppModel.resolveProviderLaunch(
-            agent: "codex", selectedProviderId: "glm"
+            agent: "codex", selectedProviderId: "custom"
         )
         XCTAssertNil(error)
         XCTAssertEqual(launch, ProviderLaunch(env: nil, providerId: nil))
@@ -41,22 +28,6 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(error, "Unknown Claude Code provider: missing")
     }
 
-    func testResolveProviderEnvGlmWithKey() {
-        XCTAssertTrue(ProviderKeychain.write(account: "covey.provider.glm", value: "TESTKEY"))
-        defer { _ = ProviderKeychain.delete(account: "covey.provider.glm") }
-        let (env, err) = AppModel.resolveProviderEnv("glm")
-        XCTAssertNil(err)
-        XCTAssertEqual(env?["ANTHROPIC_BASE_URL"], "https://api.z.ai/api/anthropic")
-        XCTAssertEqual(env?["ANTHROPIC_AUTH_TOKEN"], "TESTKEY")
-    }
-
-    func testResolveProviderEnvGlmWithoutKey() {
-        _ = ProviderKeychain.delete(account: "covey.provider.glm")   // ensure absent
-        let (env, err) = AppModel.resolveProviderEnv("glm")
-        XCTAssertNil(env)
-        XCTAssertNotNil(err)
-    }
-
     func testResolveProviderEnvAnthropicIsNil() {
         let (env, err) = AppModel.resolveProviderEnv("anthropic")
         XCTAssertNil(env)
@@ -67,7 +38,7 @@ final class AppModelTests: XCTestCase {
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("claude-settings-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: tmp) }
-        try Data(#"{"env":{"ANTHROPIC_BASE_URL":"https://api.z.ai/api/anthropic","other":"x"}}"#.utf8)
+        try Data(#"{"env":{"ANTHROPIC_BASE_URL":"https://provider.example/anthropic","other":"x"}}"#.utf8)
             .write(to: tmp)
         let conflicts = AppModel.anthropicManagedKeys(inSettingsAt: tmp.path)
         XCTAssertEqual(conflicts, ["ANTHROPIC_BASE_URL"])

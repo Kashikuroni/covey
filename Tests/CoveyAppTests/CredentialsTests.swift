@@ -1,5 +1,6 @@
 import XCTest
 @testable import covey
+@testable import CoveydCore
 
 final class CredentialsTests: XCTestCase {
     func testExtractsToken() {

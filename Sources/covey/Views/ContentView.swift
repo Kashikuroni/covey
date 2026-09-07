@@ -25,6 +25,7 @@ func shouldRestoreCommandPaletteResponder(inputMode: InputMode) -> Bool {
 struct ContentView: View {
     @Bindable var model: AppModel
     @State private var keyMonitor: Any?
+    @State private var windowScope = WorkspaceWindowScope()
     @State private var paletteState = CommandPaletteState()
     @State private var palettePreviousResponder: NSResponder?
 
@@ -53,6 +54,7 @@ struct ContentView: View {
         // No system (blue) focus rings anywhere; the caret and our own field
         // styling carry focus. Inherited by every input in the hierarchy.
         .focusEffectDisabled()
+        .background { WorkspaceWindowReader(scope: windowScope) }
         .installSubduedScrollbars()
         .preferredColorScheme(model.themeRaw == "light" ? .light : .dark)
         .tint(Tokens(Theme(raw: model.themeRaw)).accent)
@@ -97,17 +99,7 @@ struct ContentView: View {
         }
         .overlay(alignment: topOverlayAlignment(model.usagePlacement)) {
             if model.inputMode == .limits {
-                LimitsOverlay(usage: model.usage, plan: model.plan, error: model.usageError,
-                              codexUsage: model.codexUsage, codexPlan: model.codexPlan,
-                              glmUsage: model.glmUsage, glmError: model.glmUsageError,
-                              claudeUsageEnabled: model.claudeUsageEnabled,
-                              codexUsageEnabled: model.codexUsageEnabled,
-                              glmUsageEnabled: model.glmUsageEnabled,
-                              onSetClaudeUsageEnabled: { model.setClaudeUsageEnabled($0) },
-                              onSetCodexUsageEnabled: { model.setCodexUsageEnabled($0) },
-                              onSetGlmUsageEnabled: { model.setGlmUsageEnabled($0) },
-                              selectedProvider: model.limitsSelectedProvider,
-                              tk: tokens)
+                LimitsPanel(model: model)
                     .padding(.top, 42)
                     .offset(x: limitsOverlayHorizontalOffset(model.usagePlacement))
                     .transition(.scale(scale: 0.92, anchor: .top).combined(with: .opacity))
@@ -141,6 +133,7 @@ struct ContentView: View {
         }
         .onAppear {
             keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                guard windowScope.contains(event.window) else { return event }
                 // Reserve physical ⌘W for Covey before AppKit can choose
                 // File→Close: close a terminal split, consume it everywhere else.
                 if isCommandW(event) {

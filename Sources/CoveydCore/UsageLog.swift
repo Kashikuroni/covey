@@ -1,7 +1,7 @@
+import CoveyKit
 import Foundation
 
-/// Persistent diagnostic log for the usage/limit subsystem (Claude, Codex,
-/// GLM). NDJSON, one event per line, appended to
+/// Persistent diagnostic log for Claude and Codex limits. NDJSON, appended to
 /// `usage.log` in `LogPaths.directory`, rotated at 1 MB (one `.1` generation
 /// kept). Records every poll outcome, RPC error, and parse failure so a
 /// stalled chip can be diagnosed after the fact. Never logs tokens or key

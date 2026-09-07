@@ -130,30 +130,31 @@ public final class AppModel {
     public private(set) var themeRaw: String = "dark"
     public private(set) var splitPct: Int = 38
     public private(set) var usagePlacement: UsagePlacement = .right
+    public private(set) var menuBarLimitsEnabled = false
     public private(set) var recents: [RecentSession] = []
     // Usage/limits state lives in UsageStore; these forwarding properties keep
     // the facade views and tests already read.
-    public var usage: Usage? { usageStore.usage }
-    public var plan: String? { usageStore.plan }
-    public var usageError: String? { usageStore.usageError }
-    public var glmUsage: Usage? { usageStore.glmUsage }
-    public var glmUsageError: String? { usageStore.glmUsageError }
+    public var usage: Usage? { usageStore.snapshot.usage }
+    public var plan: String? { usageStore.snapshot.plan }
+    public var usageError: String? { usageStore.snapshot.usageError }
     /// Per-provider display/polling toggle — off skips the network call (and,
     /// for Codex, tears down the whole subprocess) but keeps the last known
     /// snapshot around for the dimmed popover row.
-    public var claudeUsageEnabled: Bool { usageStore.claudeUsageEnabled }
-    public var codexUsageEnabled: Bool { usageStore.codexUsageEnabled }
-    public var glmUsageEnabled: Bool { usageStore.glmUsageEnabled }
+    public var claudeUsageEnabled: Bool { usageStore.snapshot.claudeUsageEnabled }
+    public var codexUsageEnabled: Bool { usageStore.snapshot.codexUsageEnabled }
     /// Which provider the limits detail popover highlights — j/k moves it, h/l
     /// disables/enables it. Resets to `.claude` every time the popover opens;
     /// not persisted, this is transient keyboard-navigation state.
-    public enum LimitsProvider: Equatable, CaseIterable { case claude, codex, glm }
+    public enum LimitsProvider: Equatable, CaseIterable { case claude, codex }
     public private(set) var limitsSelectedProvider: LimitsProvider = .claude
     // Codex limits are consumed only in-module (TopBar) + @testable tests, so
     // these stay internal — their types (CodexRateLimitsSnapshot/State) are too.
-    var codexUsage: CodexRateLimitsSnapshot? { usageStore.codexUsage }
-    var codexPlan: String? { usageStore.codexPlan }
-    var codexState: CodexServerState { usageStore.codexState }
+    var codexUsage: CodexRateLimitsSnapshot? { usageStore.snapshot.codexUsage }
+    var codexPlan: String? { usageStore.snapshot.codexPlan }
+    var codexState: CodexServerState { usageStore.snapshot.codexState }
+    var codexUsageError: String? {
+        codexState == .unauthed ? "Codex is signed out. Sign in to Codex to resume limit updates." : nil
+    }
     public private(set) var order: [String] = []
     public private(set) var projectOrder: [String] = []
     public var filter: String = ""
@@ -257,9 +258,6 @@ public final class AppModel {
     private var eventLoop: Task<Void, Never>?
     @ObservationIgnored private var sessionCycleTarget: String?
     @ObservationIgnored private var sessionCycleTask: Task<Void, Never>?
-    private let fetchAccount: () async -> Account
-    private let fetchGlmAccount: () async -> Account
-    private let usageInterval: TimeInterval
     private var usageStore: UsageStore!
     private let readProviderKey: @Sendable (String) -> String?
     private let writeProviderKey: @Sendable (String, String) -> Bool
@@ -269,9 +267,6 @@ public final class AppModel {
     public init(client: IPCClient,
                 makeClient: @escaping () throws -> IPCClient,
                 store: StateStore,
-                fetchAccount: @escaping () async -> Account = { Account() },
-                fetchGlmAccount: @escaping () async -> Account = { Account() },
-                usageInterval: TimeInterval = 60,
                 readProviderKey: (@Sendable (String) -> String?)? = nil,
                 writeProviderKey: (@Sendable (String, String) -> Bool)? = nil,
                 deleteProviderKey: (@Sendable (String) -> Bool)? = nil) {
@@ -292,14 +287,8 @@ public final class AppModel {
         self.client = client
         self.makeClient = makeClient
         self.store = store
-        self.fetchAccount = fetchAccount
-        self.fetchGlmAccount = fetchGlmAccount
-        self.usageInterval = usageInterval
         // Created before any self-capturing closures read usage state.
         usageStore = UsageStore(
-            fetchAccount: fetchAccount,
-            fetchGlmAccount: fetchGlmAccount,
-            usageInterval: usageInterval,
             onPersist: { [weak self] in self?.persist() },
             readMarkers: { [weak self] in self?.persisted.usageNotified ?? [:] },
             writeMarkers: { [weak self] in self?.persisted.usageNotified = $0 })
@@ -314,6 +303,7 @@ public final class AppModel {
         themeRaw = persisted.theme ?? "dark"
         splitPct = persisted.splitPct ?? 38
         usagePlacement = persisted.usagePlacement.flatMap(UsagePlacement.init(rawValue:)) ?? .right
+        menuBarLimitsEnabled = persisted.menuBarLimitsEnabled ?? false
         recents = persisted.recents
         order = persisted.order
         projectOrder = persisted.projectOrder
@@ -324,7 +314,6 @@ public final class AppModel {
         vimMode = persisted.vimMode ?? true
         projectNames = persisted.projectNames
         projects = persisted.projects ?? []
-        usageStore.restoreFromPersisted(persisted)
         do {
             let (list, statuses, lost, models) = try await client.list()
             sessions = list.sorted { $0.created < $1.created }
@@ -364,16 +353,22 @@ public final class AppModel {
             return
         }
         eventLoop?.cancel()
+        usageStore.beginSubscription()
+        do {
+            usageStore.apply(try await client.usageSubscribe())
+        } catch {
+            usageStore.failed(error)
+        }
         // Inherits MainActor: apply() and the trailing mutations run on the actor.
         eventLoop = Task { [client] in
             for await event in client.events {
                 self.apply(event)
             }
+            guard !Task.isCancelled, self.client === client else { return }
             self.connected = false
+            self.usageStore.disconnected()
             self.toast = "daemon connection lost"
         }
-        usageStore.startPolling()
-        usageStore.startCodexServerIfNeeded()
         // Event loop is up: relink / respawn each view's shell without blocking
         // the first paint.
         Task { await relinkOrRespawnShells() }
@@ -879,8 +874,7 @@ public final class AppModel {
                        showHeader: showHeader, showFooter: showFooter,
                        usagePlacement: usagePlacement,
                        claudeUsageEnabled: claudeUsageEnabled,
-                       codexUsageEnabled: codexUsageEnabled,
-                       glmUsageEnabled: glmUsageEnabled)
+                       codexUsageEnabled: codexUsageEnabled)
     }
 
     func openSettings() {
@@ -916,11 +910,6 @@ public final class AppModel {
             }.value
             guard verified else { return failure }
             providerKeyStatuses[account] = .set
-            if profile.id == ProviderProfile.glm.id {
-                Task { [weak self] in
-                    await self?.usageStore.tickGlm()
-                }
-            }
             return .success
         }
     }
@@ -1211,18 +1200,15 @@ public final class AppModel {
             return
         }
         let themeChanged = values.theme != old.theme
-        let codexChanged = values.codexUsageEnabled != old.codexUsageEnabled
         themeRaw = values.theme.rawValue
         vimMode = values.vimMode
         showSessions = values.showSessions
         showHeader = values.showHeader
         showFooter = values.showFooter
         usagePlacement = values.usagePlacement
-        usageStore.claudeUsageEnabled = values.claudeUsageEnabled
-        usageStore.codexUsageEnabled = values.codexUsageEnabled
-        usageStore.glmUsageEnabled = values.glmUsageEnabled
+        if values.claudeUsageEnabled != old.claudeUsageEnabled { setClaudeUsageEnabled(values.claudeUsageEnabled) }
+        if values.codexUsageEnabled != old.codexUsageEnabled { setCodexUsageEnabled(values.codexUsageEnabled) }
         persist()
-        if codexChanged { usageStore.synchronizeCodexServer() }
         offerThemeRestartAfterModalDismiss = themeChanged
         modal = nil
     }
@@ -1233,18 +1219,51 @@ public final class AppModel {
         offerThemeRestart()
     }
 
-    public func setClaudeUsageEnabled(_ on: Bool) {
-        usageStore.claudeUsageEnabled = on
+    public var usageConnectionError: String? { usageStore.connectionError }
+    public var usageSettingsAvailable: Bool { usageStore.isAvailable }
+    public var usageSettingsPending: Bool { pendingUsageCommands > 0 }
+    private var pendingUsageCommands = 0
+    private var usageCommandTask: Task<Void, Never>?
+
+    public func setClaudeUsageEnabled(_ on: Bool) { setUsageEnabled(.claude, on) }
+    public func setCodexUsageEnabled(_ on: Bool) { setUsageEnabled(.codex, on) }
+
+    public func setMenuBarLimitsEnabled(_ on: Bool) {
+        menuBarLimitsEnabled = on
         persist()
     }
-    public func setCodexUsageEnabled(_ on: Bool) {
-        usageStore.codexUsageEnabled = on
-        persist()
-        usageStore.synchronizeCodexServer()
+
+    private func setUsageEnabled(_ provider: UsageProvider, _ enabled: Bool) {
+        let previous = usageCommandTask
+        let connection = client
+        pendingUsageCommands += 1
+        usageCommandTask = Task { [weak self] in
+            await previous?.value
+            guard let self else { return }
+            defer { self.pendingUsageCommands -= 1 }
+            guard self.client === connection else { return }
+            do {
+                let snapshot = try await connection.usageSetEnabled(provider: provider, enabled: enabled)
+                guard self.client === connection else { return }
+                self.usageStore.apply(snapshot)
+            } catch {
+                guard self.client === connection else { return }
+                self.usageStore.failed(error)
+                self.showToast("Could not change limits settings: \(error)")
+            }
+        }
     }
-    public func setGlmUsageEnabled(_ on: Bool) {
-        usageStore.glmUsageEnabled = on
-        persist()
+
+    private func refreshUsage(_ provider: UsageProvider) async {
+        let connection = client
+        do {
+            let snapshot = try await connection.usageRefresh(provider: provider)
+            guard client === connection else { return }
+            usageStore.apply(snapshot)
+        } catch {
+            guard client === connection else { return }
+            usageStore.failed(error)
+        }
     }
 
     public func setSbWidth(_ px: Int) {
@@ -1394,13 +1413,11 @@ public final class AppModel {
             switch limitsSelectedProvider {
             case .claude: setClaudeUsageEnabled(true)
             case .codex: setCodexUsageEnabled(true)
-            case .glm: setGlmUsageEnabled(true)
             }
         case .limitsDisableSelected:
             switch limitsSelectedProvider {
             case .claude: setClaudeUsageEnabled(false)
             case .codex: setCodexUsageEnabled(false)
-            case .glm: setGlmUsageEnabled(false)
             }
         case .splitFocusToggle:
             guard let shell = activeShell else { return }
@@ -1739,6 +1756,7 @@ public final class AppModel {
         persisted.theme = themeRaw
         persisted.splitPct = splitPct
         persisted.usagePlacement = usagePlacement.rawValue
+        persisted.menuBarLimitsEnabled = menuBarLimitsEnabled
         persisted.recents = recents
         persisted.order = order
         persisted.projectOrder = projectOrder
@@ -1749,35 +1767,14 @@ public final class AppModel {
         persisted.vimMode = vimMode
         persisted.projectNames = projectNames
         persisted.projects = projects
-        persisted.claudeUsageEnabled = claudeUsageEnabled
-        persisted.codexUsageEnabled = codexUsageEnabled
-        persisted.claudeUsage = usage.map(PersistedUsage.init)
-        persisted.claudePlan = plan
-        persisted.codexUsage = codexUsage.map(PersistedCodexUsage.init)
-        persisted.codexPlan = codexPlan
-        persisted.glmUsageEnabled = glmUsageEnabled
-        persisted.glmUsage = glmUsage.map(PersistedUsage.init)
         snapshotWorkspaceViews()
         store.save(persisted)
     }
 
-    // Test seams: existing AppModel tests drive codex state through these;
-    // the implementation lives in UsageStore.
-    func setCodexState(_ state: CodexServerState) {
-        usageStore.setCodexState(state)
-    }
-
-    func ingestCodexRateLimits(_ update: CodexRateLimitsSnapshot, now: Date = Date()) {
-        usageStore.ingestRateLimits(update, now: now)
-    }
-
-    /// App teardown: terminate the codex subprocess.
-    func stopCodexServer() {
-        usageStore.stopCodexServer()
-    }
-
     private func apply(_ event: DaemonEvent) {
         switch event {
+        case let .usageChanged(snapshot):
+            usageStore.apply(snapshot)
         case let .sessionAdded(session):
             sessions.removeAll { $0.name == session.name }
             sessions.append(session)

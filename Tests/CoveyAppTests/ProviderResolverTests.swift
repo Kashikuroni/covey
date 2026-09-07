@@ -5,10 +5,10 @@ import CoveyKit
 final class ProviderResolverTests: XCTestCase {
     func testBearerInjectsTokenFromReader() throws {
         let env = try ProviderResolver.resolve(
-            profile: ProviderProfile.glm,
+            profile: ProviderProfile.testProvider,
             readSecret: { _ in "KEY" })
         XCTAssertEqual(env["ANTHROPIC_AUTH_TOKEN"], "KEY")
-        XCTAssertEqual(env["ANTHROPIC_BASE_URL"], "https://api.z.ai/api/anthropic")
+        XCTAssertEqual(env["ANTHROPIC_BASE_URL"], "https://provider.example/anthropic")
     }
     func testApiKeySchemeUsesApiKeyVar() throws {
         let p = ProviderProfile(id: "x", label: "X", baseURL: "https://x", auth: .apiKey,
@@ -24,10 +24,10 @@ final class ProviderResolverTests: XCTestCase {
     }
     func testThrowsWhenKeyNeededButAbsent() {
         XCTAssertThrowsError(
-            try ProviderResolver.resolve(profile: .glm, readSecret: { _ in nil }))
+            try ProviderResolver.resolve(profile: .testProvider, readSecret: { _ in nil }))
     }
     func testThrowsWhenKeyEmpty() {
         XCTAssertThrowsError(
-            try ProviderResolver.resolve(profile: .glm, readSecret: { _ in "" }))
+            try ProviderResolver.resolve(profile: .testProvider, readSecret: { _ in "" }))
     }
 }

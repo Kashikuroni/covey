@@ -8,7 +8,7 @@ final class TestDaemon {
     let path: String
     let registry: SessionRegistry
     let monitor: StatusMonitor
-    private let ipc: IPCServer
+    let ipc: IPCServer
     private let server: SocketServer
 
     /// `mute: true` accepts connections but wires no handlers, so requests

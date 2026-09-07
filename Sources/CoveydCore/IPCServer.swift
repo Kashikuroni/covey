@@ -15,6 +15,43 @@ public final class IPCServer {
     private var sinks: [Int: ClientSink] = [:]
     private var subscribers: [String: Set<Int>] = [:]
     private var traceSubscribers: [String: Set<Int>] = [:]
+    private var usageSubscribers: Set<Int> = []
+    private var usageMonitor: UsageMonitor?
+    private var usageSnapshot: UsageSnapshot?
+
+    /// Called once during daemon setup, before accepting connections. All
+    /// publications and subscription replies share the IPC queue.
+    @MainActor
+    public func attachUsageMonitor(_ monitor: UsageMonitor) {
+        monitor.onChange = { [weak self] snapshot in
+            self?.publishUsage(snapshot)
+        }
+        let initial = monitor.snapshot
+        configureUsageMonitor(monitor, initial: initial)
+    }
+
+    private func configureUsageMonitor(_ monitor: UsageMonitor, initial: UsageSnapshot) {
+        server.async { [weak self] in
+            self?.usageMonitor = monitor
+            self?.usageSnapshot = initial
+        }
+    }
+
+    private func publishUsage(_ snapshot: UsageSnapshot) {
+        server.async { [weak self] in
+            guard let self else { return }
+            self.usageSnapshot = snapshot
+            for id in self.usageSubscribers {
+                self.sinks[id]?.send(.event(.usageChanged(snapshot: snapshot)))
+            }
+        }
+    }
+
+    private func replyToUsage(id: Int, sinkID: Int, result: ServerMessage.Result) {
+        server.async { [weak self] in
+            self?.sinks[sinkID]?.send(.response(id: id, result: result))
+        }
+    }
 
     public init(registry: SessionRegistry, monitor: StatusMonitor,
                 gitMonitor: GitMonitor? = nil, modelMonitor: ModelMonitor? = nil,
@@ -94,6 +131,7 @@ public final class IPCServer {
         server.async { [weak self] in
             guard let self else { return }
             self.sinks[sink.id] = nil
+            self.usageSubscribers.remove(sink.id)
             for name in self.subscribers.keys { self.subscribers[name]?.remove(sink.id) }
             for name in self.traceSubscribers.keys { self.traceSubscribers[name]?.remove(sink.id) }
         }
@@ -122,6 +160,38 @@ public final class IPCServer {
         func notFound(_ name: String) { reply(.error(code: "notFound", message: "no session: \(name)")) }
 
         switch request.op {
+        case .usageSubscribe:
+            guard let snapshot = usageSnapshot else {
+                return reply(.error(code: "usageUnavailable", message: "Daemon usage collector unavailable"))
+            }
+            usageSubscribers.insert(sink.id)
+            reply(.usageSnapshot(snapshot))
+
+        case let .usageSetEnabled(provider, enabled):
+            guard let monitor = usageMonitor else {
+                return reply(.error(code: "usageUnavailable", message: "Daemon usage collector unavailable"))
+            }
+            Task { @MainActor in
+                let result: ServerMessage.Result
+                do {
+                    try monitor.setEnabled(provider, enabled: enabled)
+                    result = .usageSnapshot(monitor.snapshot)
+                } catch {
+                    result = .error(code: "usageSettingsFailed", message: "Could not save usage settings: \(error)")
+                }
+                self.replyToUsage(id: id, sinkID: sink.id, result: result)
+            }
+
+        case let .usageRefresh(provider):
+            guard let monitor = usageMonitor else {
+                return reply(.error(code: "usageUnavailable", message: "Daemon usage collector unavailable"))
+            }
+            Task { @MainActor in
+                await monitor.refresh(provider)
+                let snapshot = monitor.snapshot
+                self.replyToUsage(id: id, sinkID: sink.id, result: .usageSnapshot(snapshot))
+            }
+
         case .list:
             let sessions = registry.list()
             let known = monitor.currentStatuses()

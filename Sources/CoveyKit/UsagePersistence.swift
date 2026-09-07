@@ -1,25 +1,24 @@
-import CoveyKit
 
 extension PersistedUsageWindow {
-    init(_ w: UsageWindow) {
+    public init(_ w: UsageWindow) {
         self.init(utilization: w.utilization, resetUnix: w.resetUnix)
     }
-    var live: UsageWindow { UsageWindow(utilization: utilization, resetUnix: resetUnix) }
+    public var live: UsageWindow { UsageWindow(utilization: utilization, resetUnix: resetUnix) }
 }
 
 extension PersistedUsage {
-    init(_ usage: Usage) {
+    public init(_ usage: Usage) {
         self.init(fiveHour: usage.fiveHour.map(PersistedUsageWindow.init),
                   sevenDay: usage.sevenDay.map(PersistedUsageWindow.init),
                   sevenDaySonnet: usage.sevenDaySonnet.map(PersistedUsageWindow.init))
     }
-    var live: Usage {
+    public var live: Usage {
         Usage(fiveHour: fiveHour?.live, sevenDay: sevenDay?.live, sevenDaySonnet: sevenDaySonnet?.live)
     }
 }
 
 extension PersistedCodexUsage {
-    init(_ snapshot: CodexRateLimitsSnapshot) {
+    public init(_ snapshot: CodexRateLimitsSnapshot) {
         let legacy = snapshot.buckets["codex"]
             ?? snapshot.buckets.sorted { $0.key < $1.key }.first?.value
         self.init(
@@ -36,7 +35,7 @@ extension PersistedCodexUsage {
                     secondary: bucket.secondary.map { PersistedUsageWindow($0.window) })
             })
     }
-    var live: CodexRateLimitsSnapshot {
+    public var live: CodexRateLimitsSnapshot {
         if let buckets, !buckets.isEmpty {
             let liveBuckets = buckets.reduce(into: [String: CodexRateLimitBucket]()) {
                 result, entry in

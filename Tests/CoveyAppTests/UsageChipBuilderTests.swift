@@ -42,31 +42,17 @@ final class UsageChipBuilderTests: XCTestCase {
                                plan: "Pro"))
     }
 
-    func testGlmChipFromUsage() {
-        let u = Usage(fiveHour: UsageWindow(utilization: 17, resetUnix: 1),
-                      sevenDay: nil, sevenDaySonnet: nil)
-        let chip = glmChip(usage: u)
-        XCTAssertEqual(chip?.name, "GLM")
-        XCTAssertNil(chip?.plan, "z.ai's quota endpoint carries no plan/tier name")
-        XCTAssertEqual(chip?.windows.map(\.label), ["5h"])
-    }
-
-    func testGlmChipNilWhenNoUsage() {
-        XCTAssertNil(glmChip(usage: nil))
-    }
-
-    func testLimitsRowsAlwaysContainClaudeCodexAndGlmInOrder() {
+    func testLimitsRowsAlwaysContainClaudeAndCodexInOrder() {
         let rows = limitsRows(
             usage: nil, plan: nil, error: nil,
             codexUsage: nil, codexPlan: nil,
-            glmUsage: nil, glmError: nil,
-            claudeEnabled: true, codexEnabled: true, glmEnabled: true
+            claudeEnabled: true, codexEnabled: true
         )
 
-        XCTAssertEqual(rows.map(\.provider), [.claude, .codex, .glm])
-        XCTAssertEqual(rows.map(\.chip.name), ["Claude", "Codex", "GLM"])
+        XCTAssertEqual(rows.map(\.provider), [.claude, .codex])
+        XCTAssertEqual(rows.map(\.chip.name), ["Claude", "Codex"])
         XCTAssertEqual(rows.map(\.emptyMessage), [
-            "No usage data", "No usage data", "No usage data",
+            "No usage data", "No usage data",
         ])
     }
 
@@ -74,14 +60,13 @@ final class UsageChipBuilderTests: XCTestCase {
         let rows = limitsRows(
             usage: nil, plan: nil, error: "Claude offline",
             codexUsage: nil, codexPlan: nil,
-            glmUsage: nil, glmError: "GLM key missing",
-            claudeEnabled: true, codexEnabled: false, glmEnabled: true
+            claudeEnabled: true, codexEnabled: false
         )
 
         XCTAssertEqual(rows.map(\.emptyMessage), [
-            "Claude offline", "No usage data", "GLM key missing",
+            "Claude offline", "No usage data",
         ])
-        XCTAssertEqual(rows.map(\.enabled), [true, false, true])
+        XCTAssertEqual(rows.map(\.enabled), [true, false])
     }
 
     func testLimitsRowsKeepUsageAndMarkLaterErrorAsStale() {
@@ -90,14 +75,11 @@ final class UsageChipBuilderTests: XCTestCase {
         let rows = limitsRows(
             usage: usage, plan: "Max", error: "network",
             codexUsage: nil, codexPlan: nil,
-            glmUsage: usage, glmError: "network",
-            claudeEnabled: true, codexEnabled: true, glmEnabled: true
+            claudeEnabled: true, codexEnabled: true
         )
 
         XCTAssertEqual(rows[0].chip.windows.map(\.label), ["5h"])
         XCTAssertTrue(rows[0].stale)
         XCTAssertNil(rows[0].emptyMessage)
-        XCTAssertTrue(rows[2].stale)
-        XCTAssertNil(rows[2].emptyMessage)
     }
 }

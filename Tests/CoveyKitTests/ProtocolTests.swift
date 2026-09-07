@@ -7,13 +7,13 @@ final class ProtocolTests: XCTestCase {
         e.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         return e
     }
-    
+
     private func roundTrip<T: Codable & Equatable>(_ value: T) throws {
         let data = try encoder().encode(value)
         let back = try JSONDecoder().decode(T.self, from: data)
         XCTAssertEqual(value, back)
     }
-    
+
     func testRequestOpRoundTrip() throws {
         let ops: [Request.Op] = [
             .list,
@@ -23,7 +23,7 @@ final class ProtocolTests: XCTestCase {
             .create(dir: "/work", agent: "claude", argv: nil, name: "s9",
                     terminal: true, worktree: .new(branch: "b", base: "main"),
                     model: "opus", effort: "max", resume: "claude --resume u", companionOf: nil,
-                    env: ["ANTHROPIC_AUTH_TOKEN": "k"], providerId: "glm", hidden: true),
+                    env: ["ANTHROPIC_AUTH_TOKEN": "k"], providerId: "custom", hidden: true),
             .create(dir: "/work", agent: "claude", argv: nil, name: nil,
                     terminal: nil, worktree: .checkout(branch: "feat"),
                     model: nil, effort: nil, resume: nil, companionOf: nil,
@@ -55,7 +55,7 @@ final class ProtocolTests: XCTestCase {
         ]
         for op in ops { try roundTrip(Request(id: 7, op: op)) }
     }
-    
+
     func testCreateCompanionOfRoundTrip() throws {
         let op = Request.Op.create(dir: "/tmp", agent: "sh", argv: nil, name: nil,
                                    terminal: true, worktree: nil, model: nil,
@@ -125,7 +125,7 @@ final class ProtocolTests: XCTestCase {
         ]
         for m in msgs { try roundTrip(m) }
     }
-    
+
     func testGoldenWireFormat() throws {
         let line = { (v: Request) in String(decoding: try self.encoder().encode(v), as: UTF8.self) }
         XCTAssertEqual(

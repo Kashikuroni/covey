@@ -32,17 +32,9 @@ private final class ByteBuffer {
         return String(decoding: data, as: UTF8.self) }
 }
 
-/// Codex app-server connection state.
-enum CodexServerState: Equatable {
-    case stopped
-    case starting
-    case unauthed                 // not a chatgpt account → no chip
-    case active(CodexAccount)
-}
-
 /// `codex` absolute path via `command -v` under an enriched PATH (Finder-
 /// launched GUI has only the bare system PATH). Returns nil if not installed.
-func resolveCodexPath() -> String? {
+public func resolveCodexPath() -> String? {
     let home = FileManager.default.homeDirectoryForCurrentUser.path
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/bin/sh")
@@ -145,6 +137,11 @@ final class CodexAppServer {
         ])
     }
 
+    func refreshRateLimits() {
+        guard process.isRunning else { return }
+        send(method: "account/rateLimits/read", id: RPC.rateLimits.rawValue)
+    }
+
     func stop() {
         rateLimitsPoll?.cancel()
         outPipe.fileHandleForReading.readabilityHandler = nil
@@ -194,9 +191,17 @@ final class CodexAppServer {
             switch RPC(rawValue: id) {
             case .initialize:
                 send(method: "initialized")
+                // Reading limits must not force rotation of the CLI's shared token.
+                // The backend refreshes credentials itself when necessary.
                 send(method: "account/read", id: RPC.account.rawValue,
-                     params: ["refreshToken": true])
+                     params: ["refreshToken": false])
             case .account:
+                // A missing account is a signed-out session, not malformed data.
+                // Drop cached percentages instead of presenting them as current.
+                if result["account"] is NSNull {
+                    onState?(.unauthed)
+                    return
+                }
                 guard let acc = parseCodexAccount(result) else {
                     UsageLog.note("codex", [("ev", "parseFail"), ("id", id),
                                             ("body", "\(result)")])

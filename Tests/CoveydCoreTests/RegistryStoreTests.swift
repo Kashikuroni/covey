@@ -30,7 +30,7 @@ final class RegistryStoreTests: XCTestCase {
         let path = tempPath()
         defer { try? FileManager.default.removeItem(atPath: path) }
         let metas = [SessionMeta(name: "s1", dir: "/a", agent: "claude",
-                                 argv: ["claude"], created: 42, providerId: "glm")]
+                                 argv: ["claude"], created: 42, providerId: "custom")]
         RegistryStore(path: path).save(metas)
         XCTAssertEqual(RegistryStore(path: path).load(), metas)
     }

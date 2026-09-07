@@ -25,7 +25,7 @@ struct SettingsSheet: View {
     let model: AppModel
     @State private var draft: SettingsDraft
     @State private var showingKeySheet = false
-    @State private var keyProfile = ProviderProfile.glm
+    @State private var keyProfile = ProviderProfile.anthropic
     @FocusState private var keyboardFocused: Bool
 
     private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
@@ -95,8 +95,6 @@ struct SettingsSheet: View {
                             value: $draft.values.claudeUsageEnabled)
                 checkboxRow(.codexUsage, label: "Codex usage limits",
                             value: $draft.values.codexUsageEnabled)
-                checkboxRow(.glmUsage, label: "GLM usage limits",
-                            value: $draft.values.glmUsageEnabled)
             }
             actionRow
         }

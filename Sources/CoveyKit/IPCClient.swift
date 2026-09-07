@@ -67,6 +67,23 @@ public final class IPCClient {
 
     // MARK: - typed requests
 
+    public func usageSubscribe() async throws -> UsageSnapshot {
+        try await usageRequest(.usageSubscribe)
+    }
+
+    public func usageSetEnabled(provider: UsageProvider, enabled: Bool) async throws -> UsageSnapshot {
+        try await usageRequest(.usageSetEnabled(provider: provider, enabled: enabled))
+    }
+
+    public func usageRefresh(provider: UsageProvider) async throws -> UsageSnapshot {
+        try await usageRequest(.usageRefresh(provider: provider))
+    }
+
+    private func usageRequest(_ op: Request.Op) async throws -> UsageSnapshot {
+        if case let .usageSnapshot(snapshot) = try await request(op) { return snapshot }
+        throw IPCClientError.daemonError(code: "badResponse", message: "expected usage snapshot")
+    }
+
     public func list() async throws -> (sessions: [Session], statuses: [String: Status],
                                         lost: [Session]?, models: [String: String]) {
         if case let .sessions(sessions, statuses, lost, models) = try await request(.list) {

@@ -17,7 +17,15 @@ final class TestDaemon {
     /// Fake ~/.claude/projects for transcript fixtures.
     let modelRoot: String
     let traceRoot: String
-    private let ipc: IPCServer
+    let ipc: IPCServer
+    @MainActor var usageMonitor: UsageMonitor?
+
+    @MainActor
+    func attachUsageMonitor(_ monitor: UsageMonitor) {
+        usageMonitor?.stop()
+        usageMonitor = monitor
+        ipc.attachUsageMonitor(monitor)
+    }
     private let server: SocketServer
 
     init(persisted: [SessionMeta] = []) throws {
@@ -52,6 +60,7 @@ final class TestDaemon {
     }
 
     func stop() {
+        Task { @MainActor in self.usageMonitor?.stop() }
         server.stop()
         try? FileManager.default.removeItem(atPath: modelRoot)
         try? FileManager.default.removeItem(atPath: traceRoot)

@@ -80,20 +80,20 @@ final class PersistedStateTests: XCTestCase {
 
     func testProviderRoundTrips() throws {
         var s = PersistedState()
-        s.provider = "glm"
-        s.sessions["s-1"] = PersistedSession(dir: "/tmp", agent: "claude", providerId: "glm")
+        s.provider = "custom"
+        s.sessions["s-1"] = PersistedSession(dir: "/tmp", agent: "claude", providerId: "custom")
         let back = try JSONDecoder().decode(PersistedState.self,
                                             from: JSONEncoder().encode(s))
-        XCTAssertEqual(back.provider, "glm")
-        XCTAssertEqual(back.sessions["s-1"]?.providerId, "glm")
+        XCTAssertEqual(back.provider, "custom")
+        XCTAssertEqual(back.sessions["s-1"]?.providerId, "custom")
     }
 
     func testRecentProviderIdRoundTrips() throws {
         var s = PersistedState()
-        s.recents = [RecentSession(name: "r", dir: "/tmp", agent: "claude", providerId: "glm")]
+        s.recents = [RecentSession(name: "r", dir: "/tmp", agent: "claude", providerId: "custom")]
         let back = try JSONDecoder().decode(PersistedState.self,
                                             from: JSONEncoder().encode(s))
-        XCTAssertEqual(back.recents.first?.providerId, "glm")
+        XCTAssertEqual(back.recents.first?.providerId, "custom")
     }
 
     func testLegacyPayloadDecodesWithoutProvider() throws {
@@ -219,18 +219,8 @@ final class PersistedStateTests: XCTestCase {
         let decoded = try JSONDecoder().decode(PersistedState.self, from: old.data(using: .utf8)!)
         XCTAssertNil(decoded.claudeUsageEnabled)
         XCTAssertNil(decoded.claudeUsage)
-        XCTAssertNil(decoded.glmUsageEnabled)
-        XCTAssertNil(decoded.glmUsage)
     }
 
-    func testGlmUsageCacheFieldsRoundTrip() throws {
-        var st = PersistedState()
-        st.glmUsageEnabled = false
-        st.glmUsage = PersistedUsage(fiveHour: PersistedUsageWindow(utilization: 17, resetUnix: 5),
-                                     sevenDay: nil, sevenDaySonnet: nil)
-        let back = try JSONDecoder().decode(PersistedState.self, from: JSONEncoder().encode(st))
-        XCTAssertEqual(back, st)
-    }
 }
 
 // MARK: - Pane tree persistence (Split Session)

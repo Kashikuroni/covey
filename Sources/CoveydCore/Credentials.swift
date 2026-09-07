@@ -1,3 +1,4 @@
+import CoveyKit
 import Foundation
 
 struct RawCredentials: Equatable {

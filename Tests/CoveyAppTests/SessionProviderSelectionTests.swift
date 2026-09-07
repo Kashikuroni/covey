@@ -16,16 +16,16 @@ final class SessionProviderSelectionTests: XCTestCase {
 
     func testEffectiveProviderIsScopedToClaudeSession() {
         XCTAssertEqual(
-            SessionProviderSelection.effectiveProviderId(agent: "claude", selectedId: "glm"),
-            "glm"
+            SessionProviderSelection.effectiveProviderId(agent: "claude", selectedId: "custom"),
+            "custom"
         )
         XCTAssertNil(
-            SessionProviderSelection.effectiveProviderId(agent: "codex", selectedId: "glm")
+            SessionProviderSelection.effectiveProviderId(agent: "codex", selectedId: "custom")
         )
     }
 
     func testCredentialProfilesExcludeProvidersThatNeedNoKey() {
-        let profiles = SessionProviderSelection.credentialProfiles([.anthropic, .glm])
-        XCTAssertEqual(profiles.map(\.id), ["glm"])
+        let profiles = SessionProviderSelection.credentialProfiles([.anthropic, .testProvider])
+        XCTAssertEqual(profiles.map(\.id), ["custom"])
     }
 }

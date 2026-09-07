@@ -80,18 +80,18 @@ final class ModelsTests: XCTestCase {
 
     func testSessionProviderRoundTripsAndLegacyDefaultsToNil() throws {
         let session = Session(
-            name: "glm", dir: "/work", cwd: "/work", agent: "claude",
-            created: 42, providerId: "glm"
+            name: "custom", dir: "/work", cwd: "/work", agent: "claude",
+            created: 42, providerId: "custom"
         )
         let data = try JSONEncoder().encode(session)
-        XCTAssertEqual(try JSONDecoder().decode(Session.self, from: data).providerId, "glm")
+        XCTAssertEqual(try JSONDecoder().decode(Session.self, from: data).providerId, "custom")
 
         let legacy = Data(
             #"{"name":"old","dir":"/work","cwd":"/work","agent":"claude","created":1}"#.utf8
         )
         XCTAssertNil(try JSONDecoder().decode(Session.self, from: legacy).providerId)
     }
-    
+
     func testStatusRoundTrip() throws {
         for st in [Status.running, .waiting, .idle] {
             let data = try JSONEncoder().encode(st)

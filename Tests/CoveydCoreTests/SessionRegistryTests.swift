@@ -54,14 +54,14 @@ final class SessionRegistryTests: XCTestCase {
         let reg = SessionRegistry()
         let s = try reg.create(dir: NSTemporaryDirectory(), agent: "/bin/sh",
                                argv: ["/bin/sh", "-c", "sleep 30"],
-                               env: ["ANTHROPIC_AUTH_TOKEN": "secret"], providerId: "glm")
+                               env: ["ANTHROPIC_AUTH_TOKEN": "secret"], providerId: "custom")
         XCTAssertEqual(s.agent, "/bin/sh")
-        XCTAssertEqual(s.providerId, "glm")
-        XCTAssertEqual(reg.list().first { $0.name == s.name }?.providerId, "glm")
-        XCTAssertEqual(reg.snapshotMetasForTesting().first { $0.name == s.name }?.providerId, "glm")
+        XCTAssertEqual(s.providerId, "custom")
+        XCTAssertEqual(reg.list().first { $0.name == s.name }?.providerId, "custom")
+        XCTAssertEqual(reg.snapshotMetasForTesting().first { $0.name == s.name }?.providerId, "custom")
         reg.kill(name: s.name)
     }
-    
+
     func testHiddenSessionIsInListButNotInMetas() throws {
         let reg = SessionRegistry(clock: { 1 })
         _ = try reg.create(dir: "/tmp", agent: "sh", argv: ["/bin/cat"], name: "s-1")
@@ -83,7 +83,7 @@ final class SessionRegistryTests: XCTestCase {
         }
         reg.kill(name: "dup")
     }
-    
+
     func testKillRemovesFromList() throws {
         let reg = SessionRegistry()
         let exitExp = expectation(description: "exit")
@@ -93,7 +93,7 @@ final class SessionRegistryTests: XCTestCase {
         wait(for: [exitExp], timeout: 5)
         XCTAssertTrue(reg.list().isEmpty)
     }
-    
+
     func testStatePreambleReflectsSessionModes() throws {
         let reg = SessionRegistry()
         let s = try reg.create(dir: "/usr", agent: "sh", argv: [
@@ -151,7 +151,7 @@ final class SessionRegistryTests: XCTestCase {
         reg.kill(name: s1.name)
         reg.kill(name: s2.name)
     }
-    
+
     func testCreateFiresSessionAdded() throws {
             let reg = SessionRegistry(clock: { 1 })
             let added = expectation(description: "added")

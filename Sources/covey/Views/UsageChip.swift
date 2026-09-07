@@ -2,9 +2,11 @@ import SwiftUI
 
 /// "2h13m" until the window resets; ceils so it never understates.
 func remainingLabel(resetUnix: Int64, now: Date) -> String {
-    let secs = resetUnix - Int64(now.timeIntervalSince1970)
-    if secs <= 0 { return "0m" }
-    let mins = (secs + 59) / 60
+    let current = Int64(now.timeIntervalSince1970)
+    if resetUnix <= current { return "0m" }
+    let (secs, overflow) = resetUnix.subtractingReportingOverflow(current)
+    guard !overflow else { return "—" }
+    let mins = secs / 60 + (secs % 60 == 0 ? 0 : 1)
     if mins < 60 { return "\(mins)m" }
     let hours = mins / 60
     if hours < 24 {
@@ -18,6 +20,13 @@ func remainingLabel(resetUnix: Int64, now: Date) -> String {
 
 /// amux CLI thresholds: the percentage colors by how burnt the window is.
 enum UsageLevel: Equatable { case ok, warn, err }
+
+/// Old on-disk caches predate parser validation. Reject unsafe conversions,
+/// while preserving real over-limit values such as 104%.
+func displayUsagePercent(_ utilization: Double) -> Int? {
+    guard utilization.isFinite, utilization >= 0 else { return nil }
+    return Int(exactly: utilization.rounded())
+}
 func usageLevel(_ pct: Int) -> UsageLevel {
     if pct >= 80 { return .err }
     if pct >= 50 { return .warn }
@@ -66,12 +75,6 @@ func codexChip(snapshot: CodexRateLimitsSnapshot?, plan: String?) -> AgentUsageC
                           windows: snapshot.windows)
 }
 
-/// GLM chip from the polled 5h-token Usage (nil when there's no snapshot).
-/// z.ai's quota endpoint carries no plan/tier name, so there is no plan badge.
-func glmChip(usage: Usage?) -> AgentUsageChip? {
-    guard let usage, let window = usage.fiveHour else { return nil }
-    return AgentUsageChip(name: "GLM", plan: nil, windows: [LabeledWindow(label: "5h", window: window)])
-}
 
 /// The most-used Codex window across every rate-limit bucket. The compact
 /// header has one Codex slot, so it surfaces whichever limit is closest.
@@ -89,27 +92,20 @@ struct HeaderSegment: Equatable {
     let level: UsageLevel?
 }
 
-/// Claude, Codex, and GLM segments for the compact header, in display order.
-/// The three slots are stable; a provider without data shows an em dash.
+/// Claude and Codex segments for the compact header, in display order.
+/// The two slots are stable; a provider without data shows an em dash.
 func headerSegments(usage: Usage?, usageError: String?,
-                    codexUsage: CodexRateLimitsSnapshot?,
-                    glmUsage: Usage? = nil) -> [HeaderSegment] {
+                    codexUsage: CodexRateLimitsSnapshot?) -> [HeaderSegment] {
     func segment(_ label: String, _ window: UsageWindow?) -> HeaderSegment {
-        guard let window else {
+        guard let window, let pct = displayUsagePercent(window.utilization) else {
             return HeaderSegment(label: label, value: "—", level: nil)
         }
-        let pct = Int(window.utilization.rounded())
         return HeaderSegment(label: label, value: "\(pct)%", level: usageLevel(pct))
     }
     return [
         segment("Claude", usage?.fiveHour),
         segment("Codex", codexHeaderWindow(codexUsage)),
-        segment("GLM", glmUsage?.fiveHour),
     ]
-}
-
-enum UsageProvider: Equatable, CaseIterable {
-    case claude, codex, glm
 }
 
 /// Stable provider row for the limits detail popover. A row exists even when
@@ -125,15 +121,11 @@ struct LimitsRowModel: Equatable, Identifiable {
 
 func limitsRows(usage: Usage?, plan: String?, error: String?,
                 codexUsage: CodexRateLimitsSnapshot?, codexPlan: String?,
-                glmUsage: Usage?, glmError: String?,
-                claudeEnabled: Bool, codexEnabled: Bool,
-                glmEnabled: Bool) -> [LimitsRowModel] {
+                claudeEnabled: Bool, codexEnabled: Bool, codexError: String? = nil) -> [LimitsRowModel] {
     let claude = claudeChip(usage: usage, plan: plan)
         ?? AgentUsageChip(name: "Claude", plan: distinctPlan(plan, name: "Claude"), windows: [])
     let codex = codexChip(snapshot: codexUsage, plan: codexPlan)
         ?? AgentUsageChip(name: "Codex", plan: distinctPlan(codexPlan, name: "Codex"), windows: [])
-    let glm = glmChip(usage: glmUsage)
-        ?? AgentUsageChip(name: "GLM", plan: nil, windows: [])
 
     return [
         LimitsRowModel(provider: .claude, chip: claude, enabled: claudeEnabled,
@@ -141,10 +133,7 @@ func limitsRows(usage: Usage?, plan: String?, error: String?,
                        emptyMessage: claude.windows.isEmpty ? (error ?? "No usage data") : nil),
         LimitsRowModel(provider: .codex, chip: codex, enabled: codexEnabled,
                        stale: false,
-                       emptyMessage: codex.windows.isEmpty ? "No usage data" : nil),
-        LimitsRowModel(provider: .glm, chip: glm, enabled: glmEnabled,
-                       stale: glmError != nil && !glm.windows.isEmpty,
-                       emptyMessage: glm.windows.isEmpty ? (glmError ?? "No usage data") : nil),
+                       emptyMessage: codex.windows.isEmpty ? (codexError ?? "No usage data") : nil),
     ]
 }
 
@@ -167,7 +156,6 @@ struct UsageChip: View {
     let usage: Usage?
     let usageError: String?
     let codexUsage: CodexRateLimitsSnapshot?
-    let glmUsage: Usage?
     let tk: Tokens
 
     var body: some View {
@@ -175,7 +163,7 @@ struct UsageChip: View {
         // even when the snapshot is Equatable-equal (no re-render otherwise).
         TimelineView(.everyMinute) { ctx in
             let segments = headerSegments(usage: usage, usageError: usageError,
-                                          codexUsage: codexUsage, glmUsage: glmUsage)
+                                          codexUsage: codexUsage)
             HStack(spacing: 12) {
                 ForEach(Array(segments.enumerated()), id: \.offset) { index, seg in
                     if index > 0 { divider }
@@ -206,7 +194,6 @@ struct UsageChip: View {
     private func brandColor(_ label: String) -> Color {
         switch label {
         case "Codex": return tk.codexBrand
-        case "GLM": return tk.glmBrand
         default: return tk.claudeBrand
         }
     }

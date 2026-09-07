@@ -1,6 +1,7 @@
 import XCTest
 @testable import covey
 import CoveyKit
+import CoveydCore
 
 private final class ProviderKeyIOProbe: @unchecked Sendable {
     private let lock = NSLock()
@@ -68,10 +69,10 @@ private actor AsyncGate {
 
 final class SettingsApplyTests: XCTestCase {
     func testProviderKeyLabelDistinguishesCheckingSetAndMissing() {
-        XCTAssertEqual(providerKeyLabel(profile: .glm, status: .checking), "Checking…")
-        XCTAssertEqual(providerKeyLabel(profile: .glm, status: .set), "GLM API key set ✓")
-        XCTAssertEqual(providerKeyLabel(profile: .glm, status: .missing),
-                       "Set GLM API key…")
+        XCTAssertEqual(providerKeyLabel(profile: .testProvider, status: .checking), "Checking…")
+        XCTAssertEqual(providerKeyLabel(profile: .testProvider, status: .set), "Custom API key set ✓")
+        XCTAssertEqual(providerKeyLabel(profile: .testProvider, status: .missing),
+                       "Set Custom API key…")
     }
 
     func testProviderKeyMutationErrorPresentation() {
@@ -86,7 +87,6 @@ final class SettingsApplyTests: XCTestCase {
     private func makeSettingsModel(
         _ daemon: TestDaemon,
         store: StateStore,
-        fetchGlmAccount: @escaping () async -> Account = { Account() },
         readProviderKey: @escaping @Sendable (String) -> String? = {
             ProviderKeychain.read(account: $0)
         },
@@ -97,15 +97,16 @@ final class SettingsApplyTests: XCTestCase {
             ProviderKeychain.delete(account: $0)
         }
     ) throws -> AppModel {
+        let monitor = UsageMonitor(path: daemon.path + ".usage.json", legacyPath: daemon.path + ".legacy.json",
+                                   fetchAccount: { Account() },
+                                   usageInterval: 60, resolveCodex: { nil })
+        daemon.attachUsageMonitor(monitor)
         let client = IPCClient(path: daemon.path)
         try client.connect()
         return AppModel(
             client: client,
             makeClient: { let c = IPCClient(path: daemon.path); try c.connect(); return c },
             store: store,
-            fetchAccount: { Account() },
-            fetchGlmAccount: fetchGlmAccount,
-            usageInterval: 60,
             readProviderKey: readProviderKey,
             writeProviderKey: writeProviderKey,
             deleteProviderKey: deleteProviderKey)
@@ -117,7 +118,7 @@ final class SettingsApplyTests: XCTestCase {
         let store = StateStore(
             path: "\(NSTemporaryDirectory())covey-settings-\(UUID().uuidString).json",
             debounce: 0.05)
-        let probe = ProviderKeyIOProbe(stored: ["covey.provider.glm": "KEY"])
+        let probe = ProviderKeyIOProbe(stored: ["covey.provider.custom": "KEY"])
         let model = try makeSettingsModel(
             daemon,
             store: store,
@@ -125,13 +126,13 @@ final class SettingsApplyTests: XCTestCase {
             writeProviderKey: { probe.write($0, $1) },
             deleteProviderKey: { probe.delete($0) })
 
-        XCTAssertEqual(model.providerKeyStatus(.glm), .checking)
+        XCTAssertEqual(model.providerKeyStatus(.testProvider), .checking)
         XCTAssertTrue(probe.reads.isEmpty, "render-readable status must be cache-only")
 
-        await model.refreshProviderKeyStatuses([.glm])
+        await model.refreshProviderKeyStatuses([.testProvider])
 
-        XCTAssertEqual(model.providerKeyStatus(.glm), .set)
-        XCTAssertEqual(probe.reads.map { $0.account }, ["covey.provider.glm"])
+        XCTAssertEqual(model.providerKeyStatus(.testProvider), .set)
+        XCTAssertEqual(probe.reads.map { $0.account }, ["covey.provider.custom"])
         XCTAssertEqual(probe.reads.map { $0.onMainThread }, [false])
     }
 
@@ -149,24 +150,24 @@ final class SettingsApplyTests: XCTestCase {
             writeProviderKey: { probe.write($0, $1) },
             deleteProviderKey: { probe.delete($0) })
 
-        let saveResult = await model.setProviderKey(.glm, "KEY")
+        let saveResult = await model.setProviderKey(.testProvider, "KEY")
         XCTAssertEqual(saveResult, .success)
 
-        XCTAssertEqual(model.providerKeyStatus(.glm), .set)
-        XCTAssertEqual(probe.writes.map { $0.account }, ["covey.provider.glm"])
+        XCTAssertEqual(model.providerKeyStatus(.testProvider), .set)
+        XCTAssertEqual(probe.writes.map { $0.account }, ["covey.provider.custom"])
         XCTAssertEqual(probe.writes.map { $0.value }, ["KEY"])
         XCTAssertEqual(probe.writes.map { $0.onMainThread }, [false])
-        XCTAssertEqual(probe.reads.map { $0.account }, ["covey.provider.glm"])
+        XCTAssertEqual(probe.reads.map { $0.account }, ["covey.provider.custom"])
         XCTAssertEqual(probe.reads.map { $0.onMainThread }, [false])
 
-        let clearResult = await model.setProviderKey(.glm, "")
+        let clearResult = await model.setProviderKey(.testProvider, "")
         XCTAssertEqual(clearResult, .success)
 
-        XCTAssertEqual(model.providerKeyStatus(.glm), .missing)
-        XCTAssertEqual(probe.deletes.map { $0.account }, ["covey.provider.glm"])
+        XCTAssertEqual(model.providerKeyStatus(.testProvider), .missing)
+        XCTAssertEqual(probe.deletes.map { $0.account }, ["covey.provider.custom"])
         XCTAssertEqual(probe.deletes.map { $0.onMainThread }, [false])
         XCTAssertEqual(probe.reads.map { $0.account },
-                       ["covey.provider.glm", "covey.provider.glm"])
+                       ["covey.provider.custom", "covey.provider.custom"])
         XCTAssertEqual(probe.reads.map { $0.onMainThread }, [false, false])
     }
 
@@ -184,12 +185,12 @@ final class SettingsApplyTests: XCTestCase {
             writeProviderKey: { probe.write($0, $1) },
             deleteProviderKey: { probe.delete($0) })
 
-        let result = await model.setProviderKey(.glm, "KEY")
+        let result = await model.setProviderKey(.testProvider, "KEY")
 
         XCTAssertEqual(
             result,
             .failure("Couldn’t save API key. Check Keychain access and try again."))
-        XCTAssertNotEqual(model.providerKeyStatus(.glm), .set)
+        XCTAssertNotEqual(model.providerKeyStatus(.testProvider), .set)
     }
 
     @MainActor
@@ -199,7 +200,7 @@ final class SettingsApplyTests: XCTestCase {
             path: "\(NSTemporaryDirectory())covey-settings-\(UUID().uuidString).json",
             debounce: 0.05)
         let probe = ProviderKeyIOProbe(
-            stored: ["covey.provider.glm": "OLD"],
+            stored: ["covey.provider.custom": "OLD"],
             writeSucceeds: false
         )
         let model = try makeSettingsModel(
@@ -208,15 +209,15 @@ final class SettingsApplyTests: XCTestCase {
             readProviderKey: { probe.read($0) },
             writeProviderKey: { probe.write($0, $1) },
             deleteProviderKey: { probe.delete($0) })
-        await model.refreshProviderKeyStatuses([.glm])
+        await model.refreshProviderKeyStatuses([.testProvider])
 
-        let result = await model.setProviderKey(.glm, "NEW")
+        let result = await model.setProviderKey(.testProvider, "NEW")
 
         XCTAssertEqual(
             result,
             .failure("Couldn’t save API key. Check Keychain access and try again."))
-        XCTAssertEqual(model.providerKeyStatus(.glm), .set)
-        XCTAssertEqual(probe.read("covey.provider.glm"), "OLD")
+        XCTAssertEqual(model.providerKeyStatus(.testProvider), .set)
+        XCTAssertEqual(probe.read("covey.provider.custom"), "OLD")
     }
 
     @MainActor
@@ -232,12 +233,12 @@ final class SettingsApplyTests: XCTestCase {
             writeProviderKey: { _, _ in true },
             deleteProviderKey: { _ in true })
 
-        let result = await model.setProviderKey(.glm, "KEY")
+        let result = await model.setProviderKey(.testProvider, "KEY")
 
         XCTAssertEqual(
             result,
             .failure("Couldn’t save API key. Check Keychain access and try again."))
-        XCTAssertNotEqual(model.providerKeyStatus(.glm), .set)
+        XCTAssertNotEqual(model.providerKeyStatus(.testProvider), .set)
     }
 
     @MainActor
@@ -247,7 +248,7 @@ final class SettingsApplyTests: XCTestCase {
             path: "\(NSTemporaryDirectory())covey-settings-\(UUID().uuidString).json",
             debounce: 0.05)
         let probe = ProviderKeyIOProbe(
-            stored: ["covey.provider.glm": "KEY"],
+            stored: ["covey.provider.custom": "KEY"],
             deleteSucceeds: false
         )
         let model = try makeSettingsModel(
@@ -256,15 +257,15 @@ final class SettingsApplyTests: XCTestCase {
             readProviderKey: { probe.read($0) },
             writeProviderKey: { probe.write($0, $1) },
             deleteProviderKey: { probe.delete($0) })
-        await model.refreshProviderKeyStatuses([.glm])
+        await model.refreshProviderKeyStatuses([.testProvider])
 
-        let result = await model.setProviderKey(.glm, "")
+        let result = await model.setProviderKey(.testProvider, "")
 
         XCTAssertEqual(
             result,
             .failure("Couldn’t save API key. Check Keychain access and try again."))
-        XCTAssertEqual(model.providerKeyStatus(.glm), .set)
-        XCTAssertEqual(probe.read("covey.provider.glm"), "KEY")
+        XCTAssertEqual(model.providerKeyStatus(.testProvider), .set)
+        XCTAssertEqual(probe.read("covey.provider.custom"), "KEY")
     }
 
     @MainActor
@@ -273,63 +274,22 @@ final class SettingsApplyTests: XCTestCase {
         let store = StateStore(
             path: "\(NSTemporaryDirectory())covey-settings-\(UUID().uuidString).json",
             debounce: 0.05)
-        let probe = ProviderKeyIOProbe(stored: ["covey.provider.glm": "KEY"])
+        let probe = ProviderKeyIOProbe(stored: ["covey.provider.custom": "KEY"])
         let model = try makeSettingsModel(
             daemon,
             store: store,
             readProviderKey: { probe.read($0) },
             writeProviderKey: { probe.write($0, $1) },
             deleteProviderKey: { _ in true })
-        await model.refreshProviderKeyStatuses([.glm])
+        await model.refreshProviderKeyStatuses([.testProvider])
 
-        let result = await model.setProviderKey(.glm, "")
+        let result = await model.setProviderKey(.testProvider, "")
 
         XCTAssertEqual(
             result,
             .failure("Couldn’t save API key. Check Keychain access and try again."))
-        XCTAssertEqual(model.providerKeyStatus(.glm), .set)
-        XCTAssertEqual(probe.read("covey.provider.glm"), "KEY")
-    }
-
-    @MainActor
-    func testSuccessfulGlmKeySaveRefreshesLimitsImmediately() async throws {
-        let daemon = try TestDaemon(); defer { daemon.stop() }
-        let store = StateStore(
-            path: "\(NSTemporaryDirectory())covey-settings-\(UUID().uuidString).json",
-            debounce: 0.05)
-        let probe = ProviderKeyIOProbe()
-        let fetchGate = AsyncGate()
-        let glmAccount = Account(usage: Usage(
-            fiveHour: UsageWindow(utilization: 23, resetUnix: nil),
-            sevenDay: nil,
-            sevenDaySonnet: nil
-        ))
-        let model = try makeSettingsModel(
-            daemon,
-            store: store,
-            fetchGlmAccount: {
-                await fetchGate.wait()
-                return glmAccount
-            },
-            readProviderKey: { probe.read($0) },
-            writeProviderKey: { probe.write($0, $1) },
-            deleteProviderKey: { probe.delete($0) })
-
-        var result: ProviderKeyMutationResult?
-        let save = Task { @MainActor in
-            result = await model.setProviderKey(.glm, "KEY")
-        }
-
-        let saveReturned = await eventually(timeout: 0.2) { result != nil }
-        XCTAssertTrue(saveReturned, "saving the key must not wait for the usage network request")
-        XCTAssertEqual(result, .success)
-
-        await fetchGate.open()
-        await save.value
-        let refreshed = await eventually {
-            model.glmUsage?.fiveHour?.utilization == 23
-        }
-        XCTAssertTrue(refreshed)
+        XCTAssertEqual(model.providerKeyStatus(.testProvider), .set)
+        XCTAssertEqual(probe.read("covey.provider.custom"), "KEY")
     }
 
     @MainActor
@@ -358,12 +318,11 @@ final class SettingsApplyTests: XCTestCase {
                        SettingsValues(theme: .dark, vimMode: true,
                                       showSessions: true, showHeader: true, showFooter: true,
                                       usagePlacement: .right,
-                                      claudeUsageEnabled: true, codexUsageEnabled: true,
-                                      glmUsageEnabled: true))
+                                      claudeUsageEnabled: true, codexUsageEnabled: true))
     }
 
     @MainActor
-    func testApplySettingsPersistsAllValuesInOneWrite() async throws {
+    func testApplySettingsPersistsLocalValuesAndAcknowledgesDaemonPreferences() async throws {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let path = "\(NSTemporaryDirectory())covey-settings-\(UUID().uuidString).json"
         defer { try? FileManager.default.removeItem(atPath: path) }
@@ -377,7 +336,7 @@ final class SettingsApplyTests: XCTestCase {
             theme: .light, vimMode: false,
             showSessions: false, showHeader: false, showFooter: false,
             usagePlacement: .left,
-            claudeUsageEnabled: false, codexUsageEnabled: false, glmUsageEnabled: false))
+            claudeUsageEnabled: false, codexUsageEnabled: false))
         store.flush()
 
         XCTAssertEqual(model.themeRaw, "light")
@@ -386,9 +345,12 @@ final class SettingsApplyTests: XCTestCase {
         XCTAssertFalse(model.showHeader)
         XCTAssertFalse(model.showFooter)
         XCTAssertEqual(model.usagePlacement, .left)
+        let acknowledged = await eventually {
+            !model.claudeUsageEnabled && !model.codexUsageEnabled && !model.usageSettingsPending
+        }
+        XCTAssertTrue(acknowledged)
         XCTAssertFalse(model.claudeUsageEnabled)
         XCTAssertFalse(model.codexUsageEnabled)
-        XCTAssertFalse(model.glmUsageEnabled)
         XCTAssertNil(model.modal)
         XCTAssertEqual(store.writeCount, writesBefore + 1)
 
@@ -399,9 +361,8 @@ final class SettingsApplyTests: XCTestCase {
         XCTAssertEqual(saved.showHeader, false)
         XCTAssertEqual(saved.showFooter, false)
         XCTAssertEqual(saved.usagePlacement, "left")
-        XCTAssertEqual(saved.claudeUsageEnabled, false)
-        XCTAssertEqual(saved.codexUsageEnabled, false)
-        XCTAssertEqual(saved.glmUsageEnabled, false)
+        XCTAssertNil(saved.claudeUsageEnabled)
+        XCTAssertNil(saved.codexUsageEnabled)
     }
 
     @MainActor
@@ -410,7 +371,7 @@ final class SettingsApplyTests: XCTestCase {
         let path = "\(NSTemporaryDirectory())covey-settings-\(UUID().uuidString).json"
         defer { try? FileManager.default.removeItem(atPath: path) }
         let store = StateStore(path: path, debounce: 0.05)
-        store.save(PersistedState(provider: "glm"))
+        store.save(PersistedState(provider: "custom"))
         store.flush()
         let model = try makeSettingsModel(daemon, store: store)
         await model.start()
@@ -419,8 +380,7 @@ final class SettingsApplyTests: XCTestCase {
                        SettingsValues(theme: .dark, vimMode: true,
                                       showSessions: true, showHeader: true, showFooter: true,
                                       usagePlacement: .right,
-                                      claudeUsageEnabled: true, codexUsageEnabled: true,
-                                      glmUsageEnabled: true))
+                                      claudeUsageEnabled: true, codexUsageEnabled: true))
     }
 
     @MainActor
@@ -432,7 +392,8 @@ final class SettingsApplyTests: XCTestCase {
         await model.start()
         store.flush()
         let writesBefore = store.writeCount
-        model.setCodexState(.active(CodexAccount(type: "chatgpt", planType: "pro")))
+        daemon.usageMonitor!.setCodexState(.active(CodexAccount(type: "chatgpt", planType: "pro")))
+        _ = await eventually { model.codexState == .active(CodexAccount(type: "chatgpt", planType: "pro")) }
         model.modal = .settings
         model.applySettings(model.settingsValues)
         store.flush()
@@ -496,8 +457,8 @@ final class SettingsApplyTests: XCTestCase {
                                debounce: 0.05)
         let model = try makeSettingsModel(daemon, store: store)
         await model.start()
-        model.setCodexState(.active(CodexAccount(type: "chatgpt", planType: "pro")))
-        model.ingestCodexRateLimits(CodexRateLimitsSnapshot(
+        daemon.usageMonitor!.setCodexState(.active(CodexAccount(type: "chatgpt", planType: "pro")))
+        daemon.usageMonitor!.ingestRateLimits(CodexRateLimitsSnapshot(
             primary: LabeledWindow(label: "5h",
                                    window: UsageWindow(utilization: 30, resetUnix: 1)),
             secondary: nil))
@@ -505,6 +466,8 @@ final class SettingsApplyTests: XCTestCase {
         values.codexUsageEnabled = false
         model.modal = .settings
         model.applySettings(values)
+        let disabled = await eventually { !model.codexUsageEnabled && model.codexUsage?.primary?.window.utilization == 30 }
+        XCTAssertTrue(disabled)
         XCTAssertEqual(model.codexState, .stopped)
         XCTAssertEqual(model.codexUsage?.primary?.window.utilization, 30)
     }

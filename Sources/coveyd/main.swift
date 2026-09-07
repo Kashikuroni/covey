@@ -59,6 +59,12 @@ let traceMonitor = TraceMonitor(store: traceStore, snapshot: {
 let ipc = IPCServer(registry: registry, monitor: monitor, gitMonitor: gitMonitor,
                     modelMonitor: modelMonitor, traceMonitor: traceMonitor,
                     traceStore: traceStore)
+let usageMonitor = MainActor.assumeIsolated {
+    let usage = UsageMonitor(path: dir.appendingPathComponent("usage.json").path,
+                             legacyPath: dir.appendingPathComponent("state.json").path)
+    ipc.attachUsageMonitor(usage)
+    return usage
+}
 let server = SocketServer(path: socketPath)
 server.onAccept = { conn in
     ipc.register(conn)
@@ -72,7 +78,11 @@ server.onAccept = { conn in
 // C function, so use DispatchSource signal sources (their closures may capture).
 signal(SIGTERM, SIG_IGN)
 signal(SIGINT, SIG_IGN)
-let onSignal: () -> Void = { unlink(socketPath); exit(0) }
+let onSignal: () -> Void = {
+    MainActor.assumeIsolated { usageMonitor.stop() }
+    unlink(socketPath)
+    exit(0)
+}
 let termSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
 let intSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
 termSource.setEventHandler(handler: onSignal)
@@ -88,6 +98,7 @@ do {
     exit(1)
 }
 
+MainActor.assumeIsolated { usageMonitor.start() }
 monitor.start()
 gitMonitor.start()
 modelMonitor.start()

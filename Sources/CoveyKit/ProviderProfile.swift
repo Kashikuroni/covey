@@ -24,7 +24,7 @@ public struct ProviderModelSlots: Codable, Equatable {
 /// A Claude Code API provider. Pure data so new providers (Kimi, …) ship as a
 /// `~/.covey/config.json` entry or a new built-in — no switching code changes.
 public struct ProviderProfile: Codable, Equatable, Identifiable {
-    public var id: String                         // "anthropic" | "glm" | "kimi" …
+    public var id: String                         // "anthropic" | "kimi" …
     public var label: String                      // UI label
     public var baseURL: String?                   // nil → no ANTHROPIC_BASE_URL override
     public var auth: ProviderAuth
@@ -68,22 +68,16 @@ public struct ProviderProfile: Codable, Equatable, Identifiable {
     /// nothing; claude reads its own credentials.
     public static let anthropic = ProviderProfile(id: "anthropic", label: "Anthropic")
 
-    /// Z.AI GLM Coding Plan for Claude Code. Model slots intentionally stay
-    /// unset so Z.AI can apply its current server-side defaults.
-    public static let glm = ProviderProfile(
-        id: "glm", label: "GLM", baseURL: "https://api.z.ai/api/anthropic", auth: .bearer,
-        keychainAccount: "covey.provider.glm",
-        extraEnv: ["API_TIMEOUT_MS": "3000000"])
+
 }
 
-/// Loads the provider list: built-ins (`anthropic`, `glm`) overlaid by user
+/// Loads the provider list: built-ins (`anthropic`) overlaid by user
 /// entries from `~/.covey/config.json`. `anthropic` is always first; a
 /// `defaultProvider` is hoisted to second. Adding a provider = one config entry.
 public enum ProviderRegistry {
     public static func load(path: String = CoveyConfig.defaultPath) -> [ProviderProfile] {
         var byId: [String: ProviderProfile] = [
             ProviderProfile.anthropic.id: ProviderProfile.anthropic,
-            ProviderProfile.glm.id: ProviderProfile.glm,
         ]
         let cfg = CoveyConfig.load(path: path)
         for p in cfg.providers ?? [] where !p.id.isEmpty {

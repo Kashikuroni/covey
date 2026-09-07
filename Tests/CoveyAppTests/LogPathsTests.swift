@@ -1,5 +1,6 @@
 import XCTest
 @testable import covey
+@testable import CoveydCore
 
 /// Прогон тестов не должен писать в журнал реального приложения: иначе
 /// диагностика по ~/Library/Logs/Covey смешивает события пользователя с

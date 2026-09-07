@@ -5,7 +5,7 @@ public struct CoveyConfig: Codable, Equatable {
     public var defaultAgent: String?
     public var agentPresets: [String]?
     /// User-defined / overridden Claude Code provider profiles, merged over the
-    /// built-ins (`anthropic`, `glm`) by id. See `ProviderRegistry`.
+    /// built-ins (`anthropic`) by id. See `ProviderRegistry`.
     public var providers: [ProviderProfile]?
     /// Provider id hoisted to the top of the picker (anthropic is always first
     /// regardless; this controls the second slot).

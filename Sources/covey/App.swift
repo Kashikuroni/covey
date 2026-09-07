@@ -62,9 +62,7 @@ struct CoveyApp: App {
                         .homeDirectoryForCurrentUser.appendingPathComponent(".covey/state.json").path)
                     let m = AppModel(client: try CoveyApp.makeClient(),
                                      makeClient: CoveyApp.makeClient,
-                                     store: store,
-                                     fetchAccount: UsageService.fetchAccount,
-                                     fetchGlmAccount: GlmUsageService.fetchAccount)
+                                     store: store)
                     await m.start()
                     Notifier.requestPermission()
                     model = m
@@ -72,7 +70,6 @@ struct CoveyApp: App {
                     startupError = "\(error)"
                 }
             }
-            .onDisappear { model?.stopCodexServer() }
         }
         // Content under the title bar: the topbar row sits at traffic-light
         // level (TopBar pads left for the buttons), and the toolbar is gone.
@@ -131,6 +128,17 @@ struct CoveyApp: App {
                     set: { model?.setVimMode($0) }))
             }
         }
+        MenuBarExtra(isInserted: Binding(
+            get: { model?.menuBarLimitsEnabled ?? false },
+            set: { model?.setMenuBarLimitsEnabled($0) }
+        )) {
+            if let model {
+                MenuBarLimitsPanel(model: model)
+            }
+        } label: {
+            MenuBarLimitsLabel(usage: model?.usage, codexUsage: model?.codexUsage)
+        }
+        .menuBarExtraStyle(.window)
     }
 
     /// ensureDaemon + connect. The daemon binary lives next to our own binary —

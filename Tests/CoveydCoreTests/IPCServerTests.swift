@@ -251,7 +251,7 @@ final class IPCServerTests: XCTestCase {
 
     func testListCarriesLostAndClearLostRemoves() {
         let meta = SessionMeta(name: "old", dir: "/tmp", agent: "claude",
-                               argv: ["claude"], created: 1, providerId: "glm")
+                               argv: ["claude"], created: 1, providerId: "custom")
         let registry = SessionRegistry(persisted: [meta])
         let server = IPCServer(registry: registry,
                                monitor: StatusMonitor(snapshot: { registry.snapshotScreens() }))
@@ -260,7 +260,7 @@ final class IPCServerTests: XCTestCase {
         server.handle(Request(id: 1, op: .list), from: sink)
         waitUntil({ sink.captured.contains {
             if case .response(1, .sessions(_, _, let lost, _)) = $0 {
-                return lost?.map(\.name) == ["old"] && lost?.first?.providerId == "glm"
+                return lost?.map(\.name) == ["old"] && lost?.first?.providerId == "custom"
             }
             return false
         } }, "list carries lost")

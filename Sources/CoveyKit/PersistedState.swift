@@ -240,7 +240,7 @@ public struct PersistedWorkspaceView: Codable, Equatable {
 public struct PersistedState: Codable, Equatable {
     // wired this slice
     public var theme: String?
-    /// Active Claude Code provider id ("anthropic" | "glm" | …); nil = anthropic.
+    /// Active Claude Code provider id ("anthropic" | …); nil = anthropic.
     public var provider: String?
     public var splitPct: Int?
     public var recents: [RecentSession]
@@ -285,6 +285,8 @@ public struct PersistedState: Codable, Equatable {
     /// Top-bar placement for the usage chip and fullscreen clock:
     /// "left", "center", or "right". Unknown values are resolved by the GUI.
     public var usagePlacement: String?
+    /// Optional for compatibility with older state files; nil means hidden.
+    public var menuBarLimitsEnabled: Bool?
     /// Issue number bound to a session, keyed by session name. Migrated on
     /// rename so the binding survives (the name is the session's durable
     /// identity — it is preserved across relaunch, only rename changes it).
@@ -299,10 +301,6 @@ public struct PersistedState: Codable, Equatable {
     public var claudePlan: String?
     public var codexUsage: PersistedCodexUsage?
     public var codexPlan: String?
-    /// GLM's usage endpoint carries no plan/tier name, so unlike Claude/Codex
-    /// there is no `glmPlan` field.
-    public var glmUsageEnabled: Bool?
-    public var glmUsage: PersistedUsage?
 
     public init(
         theme: String? = nil, provider: String? = nil, splitPct: Int? = nil,
@@ -329,8 +327,6 @@ public struct PersistedState: Codable, Equatable {
         claudePlan: String? = nil,
         codexUsage: PersistedCodexUsage? = nil,
         codexPlan: String? = nil,
-        glmUsageEnabled: Bool? = nil,
-        glmUsage: PersistedUsage? = nil,
         workspaceViews: [PersistedWorkspaceView]? = nil,
         viewOfSession: [String: String]? = nil
     ) {
@@ -360,8 +356,6 @@ public struct PersistedState: Codable, Equatable {
         self.claudePlan = claudePlan
         self.codexUsage = codexUsage
         self.codexPlan = codexPlan
-        self.glmUsageEnabled = glmUsageEnabled
-        self.glmUsage = glmUsage
         self.workspaceViews = workspaceViews
         self.viewOfSession = viewOfSession
     }

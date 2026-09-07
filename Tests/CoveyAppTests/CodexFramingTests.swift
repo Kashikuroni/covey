@@ -1,6 +1,7 @@
 import XCTest
 import Foundation
 @testable import covey
+@testable import CoveydCore
 
 final class CodexFramingTests: XCTestCase {
     func testSplitsCompleteLinesAndKeepsRemainder() {

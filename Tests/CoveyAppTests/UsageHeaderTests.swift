@@ -3,6 +3,20 @@ import SwiftUI
 @testable import covey
 
 final class UsageHeaderTests: XCTestCase {
+    func testDisplayPercentBoundsLegacyCachedValues() {
+        XCTAssertNil(displayUsagePercent(1e100))
+        XCTAssertNil(displayUsagePercent(-1e100))
+        XCTAssertEqual(displayUsagePercent(104), 104)
+        XCTAssertNil(displayUsagePercent(.nan))
+        XCTAssertNil(displayUsagePercent(.infinity))
+    }
+
+    func testExtremeResetTimesDoNotOverflowCountdown() {
+        let now = Date(timeIntervalSince1970: 0)
+        XCTAssertEqual(remainingLabel(resetUnix: .min, now: now), "0m")
+        XCTAssertFalse(remainingLabel(resetUnix: .max, now: now).isEmpty)
+    }
+
     func testLevelColorMapsToTokens() {
         let tk = Tokens.dark
         XCTAssertEqual(levelColor(.ok, tk: tk), tk.ok)
@@ -64,7 +78,6 @@ final class UsageHeaderTests: XCTestCase {
         XCTAssertEqual(segs, [
             HeaderSegment(label: "Claude", value: "65%", level: .warn),
             HeaderSegment(label: "Codex", value: "18%", level: .ok),
-            HeaderSegment(label: "GLM", value: "—", level: nil),
         ])
     }
 
@@ -73,7 +86,6 @@ final class UsageHeaderTests: XCTestCase {
         XCTAssertEqual(segs, [
             HeaderSegment(label: "Claude", value: "—", level: nil),
             HeaderSegment(label: "Codex", value: "—", level: nil),
-            HeaderSegment(label: "GLM", value: "—", level: nil),
         ])
     }
 
@@ -84,34 +96,6 @@ final class UsageHeaderTests: XCTestCase {
         XCTAssertEqual(segs, [
             HeaderSegment(label: "Claude", value: "5%", level: .ok),
             HeaderSegment(label: "Codex", value: "—", level: nil),
-            HeaderSegment(label: "GLM", value: "—", level: nil),
-        ])
-    }
-
-    func testHeaderSegmentsIncludesGlmAsThirdSegment() {
-        let usage = Usage(fiveHour: UsageWindow(utilization: 65, resetUnix: 1),
-                          sevenDay: nil, sevenDaySonnet: nil)
-        let codex = CodexRateLimitsSnapshot(
-            primary: LabeledWindow(label: "5h", window: UsageWindow(utilization: 8, resetUnix: 1)),
-            secondary: LabeledWindow(label: "7d", window: UsageWindow(utilization: 18, resetUnix: 2)))
-        let glm = Usage(fiveHour: UsageWindow(utilization: 90, resetUnix: 1),
-                        sevenDay: nil, sevenDaySonnet: nil)
-        let segs = headerSegments(usage: usage, usageError: nil, codexUsage: codex, glmUsage: glm)
-        XCTAssertEqual(segs, [
-            HeaderSegment(label: "Claude", value: "65%", level: .warn),
-            HeaderSegment(label: "Codex", value: "18%", level: .ok),
-            HeaderSegment(label: "GLM", value: "90%", level: .err),
-        ])
-    }
-
-    func testHeaderSegmentsDefaultGlmArgumentStillKeepsGlmSlot() {
-        let usage = Usage(fiveHour: UsageWindow(utilization: 5, resetUnix: nil),
-                          sevenDay: nil, sevenDaySonnet: nil)
-        let segs = headerSegments(usage: usage, usageError: nil, codexUsage: nil)
-        XCTAssertEqual(segs, [
-            HeaderSegment(label: "Claude", value: "5%", level: .ok),
-            HeaderSegment(label: "Codex", value: "—", level: nil),
-            HeaderSegment(label: "GLM", value: "—", level: nil),
         ])
     }
 

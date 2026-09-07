@@ -2,25 +2,40 @@ import Foundation
 
 /// One labeled usage window (Codex primary/secondary), reusing the Claude
 /// `UsageWindow` so the chip renderer stays shared.
-struct LabeledWindow: Equatable {
-    let label: String
-    let window: UsageWindow
+public struct LabeledWindow: Codable, Equatable, Sendable {
+    public init(label: String, window: UsageWindow) {
+        self.label = label
+        self.window = window
+    }
+    public var label: String
+    public var window: UsageWindow
 }
 
 /// Codex account identity from `account/read`. Only `chatgpt` carries
 /// subscription rate limits; `apiKey` (or anything else) means no chip.
-struct CodexAccount: Equatable {
-    var type: String
-    var planType: String?
+public struct CodexAccount: Codable, Equatable, Sendable {
+    public init(type: String, planType: String? = nil) {
+        self.type = type
+        self.planType = planType
+    }
+    public var type: String
+    public var planType: String?
 }
 
 /// One Codex rate-limit bucket. Keyed by upstream limit ID so partial
 /// `updated` events merge unambiguously regardless of display label.
-struct CodexRateLimitBucket: Equatable {
-    let id: String
-    let name: String?
-    var primary: LabeledWindow?
-    var secondary: LabeledWindow?
+public struct CodexRateLimitBucket: Codable, Equatable, Sendable {
+    public init(id: String, name: String? = nil, primary: LabeledWindow? = nil,
+                secondary: LabeledWindow? = nil) {
+        self.id = id
+        self.name = name
+        self.primary = primary
+        self.secondary = secondary
+    }
+    public var id: String
+    public var name: String?
+    public var primary: LabeledWindow?
+    public var secondary: LabeledWindow?
 
     private var windowPrefix: String? {
         guard id != "codex" else { return nil }
@@ -29,7 +44,7 @@ struct CodexRateLimitBucket: Equatable {
         return name
     }
 
-    var windows: [LabeledWindow] {
+    public var windows: [LabeledWindow] {
         [primary, secondary].compactMap { labeled in
             guard let labeled else { return nil }
             guard let windowPrefix else { return labeled }
@@ -39,14 +54,14 @@ struct CodexRateLimitBucket: Equatable {
     }
 }
 
-struct CodexRateLimitsSnapshot: Equatable {
-    var buckets: [String: CodexRateLimitBucket]
+public struct CodexRateLimitsSnapshot: Codable, Equatable, Sendable {
+    public var buckets: [String: CodexRateLimitBucket]
 
-    init(buckets: [String: CodexRateLimitBucket]) {
+    public init(buckets: [String: CodexRateLimitBucket]) {
         self.buckets = buckets
     }
 
-    init(primary: LabeledWindow?, secondary: LabeledWindow?) {
+    public init(primary: LabeledWindow?, secondary: LabeledWindow?) {
         buckets = ["codex": CodexRateLimitBucket(id: "codex", name: nil,
                                                    primary: primary, secondary: secondary)]
     }
@@ -55,10 +70,10 @@ struct CodexRateLimitsSnapshot: Equatable {
         buckets["codex"] ?? buckets.sorted { $0.key < $1.key }.first?.value
     }
 
-    var primary: LabeledWindow? { legacyBucket?.primary }
-    var secondary: LabeledWindow? { legacyBucket?.secondary }
+    public var primary: LabeledWindow? { legacyBucket?.primary }
+    public var secondary: LabeledWindow? { legacyBucket?.secondary }
 
-    var windows: [LabeledWindow] {
+    public var windows: [LabeledWindow] {
         buckets.values.sorted {
             if $0.id == "codex" { return true }
             if $1.id == "codex" { return false }
@@ -68,14 +83,14 @@ struct CodexRateLimitsSnapshot: Equatable {
 }
 
 /// Compact label from a window duration: 300→"5h", 10080→"7d", 90→"90m".
-func codexWindowLabel(minutes: Int) -> String {
+public func codexWindowLabel(minutes: Int) -> String {
     if minutes % 1440 == 0 { return "\(minutes / 1440)d" }
     if minutes % 60 == 0 { return "\(minutes / 60)h" }
     return "\(minutes)m"
 }
 
 /// planType → badge: "plus"→"Plus". Unknown non-empty → capitalized as-is.
-func codexPlanLabel(_ raw: String?) -> String? {
+public func codexPlanLabel(_ raw: String?) -> String? {
     guard let raw, !raw.isEmpty else { return nil }
     return raw.prefix(1).uppercased() + raw.dropFirst()
 }
@@ -95,16 +110,17 @@ private func str(_ dict: [String: Any], _ keys: [String]) -> String? {
     return nil
 }
 
-func parseCodexAccount(_ json: [String: Any]) -> CodexAccount? {
+public func parseCodexAccount(_ json: [String: Any]) -> CodexAccount? {
     guard let acc = json["account"] as? [String: Any],
           let type = str(acc, ["type"]) else { return nil }
     return CodexAccount(type: type, planType: str(acc, ["planType", "plan_type"]))
 }
 
 private func parseWindow(_ dict: [String: Any], fallbackLabel: String) -> LabeledWindow? {
-    guard let used = num(dict, ["usedPercent", "used_percent"]) else { return nil }
-    let mins = num(dict, ["windowDurationMins", "window_duration_mins"]).map { Int($0) }
-    let reset = num(dict, ["resetsAt", "resets_at"]).map { Int64($0) }
+    guard let used = num(dict, ["usedPercent", "used_percent"]),
+          validUsagePercentage(used) else { return nil }
+    let mins = num(dict, ["windowDurationMins", "window_duration_mins"]).flatMap { usageInteger($0, as: Int.self) }
+    let reset = num(dict, ["resetsAt", "resets_at"]).flatMap { usageInteger($0, as: Int64.self) }
     let label = mins.map(codexWindowLabel(minutes:)) ?? fallbackLabel
     return LabeledWindow(label: label,
                          window: UsageWindow(utilization: used, resetUnix: reset))
@@ -125,7 +141,7 @@ private func parseBucket(_ dict: [String: Any], fallbackID: String) -> CodexRate
 
 /// Accepts the current multi-bucket response, the legacy `rateLimits` wrapper,
 /// or a bucket directly.
-func parseCodexRateLimits(_ json: [String: Any]) -> CodexRateLimitsSnapshot? {
+public func parseCodexRateLimits(_ json: [String: Any]) -> CodexRateLimitsSnapshot? {
     if let byID = json["rateLimitsByLimitId"] as? [String: Any] {
         var buckets: [String: CodexRateLimitBucket] = [:]
         for (fallbackID, value) in byID {
@@ -143,7 +159,7 @@ func parseCodexRateLimits(_ json: [String: Any]) -> CodexRateLimitsSnapshot? {
 
 /// Partial `updated` merges into the last full snapshot: a nil slot in the
 /// update keeps the base slot (missing fields are not zeroed).
-func mergeCodex(into base: CodexRateLimitsSnapshot?,
+public func mergeCodex(into base: CodexRateLimitsSnapshot?,
                 update: CodexRateLimitsSnapshot) -> CodexRateLimitsSnapshot {
     guard let base else { return update }
     var buckets = base.buckets

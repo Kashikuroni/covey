@@ -1,6 +1,7 @@
 import XCTest
 @testable import covey
 import CoveyKit
+import CoveydCore
 import Foundation
 
 final class AppModelChromeTests: XCTestCase {
@@ -336,6 +337,10 @@ final class AppModelChromeTests: XCTestCase {
     @MainActor
     func testLimitsSelectionNavigatesAndTogglesViaApply() async throws {
         let daemon = try TestDaemon(); defer { daemon.stop() }
+        let monitor = UsageMonitor(path: daemon.path + ".usage.json", legacyPath: daemon.path + ".legacy.json",
+                                   fetchAccount: { Account() },
+                                   resolveCodex: { nil })
+        daemon.attachUsageMonitor(monitor)
         let (model, _) = try makeModel(daemon)
         await model.start()
         model.perform(.showLimitsDetail)
@@ -343,13 +348,16 @@ final class AppModelChromeTests: XCTestCase {
         model.apply(.limitsSelectNext)
         XCTAssertEqual(model.limitsSelectedProvider, .codex)
         model.apply(.limitsDisableSelected)
+        _ = await eventually { !model.codexUsageEnabled && !model.usageSettingsPending }
         XCTAssertFalse(model.codexUsageEnabled)
         XCTAssertTrue(model.claudeUsageEnabled, "only the highlighted provider is affected")
         model.apply(.limitsSelectPrev)
         XCTAssertEqual(model.limitsSelectedProvider, .claude)
         model.apply(.limitsDisableSelected)
+        _ = await eventually { !model.claudeUsageEnabled && !model.usageSettingsPending }
         XCTAssertFalse(model.claudeUsageEnabled)
         model.apply(.limitsEnableSelected)
+        _ = await eventually { model.claudeUsageEnabled && !model.usageSettingsPending }
         XCTAssertTrue(model.claudeUsageEnabled)
         model.apply(.closeOverlay)
         model.perform(.showLimitsDetail)
@@ -357,8 +365,12 @@ final class AppModelChromeTests: XCTestCase {
     }
 
     @MainActor
-    func testLimitsSelectionCyclesThroughThreeProviders() async throws {
+    func testLimitsSelectionCyclesThroughTwoProviders() async throws {
         let daemon = try TestDaemon(); defer { daemon.stop() }
+        let monitor = UsageMonitor(path: daemon.path + ".usage.json", legacyPath: daemon.path + ".legacy.json",
+                                   fetchAccount: { Account() },
+                                   resolveCodex: { nil })
+        daemon.attachUsageMonitor(monitor)
         let (model, _) = try makeModel(daemon)
         await model.start()
         model.perform(.showLimitsDetail)
@@ -366,17 +378,16 @@ final class AppModelChromeTests: XCTestCase {
         model.apply(.limitsSelectNext)
         XCTAssertEqual(model.limitsSelectedProvider, .codex)
         model.apply(.limitsSelectNext)
-        XCTAssertEqual(model.limitsSelectedProvider, .glm, "codex -> glm, the new third provider")
-        model.apply(.limitsSelectNext)
-        XCTAssertEqual(model.limitsSelectedProvider, .claude, "wraps forward past glm")
+        XCTAssertEqual(model.limitsSelectedProvider, .claude, "wraps forward past codex")
         model.apply(.limitsSelectPrev)
-        XCTAssertEqual(model.limitsSelectedProvider, .glm, "wraps backward before claude")
+        XCTAssertEqual(model.limitsSelectedProvider, .codex, "wraps backward before claude")
         model.apply(.limitsDisableSelected)
-        XCTAssertFalse(model.glmUsageEnabled)
+        let disabled = await eventually { !model.codexUsageEnabled && !model.usageSettingsPending }
+        XCTAssertTrue(disabled)
         XCTAssertTrue(model.claudeUsageEnabled)
-        XCTAssertTrue(model.codexUsageEnabled)
         model.apply(.limitsEnableSelected)
-        XCTAssertTrue(model.glmUsageEnabled)
+        let enabled = await eventually { model.codexUsageEnabled && !model.usageSettingsPending }
+        XCTAssertTrue(enabled)
     }
 
     @MainActor

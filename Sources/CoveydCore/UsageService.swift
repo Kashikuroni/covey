@@ -1,12 +1,13 @@
+import CoveyKit
 import Foundation
 
 /// A fetch failure carrying a short code ("no auth"/"net"/"401"/…). A dedicated
 /// type because `Result`'s failure must be an `Error` (a bare `String` is not).
 struct UsageFailure: Error, Equatable { let code: String }
 
-enum UsageService {
+public enum UsageService {
     /// One poll cycle: usage and plan fetched independently (partial success ok).
-    static func fetchAccount() async -> Account {
+    public static func fetchAccount() async -> Account {
         var acc = Account()
         switch await oauthGet("/api/oauth/usage") {
         case .success(let body):

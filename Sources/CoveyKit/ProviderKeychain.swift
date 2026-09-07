@@ -5,8 +5,8 @@ import Foundation
 /// item. Shells out to `/usr/bin/security` exactly like `Credentials.readKeychain`
 /// does, so it relies on the same GUI-session assumptions (the keychain is
 /// unlocked while the user is logged in). The secret never touches disk.
-enum ProviderKeychain {
-    static let service = "covey.provider"
+public enum ProviderKeychain {
+    public static let service = "covey.provider"
 
     private struct CommandResult {
         let stdout: String
@@ -15,7 +15,7 @@ enum ProviderKeychain {
     }
 
     /// Returns the stored key, or nil if no item exists for `account`.
-    static func read(account: String) -> String? {
+    public static func read(account: String) -> String? {
         guard let result = run([
             "find-generic-password", "-s", service, "-a", account, "-w",
         ]), result.status == 0 else {
@@ -26,7 +26,7 @@ enum ProviderKeychain {
     }
 
     /// Stores `value` for `account`, replacing any existing item.
-    static func write(account: String, value: String) -> Bool {
+    public static func write(account: String, value: String) -> Bool {
         // `-U` updates an existing item atomically, so a failed write cannot
         // destroy the previously stored key.
         run([
@@ -36,7 +36,7 @@ enum ProviderKeychain {
     }
 
     /// Removes the item for `account` if present. Idempotent.
-    static func delete(account: String) -> Bool {
+    public static func delete(account: String) -> Bool {
         guard let result = run([
             "delete-generic-password", "-s", service, "-a", account,
         ]) else { return false }
