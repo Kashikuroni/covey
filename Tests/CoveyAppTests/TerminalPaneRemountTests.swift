@@ -3,12 +3,12 @@ import SwiftUI
 @testable import covey
 import CoveyKit
 
-/// Opening/closing the terminal split switches TerminalPaneView between two
-/// structural branches, which remounts the agent's NSView: a fresh emulator
-/// that never saw the session's `?1049h`. Without a re-attach (the preamble
-/// only flows on attach) the pane drops out of the alternate buffer and
-/// wheel routing degrades to `.viewport` — "scroll stops working until the
-/// app restarts".
+/// Remounting an agent pane hands the session a fresh emulator that never saw
+/// its `?1049h`. Without a re-attach (the preamble only flows on attach) the
+/// pane drops out of the alternate buffer and wheel routing degrades to
+/// `.viewport` — "scroll stops working until the app restarts". Switching
+/// sessions remounts by design (`.id(name)`); toggling the split must NOT —
+/// the agent pane keeps one structural position for every shape of the View.
 @MainActor
 final class TerminalPaneRemountTests: XCTestCase {
     private func terminalViews(in root: NSView) -> [CoveyTerminalView] {
@@ -52,6 +52,10 @@ final class TerminalPaneRemountTests: XCTestCase {
         line: UInt = #line
     ) {
         let probe = TerminalInputProbe()
+        // Панель переживает toggle сплита, поэтому делегат возвращается на
+        // место: иначе следующая проверка не найдёт координатор панели.
+        let real = view.terminalDelegate
+        defer { view.terminalDelegate = real }
         view.terminalDelegate = probe
         XCTAssertTrue(window.makeFirstResponder(view), file: file, line: line)
         sendReturnKey(to: view, modifiers: [.shift])
@@ -115,8 +119,8 @@ final class TerminalPaneRemountTests: XCTestCase {
                 coordinator(named: "agent", in: $0)
             }
         )
-        XCTAssertNotEqual(initialCoordinator.lease, splitCoordinator.lease)
-        XCTAssertFalse(model.isTerminalViewLeaseCurrent(initialCoordinator.lease))
+        XCTAssertEqual(initialCoordinator.lease, splitCoordinator.lease,
+                       "открытие сплита не пересобирает панель агента")
         XCTAssertTrue(model.isTerminalViewLeaseCurrent(splitCoordinator.lease))
         if let root = window.contentView,
            let agentView = restoredAgentView(in: root) {
@@ -139,8 +143,8 @@ final class TerminalPaneRemountTests: XCTestCase {
                 coordinator(named: "agent", in: $0)
             }
         )
-        XCTAssertNotEqual(splitCoordinator.lease, restoredCoordinator.lease)
-        XCTAssertFalse(model.isTerminalViewLeaseCurrent(splitCoordinator.lease))
+        XCTAssertEqual(splitCoordinator.lease, restoredCoordinator.lease,
+                       "закрытие сплита не пересобирает панель агента")
         XCTAssertTrue(model.isTerminalViewLeaseCurrent(restoredCoordinator.lease))
         if let root = window.contentView,
            let agentView = restoredAgentView(in: root) {
@@ -278,10 +282,12 @@ final class TerminalPaneRemountTests: XCTestCase {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
         await model.start()
-        for name in ["agent-a", "agent-b"] {
-            _ = try daemon.registry.create(dir: "/usr", agent: "cat",
-                                           argv: ["/bin/cat"], name: name)
-        }
+        _ = try daemon.registry.create(dir: "/usr", agent: "cat",
+                                       argv: ["/bin/cat"], name: "agent-a")
+        // Печатает маркер: вывод сессии должен оказаться в панели на экране.
+        _ = try daemon.registry.create(
+            dir: "/usr", agent: "cat",
+            argv: ["/bin/sh", "-c", "printf 'HELLO-B'; exec cat"], name: "agent-b")
         _ = await eventually { model.sessions.count == 2 }
         await model.select("agent-a")
         await model.toggleActiveTerminal()
@@ -433,8 +439,204 @@ final class TerminalPaneRemountTests: XCTestCase {
         XCTAssertEqual(leadingGap, 8, accuracy: 0.5)
         XCTAssertEqual(scrollerTrailingGap, 4, accuracy: 0.5)
         XCTAssertEqual(bottomGap, 4, accuracy: 0.5)
-        XCTAssertEqual(topGap, 25, accuracy: 0.5)
+        // Заголовок в две строки: зона + «<проект> - <сессия>».
+        XCTAssertEqual(topGap, 42, accuracy: 0.5)
 
         daemon.registry.kill(name: "agent")
+    }
+
+    /// Скриншот-баг «agent-панель пустая, пока не откроешь терминал».
+    ///
+    /// Уход с View с открытым терминалом на View без него переключает
+    /// структурную ветку `TerminalPaneView`, и SwiftUI успевает создать ВТОРУЮ
+    /// панель той же сессии, а затем снести её. Аренда и вывод-сток заведены
+    /// по имени сессии по принципу «последний mount выигрывает», поэтому их
+    /// забирает обречённый view: живой на экране остаётся без байтов сессии
+    /// (пустой экран) и без resize (`verdict":"stale-lease"` в pane-layout.log),
+    /// пока следующий remount — открытие терминала — не пересоберёт панель.
+    func testPaneStaysLiveAfterLeavingAViewWithATerminal() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        _ = try daemon.registry.create(dir: "/usr", agent: "cat",
+                                       argv: ["/bin/cat"], name: "agent-a")
+        // Печатает маркер: вывод сессии должен оказаться в панели на экране.
+        _ = try daemon.registry.create(
+            dir: "/usr", agent: "cat",
+            argv: ["/bin/sh", "-c", "printf 'HELLO-B'; exec cat"], name: "agent-b")
+        _ = await eventually { model.sessions.count == 2 }
+        await model.select("agent-a")
+        await model.toggleActiveTerminal()
+        _ = await eventually { model.activeView?.terminal?.shellSession != nil }
+
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let root = NSHostingView(rootView: TerminalPaneView(model: model))
+        window.contentView = root
+        _ = await eventually { self.view(named: "agent-a", in: root) != nil }
+        root.layoutSubtreeIfNeeded()
+
+        await model.select("agent-b")                    // ⌘] — у b терминала нет
+        _ = await eventually { self.view(named: "agent-b", in: root) != nil }
+        _ = await eventually { self.view(named: "agent-a", in: root) == nil }
+        root.layoutSubtreeIfNeeded()
+
+        let b = try XCTUnwrap(view(named: "agent-b", in: root))
+        let lease = try XCTUnwrap(
+            (b.terminalDelegate as? TerminalRepresentable.Coordinator)?.lease)
+        XCTAssertTrue(model.isTerminalViewLeaseCurrent(lease),
+                      "панель на экране владеет сессией — иначе её resize глушится")
+
+        let printed = await eventually { Self.contents(of: b).contains("HELLO-B") }
+        XCTAssertTrue(printed, "вывод сессии доходит до панели на экране")
+
+        daemon.registry.kill(name: "agent-a")
+        daemon.registry.kill(name: "agent-b")
+    }
+
+    /// Всё содержимое сетки одной строкой.
+    private static func contents(of view: CoveyTerminalView) -> String {
+        let terminal = view.getTerminal()
+        return (0..<terminal.rows).map {
+            terminal.getScrollInvariantLine(row: $0)?
+                .translateToString(trimRight: true) ?? ""
+        }.joined()
+    }
+
+    /// Страховка на случай, если SwiftUI когда-нибудь снова смонтирует панель
+    /// дважды: сессия обязана вернуться живой панели вместе с вывозом — и
+    /// владением (resize), и повтором вывода. Панели заводятся напрямую через
+    /// контракт модели: `makeNSView` руками не вызвать.
+    func testSessionGoesBackToTheSurvivingPaneWhenTheOwnerIsTornDown() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        _ = try daemon.registry.create(
+            dir: "/usr", agent: "cat",
+            argv: ["/bin/sh", "-c", "printf 'HELLO'; exec cat"], name: "agent")
+        _ = await eventually { model.sessions.count == 1 }
+        await model.select("agent")
+        _ = await eventually { model.attachedNames.contains("agent") }
+
+        var survivor: [UInt8] = []
+        let survivorLease = model.mountTerminalView("agent")
+        model.registerPane(survivorLease) {
+            model.setTerminalSink(for: "agent") { survivor += $0 }
+        }
+        model.paneViewMounted("agent")
+        _ = await eventually { String(decoding: survivor, as: UTF8.self).contains("HELLO") }
+        let beforeHandover = survivor.count
+
+        // Переходное двойное монтирование: вторая панель той же сессии
+        // перехватывает владение и тут же сносится.
+        var doomed: [UInt8] = []
+        let doomedLease = model.mountTerminalView("agent")
+        model.registerPane(doomedLease) {
+            model.setTerminalSink(for: "agent") { doomed += $0 }
+        }
+        XCTAssertFalse(model.isTerminalViewLeaseCurrent(survivorLease),
+                       "предусловие: сессией владеет вторая панель")
+
+        model.unmountTerminalView(doomedLease)
+
+        XCTAssertTrue(model.isTerminalViewLeaseCurrent(survivorLease),
+                      "владение вернулось живой панели — её resize снова доходит")
+        let refed = await eventually { survivor.count > beforeHandover }
+        XCTAssertTrue(refed, "живая панель получила сток и повтор вывода сессии")
+
+        daemon.registry.kill(name: "agent")
+    }
+
+    /// Ушла последняя панель сессии — сток снимается, и вывод копится до
+    /// следующей панели. Иначе он молча уходит в снесённую: та ещё жива (её
+    /// держит замыкание), и потеря вывода никак себя не проявляет.
+    func testOutputWaitsForTheNextPaneWhenTheLastOneIsGone() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        _ = try daemon.registry.create(
+            dir: "/usr", agent: "cat",
+            argv: ["/bin/sh", "-c", "printf 'HELLO'; exec cat"], name: "agent")
+        _ = await eventually { model.sessions.count == 1 }
+        await model.select("agent")
+        _ = await eventually { model.attachedNames.contains("agent") }
+
+        var gone: [UInt8] = []
+        let lease = model.mountTerminalView("agent")
+        model.registerPane(lease) { model.setTerminalSink(for: "agent") { gone += $0 } }
+        model.paneViewMounted("agent")
+        _ = await eventually { String(decoding: gone, as: UTF8.self).contains("HELLO") }
+        let deliveredToPane = gone.count
+
+        model.unmountTerminalView(lease)
+        model.paneViewMounted("agent")          // демон повторяет вывод сессии
+        try await Task.sleep(nanoseconds: 300_000_000)   // повтор успевает долететь
+
+        XCTAssertEqual(gone.count, deliveredToPane,
+                       "снесённая панель больше не получает вывод")
+        var next: [UInt8] = []
+        model.setTerminalSink(for: "agent") { next += $0 }
+        let delivered = await eventually {
+            String(decoding: next, as: UTF8.self).contains("HELLO")
+        }
+        XCTAssertTrue(delivered, "вывод дождался следующей панели в буфере")
+
+        daemon.registry.kill(name: "agent")
+    }
+
+
+    /// Панели сплита обязаны стоять ровно по кадрам `PanelLayout` — раскладка
+    /// переехала с `.offset` (двигает только отрисовку; зона попадания
+    /// делителей оставалась в неcдвинутом кадре) на `.position`, и этот тест
+    /// держит, что картинка от переезда не поехала.
+    func testSplitPanesLandOnTheirLayoutFrames() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        for name in ["agent-a", "agent-b"] {
+            _ = try daemon.registry.create(dir: "/usr", agent: "cat",
+                                           argv: ["/bin/cat"], name: name)
+        }
+        _ = await eventually { model.sessions.count == 2 }
+        await model.select("agent-a")
+        model.perform(.splitTerminalVertically)
+        await model.splitPickerChosen(.init(kind: .session("agent-b"), label: "agent-b"))
+        _ = await eventually { model.activeView?.leaves.count == 2 }
+        await model.toggleActiveTerminal()
+        _ = await eventually { model.activeView?.terminal?.shellSession != nil }
+
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let root = NSHostingView(rootView: TerminalPaneView(model: model))
+        window.contentView = root
+        _ = await eventually { self.terminalViews(in: root).count == 3 }
+        root.layoutSubtreeIfNeeded()
+
+        let frames = PanelLayout.splitFrames(
+            tree: model.visibleSplitTree, soloAgent: model.selected,
+            companionShell: model.activeView?.terminal?.shellSession,
+            companionRatio: model.activeView?.agentAreaRatio ?? 0.6,
+            size: root.bounds.size, gutter: Tokens.gutter)
+
+        // Терминал сидит внутри карточки с известными отступами, поэтому
+        // сверяем не кадр в кадр, а что панель попала в свой прямоугольник.
+        for (name, frame) in frames.leaves {
+            let view = try XCTUnwrap(self.view(named: name, in: root), name)
+            let onScreen = view.convert(view.bounds, to: root)
+            XCTAssertTrue(frame.insetBy(dx: -1, dy: -1).contains(onScreen),
+                          "\(name): \(onScreen) вне своего кадра \(frame)")
+        }
+        let shell = try XCTUnwrap(model.activeView?.terminal?.shellSession)
+        let column = try XCTUnwrap(frames.companion)
+        let shellView = try XCTUnwrap(self.view(named: shell, in: root))
+        let shellFrame = shellView.convert(shellView.bounds, to: root)
+        XCTAssertTrue(column.insetBy(dx: -1, dy: -1).contains(shellFrame),
+                      "шелл-колонка \(shellFrame) вне своего кадра \(column)")
+        // И панели не наезжают друг на друга — шов остаётся свободным.
+        let a = try XCTUnwrap(frames.leaves["agent-a"])
+        let b = try XCTUnwrap(frames.leaves["agent-b"])
+        XCTAssertEqual(b.minX - a.maxX, Tokens.gutter, accuracy: 0.5)
+
+        for n in ["agent-a", "agent-b"] { daemon.registry.kill(name: n) }
     }
 }

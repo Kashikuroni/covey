@@ -224,7 +224,11 @@ public final class AppModel {
     /// Focus/scroll command handlers per mounted terminal view.
     private var terminalCommands: [String: (TerminalCommand) -> Void] = [:]
     @ObservationIgnored
-    private var terminalResizeOwnership = TerminalResizeOwnership()
+    private var terminalPaneOwnership = TerminalPaneOwnership()
+    /// Как каждая смонтированная панель забирает сессию себе. Живёт до сноса
+    /// панели, чтобы владение можно было ПЕРЕДАТЬ, а не только отобрать.
+    @ObservationIgnored
+    private var paneClaims: [TerminalViewLease: () -> Void] = [:]
     /// Names this client is attached to (все панели дерева + колонка):
     /// инвариант спеки — под ним стоит гард доставки `.output`.
     internal private(set) var attachedNames: Set<String> = []
@@ -686,15 +690,36 @@ public final class AppModel {
     }
 
     func mountTerminalView(_ name: String) -> TerminalViewLease {
-        terminalResizeOwnership.mount(session: name)
+        terminalPaneOwnership.mount(session: name)
+    }
+
+    /// Панель объявляет, как забрать сессию себе (сток вывода + текущая сетка).
+    /// Заявка исполняется сразу, если панель — владелец, и хранится до сноса:
+    /// когда владельца сносят, сессия переходит по ней оставшейся панели.
+    func registerPane(_ lease: TerminalViewLease, claim: @escaping () -> Void) {
+        paneClaims[lease] = claim
+        if terminalPaneOwnership.isCurrent(lease) { claim() }
     }
 
     func unmountTerminalView(_ lease: TerminalViewLease) {
-        terminalResizeOwnership.unmount(lease)
+        paneClaims[lease] = nil
+        switch terminalPaneOwnership.unmount(lease) {
+        case .none:
+            break
+        case .vacant:
+            // Панелей на сессию не осталось: вывод копится в буфере и
+            // достанется следующей — вместо того чтобы уйти в снесённый view.
+            setTerminalSink(for: lease.session, nil)
+        case .passed(let successor):
+            // Наследник мог простоять без стока сколько угодно: ему нужен и
+            // сток, и повтор вывода от демона.
+            paneClaims[successor]?()
+            paneViewMounted(successor.session)
+        }
     }
 
     func isTerminalViewLeaseCurrent(_ lease: TerminalViewLease) -> Bool {
-        terminalResizeOwnership.isCurrent(lease)
+        terminalPaneOwnership.isCurrent(lease)
     }
 
     func resize(

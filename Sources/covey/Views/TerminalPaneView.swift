@@ -12,14 +12,15 @@ struct TerminalPaneView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if (model.activeView?.isSplit ?? false) || model.activeView?.terminal != nil {
+            // Одна структурная позиция на agent-панель при любом составе View.
+            // Отдельная ветка «одна панель без терминала» стоила remount при
+            // каждом открытии/закрытии терминала, а на переключении сессии
+            // умирающая ветка успевала смонтировать ВТОРУЮ панель новой сессии:
+            // аренда resize и вывод-сток (оба «последний mount выигрывает»)
+            // доставались обречённому view, а панель на экране оставалась
+            // пустой до следующего remount.
+            if model.selected != nil {
                 splitBody
-            } else if let name = model.selected {
-                VStack(spacing: 0) {
-                    paneHeader("Agent", zone: .agent, name: name)
-                    pane(name)
-                }
-                .panelCard(tk, surface: tk.termBg)
             } else if let root = model.selectedProjectRoot {
                 placeholder(root)
             } else {
@@ -42,20 +43,17 @@ struct TerminalPaneView: View {
             ZStack(alignment: .topLeading) {
                 ForEach(leaves(frames)) { leaf in
                     paneStack(leaf.name, zone: .agent, label: "Agent")
-                        .frame(width: leaf.frame.width, height: leaf.frame.height)
-                        .offset(x: leaf.frame.minX, y: leaf.frame.minY)
+                        .placed(in: leaf.frame)
                 }
                 // Шелл-колонка пережила закрытие своего агента: agent-область
                 // не должна оставаться пустой.
                 if frames.leaves.isEmpty, let area = frames.agentArea {
                     placeholder(model.selectedProjectRoot)
-                        .frame(width: area.width, height: area.height)
-                        .offset(x: area.minX, y: area.minY)
+                        .placed(in: area)
                 }
                 if let shell = model.activeView?.terminal?.shellSession, let frame = frames.companion {
                     paneStack(shell, zone: .terminalSplit, label: "Terminal")
-                        .frame(width: frame.width, height: frame.height)
-                        .offset(x: frame.minX, y: frame.minY)
+                        .placed(in: frame)
                 }
                 ForEach(frames.dividers.indices, id: \.self) { i in
                     divider(for: frames.dividers[i])
@@ -92,19 +90,15 @@ struct TerminalPaneView: View {
         .panelCard(tk, surface: tk.termBg)
     }
 
-    /// Делята узлов дерева: ручка в центре узла вдоль его оси.
+    /// Делята узлов дерева: ручка стоит в шве между потомками (`handle`
+    /// считает `PanelLayout` — по середине узла шов лежит только при 0.5).
     private func divider(for d: PanelLayout.SplitDivider) -> some View {
         let vertical = d.axis == .vertical
-        let handle = CGRect(
-            x: d.bounds.midX - (vertical ? Tokens.gutter / 2 : 0),
-            y: d.bounds.midY - (vertical ? 0 : Tokens.gutter / 2),
-            width: vertical ? Tokens.gutter : d.bounds.width,
-            height: vertical ? d.bounds.height : Tokens.gutter)
         return Rectangle()
             .fill(Color.clear)
-            .frame(width: handle.width, height: handle.height)
-            .offset(x: handle.minX, y: handle.minY)
+            .frame(width: d.handle.width, height: d.handle.height)
             .contentShape(Rectangle())
+            .position(x: d.handle.midX, y: d.handle.midY)
             .onHover { inside in
                 if inside {
                     (vertical ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).push()
@@ -131,8 +125,8 @@ struct TerminalPaneView: View {
         Rectangle()
             .fill(Color.clear)
             .frame(width: Tokens.gutter, height: height)
-            .offset(x: areaWidth, y: 0)
             .contentShape(Rectangle())
+            .position(x: areaWidth + Tokens.gutter / 2, y: height / 2)
             .onHover { inside in
                 if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
             }
@@ -166,21 +160,23 @@ struct TerminalPaneView: View {
     }
 
     /// Tiny per-pane tab: the focused pane's label lights up in accent, the
-    /// session name behind it tells two agent panes apart.
+    /// line under it — «<проект> - <сессия>» — говорит, что именно за панель.
     private func paneHeader(_ label: String, zone: FocusZone, name: String) -> some View {
         let active = model.focus == .terminal && model.focusedPane == name
-        let parts = paneHeaderParts(label: label, name: name)
-        return HStack(spacing: 6) {
-            zoneTitle(parts.zone, zone: zone, active: active, tk: tk)
-            if let session = parts.session {
-                Text(session)
+        let subject = paneHeaderSubject(project: projectName(ofSession: name),
+                                        session: name,
+                                        isShell: zone == .terminalSplit)
+        return VStack(alignment: .leading, spacing: 2) {
+            zoneTitle(label, zone: zone, active: active, tk: tk)
+            if let subject {
+                Text(subject)
                     .font(.system(size: 12))
-                    .foregroundStyle(panelLabelColor(.paneSession, tk: tk))
+                    .foregroundStyle(panelLabelColor(.paneSubject, tk: tk))
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
-            Spacer()
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 8)
         .padding(.top, Tokens.paneHeaderTop)
         .padding(.bottom, Tokens.paneHeaderBottom)
@@ -188,10 +184,36 @@ struct TerminalPaneView: View {
         .onTapGesture { if !name.isEmpty { model.focusPane(name) } }
     }
 
+    /// Имя проекта сессии — как в сайдбаре (переименование проекта учитывается).
+    private func projectName(ofSession name: String) -> String? {
+        model.sessions.first { $0.name == name }
+            .map { model.displayName(forDir: sessionRoot($0)) }
+    }
+
     private func pane(_ name: String) -> some View {
         TerminalRepresentable(model: model, name: name)
             .id(name)   // fresh TerminalView per session (spec §5)
             .padding(EdgeInsets(top: 0, leading: 8, bottom: 4, trailing: 4))
             .onTapGesture { model.focusPane(name) }
+    }
+}
+
+/// Absolute placement inside the split container.
+///
+/// `.position` — не `.offset`: offset двигает ТОЛЬКО отрисовку, layout-кадр
+/// вида остаётся на месте, а зона попадания (`contentShape`, `onHover`,
+/// жесты) считается по layout-кадру. Делята из-за этого ловили мышь в левом
+/// верхнем углу области, а не в шве, где нарисованы. Панели этого не
+/// показывали: они AppKit-вью и берут события мимо hit-тестинга SwiftUI.
+/// `.position` кладёт вид в раскладку по-настоящему, и зона совпадает с
+/// картинкой. Побочно даёт контейнеру полный размер области: `.position`
+/// забирает всё предложенное место.
+extension View {
+    /// Размер кадра и его место. Порядок обязателен: сначала размер, потом
+    /// `position` — она забирает всё предложенное место, и вид без своего
+    /// размера растянулся бы на всю область.
+    func placed(in frame: CGRect) -> some View {
+        self.frame(width: frame.width, height: frame.height)
+            .position(x: frame.midX, y: frame.midY)
     }
 }

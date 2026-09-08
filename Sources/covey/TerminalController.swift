@@ -117,11 +117,14 @@ struct TerminalRepresentable: NSViewRepresentable {
             }
         }
         applyTheme(to: view)
-        // Not `feed(byteArray:)`: the pane has no real grid until SwiftUI lays
-        // it out, and this closure fires immediately with whatever the model
-        // buffered for the session (see CoveyTerminalView.feed(sessionBytes:)).
-        model.setTerminalSink(for: name) { [weak view] bytes in
-            view?.feed(sessionBytes: bytes[...])
+        // Сток вывода ставится не напрямую, а заявкой на сессию: при
+        // переходном двойном монтировании владельцем оказывается ровно одна
+        // панель, и снос владельца передаёт сессию оставшейся (см.
+        // `TerminalPaneOwnership`).
+        model.registerPane(context.coordinator.lease) { [weak coordinator = context.coordinator,
+                                                         weak view] in
+            guard let coordinator, let view else { return }
+            coordinator.claim(view)
         }
         // A structural remount (split toggle) built a fresh emulator: ask the
         // daemon to replay the session state (preamble + backfill) into it.
@@ -168,10 +171,9 @@ struct TerminalRepresentable: NSViewRepresentable {
         })
     }
 
-    // No teardown of the model's sink here: sessions switch by remounting
-    // (`.id`), and makeNSView of the new terminal overwrites the sink. Nil-ing it
-    // asynchronously on dismantle could race and clear the new view's sink. The
-    // old closure captures `[weak view]`, so it harmlessly no-ops after teardown.
+    // Сток снимается не здесь: `unmountTerminalView` знает, осталась ли на
+    // сессию живая панель, и либо передаёт ей сток, либо снимает его — гонки
+    // «снос старого view чистит сток нового» тут больше нет.
 
     // Not MainActor-isolated: TerminalViewDelegate requirements are nonisolated,
     // so an isolated class could not satisfy them. Calls hop to the actor inside.
@@ -189,6 +191,38 @@ struct TerminalRepresentable: NSViewRepresentable {
             self.model = model
             self.name = name
             self.lease = lease
+        }
+
+        /// Панель забирает сессию себе: её сток вывода и её текущая сетка.
+        ///
+        /// Сетка нужна, потому что владение могло перейти к панели, чьи resize
+        /// всё это время глушились: у сессии остался размер чужой панели.
+        @MainActor
+        func claim(_ view: CoveyTerminalView) {
+            // Not `feed(byteArray:)`: the pane has no real grid until SwiftUI
+            // lays it out, and this closure fires immediately with whatever the
+            // model buffered (see CoveyTerminalView.feed(sessionBytes:)).
+            model.setTerminalSink(for: name) { [weak view] bytes in
+                view?.feed(sessionBytes: bytes[...])
+            }
+            let terminal = view.getTerminal()
+            guard let grid = Self.announcedGrid(frame: view.frame.size,
+                                                cols: terminal.cols,
+                                                rows: terminal.rows) else { return }
+            sizeChanged(source: view, newCols: grid.cols, newRows: grid.rows)
+        }
+
+        /// Сетка, которую панель объявляет сессии в момент захвата, или nil —
+        /// молчать.
+        ///
+        /// С несложившегося кадра молчим: SwiftTerm держит грид на своём полу
+        /// в 2 колонки (issue #2 — панель в две колонки), и выдать этот пол за
+        /// размер сессии нельзя. Размер доедет сам — следующим layout-проходом,
+        /// уже как обычный `sizeChanged`.
+        static func announcedGrid(frame: CGSize, cols: Int,
+                                  rows: Int) -> (cols: Int, rows: Int)? {
+            guard frame.width > 0, frame.height > 0 else { return nil }
+            return (cols, rows)
         }
 
         func send(source: TerminalView, data: ArraySlice<UInt8>) {

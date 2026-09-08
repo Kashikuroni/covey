@@ -105,6 +105,10 @@ struct PanelLayout: Equatable {
         let axis: PaneAxis
         /// Прямоугольник всего узла в координатах split-области.
         let bounds: CGRect
+        /// Шов между потомками — ровно та полоса, где стоит ручка. Считается
+        /// здесь, а не во вью: вью знает только `bounds`, и ручка, поставленная
+        /// по его середине, совпадала со швом единственный раз — при ratio 0.5.
+        let handle: CGRect
     }
 
     struct SplitFrames: Equatable {
@@ -166,7 +170,13 @@ struct PanelLayout: Equatable {
                          width: max(0, rect.width - firstSize - gutter), height: rect.height)
                 : CGRect(x: rect.minX, y: rect.minY + firstSize + gutter,
                          width: rect.width, height: max(0, rect.height - firstSize - gutter))
-            result.dividers.append(SplitDivider(path: path, axis: axis, bounds: rect))
+            let seam = vertical
+                ? CGRect(x: rect.minX + firstSize, y: rect.minY,
+                         width: gutter, height: rect.height)
+                : CGRect(x: rect.minX, y: rect.minY + firstSize,
+                         width: rect.width, height: gutter)
+            result.dividers.append(SplitDivider(path: path, axis: axis,
+                                                bounds: rect, handle: seam))
             frames(node: first, in: firstRect, gutter: gutter,
                    path: path + [0], into: &result)
             frames(node: second, in: secondRect, gutter: gutter,

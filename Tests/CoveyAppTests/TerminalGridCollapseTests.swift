@@ -167,4 +167,25 @@ final class TerminalGridCollapseTests: XCTestCase {
 /// Terminal requires a delegate; none of it matters here.
 private final class HeadlessTerminalDelegate: TerminalDelegate {
     func send(source: Terminal, data: ArraySlice<UInt8>) {}
+
+    // MARK: - Захват сессии панелью
+
+    /// Панель, забирающая владение, объявляет сессии свою сетку — иначе у
+    /// сессии остаётся размер чужой панели. Но только со сложившегося кадра:
+    /// на нулевом грид стоит на полу в 2 колонки, и объявить его значит
+    /// своими руками сделать ту самую двухколоночную полосу.
+    func testClaimStaysSilentUntilThePaneHasARealFrame() {
+        XCTAssertNil(TerminalRepresentable.Coordinator.announcedGrid(
+            frame: CGSize(width: 0, height: 800), cols: 2, rows: 54))
+        XCTAssertNil(TerminalRepresentable.Coordinator.announcedGrid(
+            frame: CGSize(width: 1200, height: 0), cols: 147, rows: 1))
+    }
+
+    func testClaimAnnouncesTheGridOfALaidOutPane() {
+        let grid = TerminalRepresentable.Coordinator.announcedGrid(
+            frame: CGSize(width: 1200, height: 800), cols: 147, rows: 54)
+
+        XCTAssertEqual(grid?.cols, 147)
+        XCTAssertEqual(grid?.rows, 54)
+    }
 }

@@ -142,6 +142,41 @@ final class SplitFrameTests: XCTestCase {
         XCTAssertEqual(f.dividers[0].axis, .vertical)
     }
 
+    /// Ручка делителя обязана стоять В ШВЕ между панелями при ЛЮБОМ ratio.
+    /// Она рисовалась по середине узла: при 0.5 совпадало, после первого же
+    /// драга уезжала от шва — и «ресайз перестаёт работать».
+    func testDividerHandleSitsInTheSeamAtEveryRatio() {
+        for ratio in [0.3, 0.5, 0.7] {
+            let tree = PaneNode.split(axis: .vertical, ratio: ratio,
+                                      first: .agent(session: "a"), second: .agent(session: "b"))
+            let f = PanelLayout.splitFrames(tree: tree, companionShell: nil,
+                                            companionRatio: 0.6, size: size, gutter: gutter)
+            let a = f.leaves["a"]!, b = f.leaves["b"]!
+            let handle = f.dividers[0].handle
+
+            XCTAssertEqual(handle.minX, a.maxX, accuracy: 0.5,
+                           "ручка начинается там, где кончается левая панель (ratio \(ratio))")
+            XCTAssertEqual(handle.maxX, b.minX, accuracy: 0.5,
+                           "и кончается там, где начинается правая (ratio \(ratio))")
+            XCTAssertEqual(handle.width, gutter, accuracy: 0.5)
+            XCTAssertEqual(handle.height, size.height, accuracy: 0.5)
+        }
+    }
+
+    func testHorizontalDividerHandleSpansTheSeam() {
+        let tree = PaneNode.split(axis: .horizontal, ratio: 0.7,
+                                  first: .agent(session: "a"), second: .agent(session: "b"))
+        let f = PanelLayout.splitFrames(tree: tree, companionShell: nil,
+                                        companionRatio: 0.6, size: size, gutter: gutter)
+        let a = f.leaves["a"]!, b = f.leaves["b"]!
+        let handle = f.dividers[0].handle
+
+        XCTAssertEqual(handle.minY, a.maxY, accuracy: 0.5)
+        XCTAssertEqual(handle.maxY, b.minY, accuracy: 0.5)
+        XCTAssertEqual(handle.height, gutter, accuracy: 0.5)
+        XCTAssertEqual(handle.width, size.width, accuracy: 0.5)
+    }
+
     func testDragClampKeepsRatioWithinBounds() {
         let skewed = PaneNode.split(axis: .vertical, ratio: 0.99,
                                     first: .agent(session: "a"), second: .agent(session: "b"))
