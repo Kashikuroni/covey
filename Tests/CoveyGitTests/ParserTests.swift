@@ -80,4 +80,37 @@ final class ParserTests: XCTestCase {
     func testEmptyInputIsEmptyDiff() {
         XCTAssertEqual(UnifiedDiff.parse(""), .empty)
     }
+
+    func testCRLFLinesSplitCorrectly() {
+        let text = "@@ -1,2 +1,2 @@\n one\r\n-two\r\n+2\r\n"
+        let diff = UnifiedDiff.parse(text)
+        XCTAssertEqual(diff.hunks.count, 1)
+        let hunk = diff.hunks[0]
+        XCTAssertEqual(hunk.lines.count, 3)
+        XCTAssertEqual(hunk.lines[0], DiffLine(kind: .context, oldNumber: 1, newNumber: 1, text: "one"))
+        XCTAssertEqual(hunk.lines[1], DiffLine(kind: .removed, oldNumber: 2, newNumber: nil, text: "two"))
+        XCTAssertEqual(hunk.lines[2], DiffLine(kind: .added, oldNumber: nil, newNumber: 2, text: "2"))
+    }
+
+    func testCRLFWithNoNewlineMarker() {
+        let text = "@@ -1 +1 @@\n-a\r\n+b\r\n\\ No newline at end of file\n"
+        let diff = UnifiedDiff.parse(text)
+        XCTAssertEqual(diff.hunks.count, 1)
+        let hunk = diff.hunks[0]
+        XCTAssertEqual(hunk.lines.count, 2)
+        XCTAssertEqual(hunk.lines[0].text, "a")
+        XCTAssertEqual(hunk.lines[1].text, "b")
+    }
+
+    func testCombiningMarksPreserved() {
+        let text = "@@ -1,2 +1,2 @@\n-a\n+\u{301}b\n \u{200D}c\n"
+        let diff = UnifiedDiff.parse(text)
+        XCTAssertEqual(diff.hunks.count, 1)
+        let hunk = diff.hunks[0]
+        XCTAssertEqual(hunk.lines.count, 3)
+        XCTAssertEqual(hunk.lines[0].text, "a")
+        XCTAssertEqual(hunk.lines[1].text, "\u{301}b")
+        XCTAssertEqual(hunk.lines[2].text, "\u{200D}c")
+        XCTAssertEqual(hunk.lines.map(\.newNumber), [nil, 1, 2])
+    }
 }
