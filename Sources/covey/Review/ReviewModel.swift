@@ -174,6 +174,10 @@ final class ReviewModel {
             let fresh = try await git.changes(worktree: worktree, comparison: comparison)
             guard generation == loadGeneration else { return }
             apply(fresh)
+            // The saved record may predate edits made while this comparison
+            // was not loaded, and the first poll would match this very read.
+            await invalidateReviewed(old: nil, new: fresh)
+            guard generation == loadGeneration else { return }
             await recheckAnchors()
             // The re-check awaits git; a switch during it abandons this open.
             guard generation == loadGeneration else { return }

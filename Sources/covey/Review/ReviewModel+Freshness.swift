@@ -77,21 +77,28 @@ extension ReviewModel {
     }
 
     /// A reviewed file whose diff no longer hashes to what the reviewer saw
-    /// goes back to reviewing. Only files that could have changed are
-    /// re-diffed: new counts/status, a moved stamp, or a moved head/base.
-    func invalidateReviewed(old: ComparisonState, new: ComparisonState) async {
+    /// goes back to reviewing. From a reload only files that could have
+    /// changed are re-diffed: new counts/status, a moved stamp, or a moved
+    /// head/base. `old == nil` (a comparison just opened) has nothing to
+    /// compare against — the state may have moved while it was not loaded — so
+    /// every reviewed file is treated as touched.
+    func invalidateReviewed(old: ComparisonState?, new: ComparisonState) async {
         let generation = loadGeneration
-        let previous = Dictionary(old.files.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
-        let headMoved: Bool
-        if case .ref = record.comparison.head {
-            headMoved = old.fingerprint != new.fingerprint
+        let previous = Dictionary((old?.files ?? []).map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
+        let everythingTouched: Bool
+        if let old {
+            if case .ref = record.comparison.head {
+                everythingTouched = old.fingerprint != new.fingerprint
+            } else {
+                everythingTouched = old.mergeBase != new.mergeBase
+            }
         } else {
-            headMoved = old.mergeBase != new.mergeBase
+            everythingTouched = true
         }
         for file in new.files {
             guard record.files[file.path]?.state == .reviewed else { continue }
-            let touched = headMoved || previous[file.path] != file
-                || old.stamps[file.path] != new.stamps[file.path]
+            let touched = everythingTouched || previous[file.path] != file
+                || old?.stamps[file.path] != new.stamps[file.path]
             guard touched else { continue }
             let hash: String
             if file.isBinary || (file.isUntracked && file.added == nil) {

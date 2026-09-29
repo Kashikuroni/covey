@@ -157,6 +157,8 @@ final class ReviewModelFreshnessTests: XCTestCase {
 
     /// The abandoned reload is already past `changes` and parked in the
     /// re-diff of a reviewed file; it must not write that verdict into B's record.
+    /// B's saved hash matches the diff B loads (d2), so `open` keeps it reviewed;
+    /// the parked read answers something else once released, and would demote it.
     func testAbandonedReloadStopsBeforeInvalidatingTheNewComparisonsFiles() async {
         let git = FakeReviewGit()
         git.state = comparisonState([changed("a.swift")])
@@ -164,8 +166,9 @@ final class ReviewModelFreshnessTests: XCTestCase {
         git.statesByBase["b"] = comparisonState([changed("a.swift")], fingerprint: "fp-b")
         let (model, store) = makeReviewModel(git: git)
         let b = GitComparison(base: "b")
+        let bHash = ReviewHash.of(d2, file: changed("a.swift"), stamp: nil)
         var seeded = ReviewRecord(worktree: model.worktree, comparison: b)
-        seeded.files["a.swift"] = FileReview(state: .reviewed, reviewedDiffHash: "saved-hash")
+        seeded.files["a.swift"] = FileReview(state: .reviewed, reviewedDiffHash: bHash)
         store.save(seeded)
         store.flush()
         await model.start()
@@ -178,16 +181,54 @@ final class ReviewModelFreshnessTests: XCTestCase {
         let poll = Task { await model.checkFreshness() }
         await held.waitUntilArrived()
         await model.open(b)
+        XCTAssertEqual(model.review(for: "a.swift").state, .reviewed)
 
+        git.diffs["a.swift"] = oneHunk([(.added, nil, 1, "edited after the switch")])
         held.release()
         await poll.value
         XCTAssertEqual(model.record.comparison, b)
         let review = model.review(for: "a.swift")
         XCTAssertEqual(review.state, .reviewed)
-        XCTAssertEqual(review.reviewedDiffHash, "saved-hash")
+        XCTAssertEqual(review.reviewedDiffHash, bHash)
         XCTAssertFalse(review.changedSinceReviewed)
         XCTAssertNil(model.banner)
         XCTAssertEqual(model.state?.fingerprint, "fp-b")
+    }
+
+    /// The agent kept editing while the comparison was not loaded (window
+    /// closed, or A → B → A): nothing polls a state it just loaded, so `open`
+    /// itself must catch the reviewed file whose diff moved on.
+    func testOpenDemotesReviewedFilesWhoseDiffChangedWhileAway() async {
+        let git = FakeReviewGit()
+        git.state = comparisonState([changed("a.swift", added: 2), changed("b.swift")])
+        git.diffs["a.swift"] = d2
+        git.diffs["b.swift"] = d1
+        let (model, store) = makeReviewModel(git: git)
+        var seeded = ReviewRecord(worktree: model.worktree, comparison: GitComparison(base: "main"))
+        seeded.files["a.swift"] = FileReview(
+            state: .reviewed,
+            reviewedDiffHash: ReviewHash.of(d1, file: changed("a.swift"), stamp: nil))
+        seeded.files["b.swift"] = FileReview(
+            state: .reviewed,
+            reviewedDiffHash: ReviewHash.of(d1, file: changed("b.swift"), stamp: nil))
+        store.save(seeded)
+        store.flush()
+
+        await model.start()
+        XCTAssertEqual(model.phase, .ready)
+        let a = model.review(for: "a.swift")
+        XCTAssertEqual(a.state, .reviewing)
+        XCTAssertTrue(a.changedSinceReviewed)
+        XCTAssertNil(a.reviewedDiffHash)
+        XCTAssertEqual(model.review(for: "b.swift").state, .reviewed)
+        XCTAssertFalse(model.review(for: "b.swift").changedSinceReviewed)
+
+        store.flush()
+        let saved = store.load(worktree: model.worktree, comparison: GitComparison(base: "main")).record
+        XCTAssertEqual(saved.files["a.swift"]?.state, .reviewing)
+        XCTAssertEqual(saved.files["a.swift"]?.changedSinceReviewed, true)
+        XCTAssertNil(saved.files["a.swift"]?.reviewedDiffHash)
+        XCTAssertEqual(saved.files["b.swift"]?.state, .reviewed)
     }
 
     func testCanvasFitsWhenFilesFirstAppearThroughReload() async {
