@@ -422,6 +422,9 @@ final class RepositoryDiffTests: XCTestCase {
         XCTAssertNil(git.mergeBase("--output=/tmp/x", "HEAD"))
         XCTAssertNil(git.mergeBase("HEAD", "-x"))
         XCTAssertNil(git.mergeBase("", "HEAD"))
+        // The three inputs above are rejected by git itself; `--octopus` is one git
+        // accepts (exit 0, prints HEAD), so only the guard keeps it out.
+        XCTAssertNil(git.mergeBase("--octopus", "HEAD"))
         XCTAssertNotNil(git.mergeBase("main", "HEAD"))
     }
 
