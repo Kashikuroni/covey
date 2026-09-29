@@ -71,26 +71,44 @@ extension ReviewModel {
                                   comments: sendCandidateComments.filter { draft.commentIDs.contains($0.id) })
     }
 
+    /// Bytes the paste would write, markers included.
+    var sendPayloadSize: Int { ReviewSender.pastePayload(sendPreview).count }
+
     var sendWarnings: [String] {
-        guard let name = sendDraft?.target, let target = targets.first(where: { $0.name == name }) else {
-            return []
-        }
+        guard let draft = sendDraft else { return [] }
         var warnings: [String] = []
-        if target.status == .running {
-            warnings.append("\(target.name) is running — the message will be queued.")
+        if let name = draft.target, let target = targets.first(where: { $0.name == name }) {
+            switch target.status {
+            case .waiting:
+                warnings.append("\(target.name) is waiting on a prompt — answer it in the session first.")
+            case .running:
+                warnings.append("\(target.name) is running — the message will be queued.")
+            case .idle:
+                break
+            }
+            let root = URL(fileURLWithPath: worktree).resolvingSymlinksInPath().path
+            let dir = URL(fileURLWithPath: target.dir).resolvingSymlinksInPath().path
+            if dir != root, !dir.hasPrefix(root + "/") {
+                warnings.append("\(target.name) works in \(target.dir); paths in the prompt are relative to \(worktree).")
+            }
         }
-        let root = URL(fileURLWithPath: worktree).resolvingSymlinksInPath().path
-        let dir = URL(fileURLWithPath: target.dir).resolvingSymlinksInPath().path
-        if dir != root, !dir.hasPrefix(root + "/") {
-            warnings.append("\(target.name) works in \(target.dir); paths in the prompt are relative to \(worktree).")
+        let size = sendPayloadSize
+        if size > ReviewSender.maxPasteBytes {
+            let kb = Int((Double(size) / 1024).rounded(.up))
+            warnings.append("The review is too large to paste (\(kb) KB) — send fewer items.")
         }
         return warnings
     }
 
+    /// A target showing a selection/permission prompt (`.waiting`) must not
+    /// receive the paste: its Enter would answer the prompt (e.g. approve a
+    /// tool call). An oversized paste would be dropped by the daemon.
     var canSend: Bool {
         guard let draft = sendDraft, !sending, let name = draft.target,
-              targets.contains(where: { $0.name == name }) else { return false }
-        return !draft.issueIDs.isEmpty || !draft.commentIDs.isEmpty
+              let target = targets.first(where: { $0.name == name }),
+              target.status != .waiting else { return false }
+        guard !draft.issueIDs.isEmpty || !draft.commentIDs.isEmpty else { return false }
+        return sendPayloadSize <= ReviewSender.maxPasteBytes
     }
 
     /// Delivers the preview; only a fully successful delivery marks items sent.

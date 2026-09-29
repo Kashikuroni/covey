@@ -48,6 +48,23 @@ final class ReviewDiffHelpersTests: XCTestCase {
         XCTAssertEqual(DiffSplitLayout.stops(.empty), [])
     }
 
+    /// Old-side keys exist only for removed lines; every line with a new
+    /// number has a new-side key. Both layouts render the same set.
+    func testRenderedKeysPerLayout() {
+        let diff = FileDiff(hunks: [
+            hunk([line(.context, 1, 1, "a"), line(.removed, 2, nil, "b"), line(.added, nil, 2, "B")]),
+            hunk([line(.added, nil, 10, "x"), line(.removed, 9, nil, "y"), line(.context, 10, 11, "z")]),
+        ], isBinary: false)
+        let expected: Set<ThreadKey> = [
+            ThreadKey(side: .new, line: 1), ThreadKey(side: .old, line: 2), ThreadKey(side: .new, line: 2),
+            ThreadKey(side: .new, line: 10), ThreadKey(side: .old, line: 9), ThreadKey(side: .new, line: 11),
+        ]
+        XCTAssertEqual(DiffSplitLayout.renderedKeys(diff, layout: .split), expected)
+        XCTAssertEqual(DiffSplitLayout.renderedKeys(diff, layout: .unified), expected)
+        XCTAssertFalse(expected.contains(ThreadKey(side: .old, line: 1)), "context lines are new-side only")
+        XCTAssertEqual(DiffSplitLayout.renderedKeys(.empty, layout: .split), [])
+    }
+
     func testHashFollowsContentNotLineNumbers() {
         let file = ChangedFile(path: "a", status: .modified, added: 1, removed: 0)
         let a = FileDiff(hunks: [hunk([line(.context, 1, 1, "x"), line(.added, nil, 2, "y")])], isBinary: false)

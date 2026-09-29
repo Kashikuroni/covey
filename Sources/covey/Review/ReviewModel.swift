@@ -156,6 +156,10 @@ final class ReviewModel {
     func open(_ comparison: GitComparison) async {
         loadGeneration += 1
         let generation = loadGeneration
+        // Not `.ready` while `state` is gone: the canvas would claim an empty
+        // comparison, and a poll must not reload during the re-check below.
+        // An abandoned open leaves the phase to the newer one.
+        phase = .loading
         store.flush()
         let loaded = store.load(worktree: worktree, comparison: comparison)
         record = loaded.record

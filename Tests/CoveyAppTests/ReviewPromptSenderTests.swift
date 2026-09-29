@@ -60,6 +60,23 @@ final class ReviewPromptSenderTests: XCTestCase {
         XCTAssertFalse(text.contains("## Comments"))
     }
 
+    /// A minified or generated line must not blow the paste past the daemon's cap.
+    func testLongLineTextIsQuotedTruncated() {
+        let context = ReviewPromptContext(branch: "b", comparison: "c", worktree: "/w")
+        let long = "  " + String(repeating: "x", count: 1000) + "  "
+        let issue = ReviewIssue(id: 1, anchor: LineAnchor(path: "a", side: .new, line: 1, lineText: long),
+                                title: "t", body: "t", severity: .low, status: .open, createdAt: Date())
+        let text = ReviewPrompt.build(context: context, issues: [issue], comments: [])
+        XCTAssertTrue(text.contains("   > " + String(repeating: "x", count: 200) + "…\n"))
+        XCTAssertFalse(text.contains(String(repeating: "x", count: 201)))
+
+        let exact = ReviewIssue(id: 2, anchor: LineAnchor(path: "a", side: .new, line: 1,
+                                                          lineText: String(repeating: "y", count: 200)),
+                                title: "t", body: "t", severity: .low, status: .open, createdAt: Date())
+        XCTAssertTrue(ReviewPrompt.build(context: context, issues: [exact], comments: [])
+            .contains("   > " + String(repeating: "y", count: 200) + "\n"))
+    }
+
     func testSanitizeStripsEscapesAndNormalizesNewlines() {
         XCTAssertEqual(ReviewSender.sanitize("a\r\nb\rc\u{1B}[201~d"), "a\nb\nc[201~d")
     }

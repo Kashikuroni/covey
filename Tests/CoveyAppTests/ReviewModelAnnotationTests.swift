@@ -260,6 +260,109 @@ final class ReviewModelAnnotationTests: XCTestCase {
         XCTAssertTrue(model.canSend)
     }
 
+    /// `.waiting` = a selection/permission prompt is on screen: paste + Enter
+    /// would answer it (e.g. approve a tool call), so nothing may be sent.
+    func testWaitingTargetBlocksSendingUntilItIsIdle() async {
+        let (model, _, _) = await loadedModel()
+        directory.targets = [ReviewTarget(name: "origin", dir: NSTemporaryDirectory(), agent: "claude", status: .waiting)]
+        model.record.issues = [ReviewIssue(id: 1, anchor: anchor(), title: "a", body: "a", severity: .low, status: .open, createdAt: Date())]
+        model.beginSend()
+        XCTAssertFalse(model.canSend)
+        XCTAssertEqual(model.sendWarnings, ["origin is waiting on a prompt — answer it in the session first."])
+
+        await model.send()
+        XCTAssertTrue(directory.sent.isEmpty)
+        XCTAssertEqual(model.record.issues[0].status, .open)
+        XCTAssertNil(model.record.issues[0].sentAt)
+        XCTAssertNotNil(model.sendDraft)
+
+        directory.targets = [ReviewTarget(name: "origin", dir: NSTemporaryDirectory(), agent: "claude", status: .idle)]
+        XCTAssertTrue(model.canSend)
+        XCTAssertEqual(model.sendWarnings, [])
+    }
+
+    /// The daemon drops a single write over its input limit yet replies ok;
+    /// the Enter after it would then submit whatever the agent had typed.
+    func testOversizedReviewBlocksSending() async {
+        let (model, _, _) = await loadedModel()
+        let body = String(repeating: "long body line\n", count: 5_000)   // 75 000 bytes each
+        model.record.issues = (1...3).map {
+            ReviewIssue(id: $0, anchor: anchor(), title: "t\($0)", body: body, severity: .low, status: .open, createdAt: Date())
+        }
+        model.beginSend()
+        let size = ReviewSender.pastePayload(model.sendPreview).count
+        XCTAssertGreaterThan(size, ReviewSender.maxPasteBytes)
+        XCTAssertFalse(model.canSend)
+        let kb = Int((Double(size) / 1024).rounded(.up))
+        XCTAssertEqual(model.sendWarnings, ["The review is too large to paste (\(kb) KB) — send fewer items."])
+
+        await model.send()
+        XCTAssertTrue(directory.sent.isEmpty)
+        XCTAssertTrue(model.record.issues.allSatisfy { $0.status == .open && $0.sentAt == nil })
+
+        model.toggleSendIssue(2)
+        model.toggleSendIssue(3)
+        XCTAssertTrue(model.canSend)
+        XCTAssertEqual(model.sendWarnings, [])
+    }
+
+    /// Items on lines the hunk diff does not render (made in full-file mode,
+    /// or an old-side anchor on a line that is context again) are listed
+    /// above the diff instead of vanishing.
+    func testItemsOffTheShownLinesAreListedAboveTheDiff() async {
+        let (model, _, _) = await loadedModel()
+        guard case .loaded(let loaded) = model.diff else { return XCTFail("diff not loaded") }
+        let rendered = DiffSplitLayout.renderedKeys(loaded, layout: model.layout)
+        let shown = ReviewComment(id: UUID(), anchor: anchor(), text: "on a shown line", createdAt: Date())
+        let farAway = ReviewComment(id: UUID(), anchor: anchor("a.swift", 40, "far"), text: "far", createdAt: Date())
+        let restored = ReviewIssue(id: 1, anchor: anchor("a.swift", 1, "import A", side: .old), title: "r",
+                                   body: "r", severity: .low, status: .open, createdAt: Date())
+        var lost = ReviewIssue(id: 2, anchor: anchor("a.swift", 9, "gone"), title: "lost", body: "lost",
+                               severity: .low, status: .open, createdAt: Date())
+        lost.anchorState = .outdated
+        let other = ReviewIssue(id: 3, anchor: anchor("b.swift", 40, "x"), title: "b", body: "b",
+                                severity: .low, status: .open, createdAt: Date())
+        model.record.comments = [shown, farAway]
+        model.record.issues = [restored, lost, other]
+
+        XCTAssertEqual(model.unshownItems(for: "a.swift", rendered: rendered).map(\.id),
+                       ["c-\(farAway.id.uuidString)", "i-1"])
+        XCTAssertEqual(model.outdatedItems(for: "a.swift").map(\.id), ["i-2"])
+    }
+
+    func testOpeningAnIssueOffTheShownLinesSwitchesToFullFile() async {
+        let git = FakeReviewGit()
+        git.state = comparisonState([changed("a.swift")])
+        git.diffs["a.swift"] = oneHunk([(.added, nil, 5, "hunk")])
+        git.fullDiffs["a.swift"] = oneHunk([(.context, 1, 1, "top"), (.context, 2, 2, "mid"),
+                                            (.added, nil, 5, "hunk")])
+        let (model, _, _) = await loadedModel(git)
+        model.record.issues = [
+            ReviewIssue(id: 1, anchor: anchor("a.swift", 1, "top"), title: "t", body: "t", severity: .low,
+                        status: .open, createdAt: Date()),
+        ]
+        XCTAssertFalse(model.fullFile)
+        await model.openIssue(1)
+        XCTAssertTrue(model.fullFile)
+        XCTAssertEqual(model.diff, .loaded(git.fullDiffs["a.swift"]!))
+        XCTAssertEqual(model.scrollRequest?.rowID, "h0-l0")
+    }
+
+    func testOpeningAnIssueOnAShownLineStaysInHunks() async {
+        let git = FakeReviewGit()
+        git.state = comparisonState([changed("a.swift")])
+        git.diffs["a.swift"] = oneHunk([(.added, nil, 5, "hunk")])
+        git.fullDiffs["a.swift"] = oneHunk([(.context, 1, 1, "top"), (.added, nil, 5, "hunk")])
+        let (model, _, _) = await loadedModel(git)
+        model.record.issues = [
+            ReviewIssue(id: 1, anchor: anchor("a.swift", 5, "hunk"), title: "t", body: "t", severity: .low,
+                        status: .open, createdAt: Date()),
+        ]
+        await model.openIssue(1)
+        XCTAssertFalse(model.fullFile)
+        XCTAssertEqual(model.scrollRequest?.rowID, "h0-l0")
+    }
+
     func testNextIssueCyclesInTreeOrder() async {
         let git = FakeReviewGit()
         git.state = comparisonState([changed("z.txt"), changed("src/a.swift")])

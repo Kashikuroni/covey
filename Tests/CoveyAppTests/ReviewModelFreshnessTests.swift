@@ -93,6 +93,54 @@ final class ReviewModelFreshnessTests: XCTestCase {
         XCTAssertEqual(model.pollDelay, 3)
     }
 
+    /// The fingerprint read works but the reload behind it keeps failing: the
+    /// backoff must keep growing instead of resetting on every fingerprint.
+    func testBackoffGrowsWhenTheReloadKeepsFailing() async {
+        let (model, git) = await started()
+        git.fingerprintValue = "fp-moved"
+        git.changesError = GitError(kind: .failed(status: 128), description: "fatal: index locked")
+        await model.checkFreshness()
+        await model.checkFreshness()
+        await model.checkFreshness()
+        XCTAssertEqual(git.changesCalls, 4)
+        XCTAssertEqual(model.banner, "fatal: index locked")
+        XCTAssertEqual(model.pollDelay, 30)
+
+        git.changesError = nil
+        git.fingerprintValue = nil
+        git.state = comparisonState([changed("a.swift")], fingerprint: "fp-2")
+        await model.checkFreshness()
+        XCTAssertNil(model.banner)
+        XCTAssertEqual(model.pollDelay, 3)
+    }
+
+    /// A reviewed file whose counts changed cannot be confirmed unchanged when
+    /// its re-diff fails, so it goes back to reviewing rather than staying ✓.
+    func testFailedRediffDemotesAReviewedFileWhoseCountsChanged() async {
+        let (model, git) = await started()
+        await model.select("a.swift")
+        await model.toggleReviewed()
+        git.state = comparisonState([changed("a.swift", added: 2)], fingerprint: "fp-2")
+        git.diffError = GitError(kind: .timedOut, description: "timed out")
+        await model.checkFreshness()
+        let review = model.review(for: "a.swift")
+        XCTAssertEqual(review.state, .reviewing)
+        XCTAssertTrue(review.changedSinceReviewed)
+        XCTAssertNil(review.reviewedDiffHash)
+    }
+
+    func testFailedRediffKeepsAReviewedFileWhoseStampAloneMoved() async {
+        let (model, git) = await started(stamps: ["a.swift": FileStamp(mtime: 1, size: 4)])
+        await model.select("a.swift")
+        await model.toggleReviewed()
+        git.state = comparisonState([changed("a.swift")], fingerprint: "fp-2",
+                                    stamps: ["a.swift": FileStamp(mtime: 2, size: 4)])
+        git.diffError = GitError(kind: .timedOut, description: "timed out")
+        await model.checkFreshness()
+        XCTAssertEqual(model.review(for: "a.swift").state, .reviewed)
+        XCTAssertFalse(model.review(for: "a.swift").changedSinceReviewed)
+    }
+
     func testAgentFinishingTriggersACheck() async {
         let (model, git) = await started()
         await model.targetStatusChanged(from: .idle, to: .running)

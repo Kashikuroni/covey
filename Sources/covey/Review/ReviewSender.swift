@@ -4,6 +4,10 @@ enum ReviewSender {
     static let pasteStart: [UInt8] = [0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E]   // ESC[200~
     static let pasteEnd: [UInt8] = [0x1B, 0x5B, 0x32, 0x30, 0x31, 0x7E]     // ESC[201~
     static let enter: [UInt8] = [0x0D]
+    /// The daemon drops a single input write over 262 144 bytes and still
+    /// replies ok; the Enter after it would then submit whatever the agent
+    /// had typed. Payloads stay well under that.
+    static let maxPasteBytes = 200_000
 
     /// No ESC may reach the PTY: a literal `ESC[201~` in the text would end
     /// the paste early and the rest would be typed as keystrokes.

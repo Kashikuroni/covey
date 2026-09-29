@@ -25,10 +25,12 @@ extension ReviewModel {
             let fingerprint = try await git.fingerprint(worktree: worktree, comparison: record.comparison,
                                                         paths: current.files.map(\.path))
             guard generation == loadGeneration else { return }
-            failureStreak = 0
+            // A changed fingerprint leaves the streak to `reload()`: it resets
+            // it on success, so a reload that keeps failing keeps backing off.
             if fingerprint != current.fingerprint {
                 await reload()
             } else {
+                failureStreak = 0
                 banner = nil
             }
         } catch {
@@ -82,6 +84,10 @@ extension ReviewModel {
     /// head/base. `old == nil` (a comparison just opened) has nothing to
     /// compare against — the state may have moved while it was not loaded — so
     /// every reviewed file is treated as touched.
+    ///
+    /// A re-diff that fails cannot confirm the file is unchanged: a file whose
+    /// counts/status changed (or with nothing to compare against) is demoted
+    /// anyway; one whose stamp alone moved keeps its verdict.
     func invalidateReviewed(old: ComparisonState?, new: ComparisonState) async {
         let generation = loadGeneration
         let previous = Dictionary((old?.files ?? []).map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
@@ -100,7 +106,8 @@ extension ReviewModel {
             let touched = everythingTouched || previous[file.path] != file
                 || old?.stamps[file.path] != new.stamps[file.path]
             guard touched else { continue }
-            let hash: String
+            // nil: the diff could not be read, but the file did change.
+            let hash: String?
             if file.isBinary || (file.isUntracked && file.added == nil) {
                 hash = ReviewHash.of(.empty, file: file, stamp: new.stamps[file.path])
             } else {
@@ -108,12 +115,17 @@ extension ReviewModel {
                                                 mergeBase: new.mergeBase, file: file, fullFile: false)
                 // `record` may now belong to another comparison.
                 guard generation == loadGeneration else { return }
-                guard let fresh else { continue }
-                hash = ReviewHash.of(fresh, file: file, stamp: new.stamps[file.path])
+                if let fresh {
+                    hash = ReviewHash.of(fresh, file: file, stamp: new.stamps[file.path])
+                } else if previous[file.path] != file {
+                    hash = nil
+                } else {
+                    continue
+                }
             }
             // Re-read: the reviewer may have changed this file during the diff.
             guard var review = record.files[file.path], review.state == .reviewed,
-                  hash != review.reviewedDiffHash else { continue }
+                  hash == nil || hash != review.reviewedDiffHash else { continue }
             review.state = .reviewing
             review.changedSinceReviewed = true
             review.reviewedDiffHash = nil

@@ -65,4 +65,41 @@ enum DiffSplitLayout {
         }
         return stops
     }
+
+    // MARK: - Thread keys
+
+    /// Keys a split row shows threads under. Old-side keys exist only for
+    /// removed lines: context lines are anchored on the new side.
+    static func splitKeys(_ row: SplitRow) -> [ThreadKey] {
+        var keys: [ThreadKey] = []
+        if let left = row.left, left.kind == .removed, let n = left.oldNumber {
+            keys.append(ThreadKey(side: .old, line: n))
+        }
+        if let right = row.right, let n = right.newNumber {
+            keys.append(ThreadKey(side: .new, line: n))
+        }
+        return keys
+    }
+
+    /// Keys a unified line shows threads under (same rule as `splitKeys`).
+    static func unifiedKeys(_ line: DiffLine) -> [ThreadKey] {
+        if let n = line.newNumber { return [ThreadKey(side: .new, line: n)] }
+        if let n = line.oldNumber { return [ThreadKey(side: .old, line: n)] }
+        return []
+    }
+
+    /// Every key `diff` renders in `layout`; an item or composer anchored
+    /// elsewhere has no line to sit under.
+    static func renderedKeys(_ diff: FileDiff, layout: DiffLayout) -> Set<ThreadKey> {
+        var keys = Set<ThreadKey>()
+        for (h, hunk) in diff.hunks.enumerated() {
+            switch layout {
+            case .split:
+                for row in rows(hunk, hunkIndex: h) { keys.formUnion(splitKeys(row)) }
+            case .unified:
+                for line in hunk.lines { keys.formUnion(unifiedKeys(line)) }
+            }
+        }
+        return keys
+    }
 }

@@ -6,6 +6,15 @@ struct ThreadKey: Hashable {
     let line: Int
 }
 
+extension LineAnchor {
+    var threadKey: ThreadKey { ThreadKey(side: side, line: line) }
+}
+
+extension AnchorState {
+    /// The item sits on a line (not listed as lost above the diff).
+    var isOnALine: Bool { self == .current || self == .tracked }
+}
+
 enum ReviewThreadItem: Identifiable, Equatable {
     case comment(ReviewComment)
     case issue(ReviewIssue)
@@ -102,9 +111,19 @@ extension ReviewModel {
         return issues.sorted { $0.id < $1.id }
     }
 
+    /// Selects the issue's file and scrolls to its line. A line the hunk
+    /// diff does not render (outside every hunk, e.g. made in full-file
+    /// mode) switches to the full file first, so the scroll has a target.
     func openIssue(_ id: Int) async {
-        guard let issue = record.issues.first(where: { $0.id == id }) else { return }
-        await select(issue.anchor.path)
+        guard let path = record.issues.first(where: { $0.id == id })?.anchor.path else { return }
+        await select(path)
+        // Re-read: the anchor may have been re-tracked while the diff loaded.
+        guard let issue = record.issues.first(where: { $0.id == id }),
+              selectedPath == issue.anchor.path else { return }
+        if !fullFile, issue.anchorState.isOnALine, case .loaded(let loaded) = diff,
+           !DiffSplitLayout.renderedKeys(loaded, layout: layout).contains(issue.anchor.threadKey) {
+            await toggleFullFile()
+        }
         requestScroll(to: issue.anchor)
     }
 
@@ -145,8 +164,8 @@ extension ReviewModel {
     /// Inline threads of `path`: items whose anchor is current or tracked.
     func threads(for path: String) -> [ThreadKey: [ReviewThreadItem]] {
         var map: [ThreadKey: [ReviewThreadItem]] = [:]
-        for item in items(for: path) where item.anchorState == .current || item.anchorState == .tracked {
-            map[ThreadKey(side: item.anchor.side, line: item.anchor.line), default: []].append(item)
+        for item in items(for: path) where item.anchorState.isOnALine {
+            map[item.anchor.threadKey, default: []].append(item)
         }
         return map
     }
@@ -154,6 +173,13 @@ extension ReviewModel {
     /// Items of `path` that lost their line; shown above the diff.
     func outdatedItems(for path: String) -> [ReviewThreadItem] {
         items(for: path).filter { $0.anchorState == .outdated || $0.anchorState == .fileGone }
+    }
+
+    /// Items of `path` on a line the diff does not render (`rendered` =
+    /// `DiffSplitLayout.renderedKeys`): outside every hunk, or an old-side
+    /// anchor on a line that is context again. Shown above the diff.
+    func unshownItems(for path: String, rendered: Set<ThreadKey>) -> [ReviewThreadItem] {
+        items(for: path).filter { $0.anchorState.isOnALine && !rendered.contains($0.anchor.threadKey) }
     }
 
     private func items(for path: String) -> [ReviewThreadItem] {

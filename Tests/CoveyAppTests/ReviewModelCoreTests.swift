@@ -258,6 +258,30 @@ final class ReviewModelCoreTests: XCTestCase {
         XCTAssertTrue(model.comparisonPopoverOpen)
     }
 
+    /// Switching clears the old state at once; until the new one lands the
+    /// review is loading — not an empty, ready comparison that a poll may reload.
+    func testOpenIsLoadingUntilTheChangesArrive() async {
+        let git = FakeReviewGit()
+        git.state = comparisonState([changed("main.swift")])
+        git.statesByBase["b"] = comparisonState([changed("only-b.swift")], fingerprint: "fp-b")
+        let (model, _) = makeReviewModel(git: git)
+        await model.start()
+        XCTAssertEqual(model.phase, .ready)
+
+        let held = git.holdNextChanges(base: "b")
+        let switching = Task { await model.open(GitComparison(base: "b")) }
+        await held.waitUntilArrived()
+        XCTAssertEqual(model.phase, .loading)
+        XCTAssertNil(model.state)
+        await model.checkFreshness()
+        XCTAssertEqual(git.fingerprintCalls, 0)
+
+        held.release()
+        await switching.value
+        XCTAssertEqual(model.phase, .ready)
+        XCTAssertEqual(model.files.map(\.path), ["only-b.swift"])
+    }
+
     func testLateFailureOfAnAbandonedLoadIsIgnored() async {
         let git = FakeReviewGit()
         git.state = comparisonState([changed("main.swift")])

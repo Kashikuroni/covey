@@ -19,7 +19,7 @@ enum ReviewPrompt {
             for (n, issue) in issues.enumerated() {
                 out += "\(n + 1). #\(issue.id) · \(issue.severity.rawValue) — \(issue.title)\n"
                 out += "   \(location(issue.anchor))\n"
-                out += "   > \(issue.anchor.lineText.trimmingCharacters(in: .whitespaces))\n"
+                out += "   > \(quote(issue.anchor.lineText))\n"
                 for line in detail(of: issue) { out += "   \(line)\n" }
             }
         }
@@ -32,6 +32,15 @@ enum ReviewPrompt {
             }
         }
         return out
+    }
+
+    static let quoteLimit = 200
+
+    /// The anchored line, trimmed and cut to `quoteLimit` characters: a
+    /// minified or generated line must not blow the paste past its cap.
+    static func quote(_ lineText: String) -> String {
+        let trimmed = lineText.trimmingCharacters(in: .whitespaces)
+        return trimmed.count > quoteLimit ? String(trimmed.prefix(quoteLimit)) + "…" : trimmed
     }
 
     static func location(_ anchor: LineAnchor) -> String {
