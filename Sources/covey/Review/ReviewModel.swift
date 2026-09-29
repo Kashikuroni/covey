@@ -196,7 +196,11 @@ final class ReviewModel {
             comparisonPopoverOpen = true
             return
         }
-        await open(record.comparison)
+        if state != nil {
+            await reload()
+        } else {
+            await open(record.comparison)
+        }
     }
 
     /// Adopts a fresh read; files seen for the first time start unread.
@@ -437,12 +441,20 @@ final class ReviewModel {
 
     func setCanvasViewport(_ size: CGSize) {
         canvasViewport = size
-        if !canvasFitted, !files.isEmpty, size.width > 0 { fitCanvas() }
+        fitCanvasIfNeeded()
     }
 
+    /// Fits once files exist and no file-bearing fit has happened yet — also
+    /// when the first files arrive later through a reload.
+    func fitCanvasIfNeeded() {
+        if !canvasFitted, !files.isEmpty, canvasViewport.width > 0 { fitCanvas() }
+    }
+
+    /// Fitting nothing only resets the transform; the canvas counts as fitted
+    /// once a fit had at least one file to frame.
     func fitCanvas() {
         canvas = CanvasTransform.fit(CanvasLayout.bounds(cardFrames), in: canvasViewport)
-        canvasFitted = true
+        canvasFitted = !files.isEmpty
     }
 
     func zoomCanvas(by factor: CGFloat) {
