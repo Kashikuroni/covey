@@ -9,6 +9,11 @@ final class ReviewPromptSenderTests: XCTestCase {
         XCTAssertTrue(isShellAgent("xonsh", shell: "/opt/bin/xonsh"))
         XCTAssertFalse(isShellAgent("claude", shell: "/bin/zsh"))
         XCTAssertFalse(isShellAgent("codex", shell: "/bin/zsh"))
+        // Custom agents keep their flags in `agent`; a login shell is `-zsh`.
+        XCTAssertTrue(isShellAgent("zsh -l", shell: nil))
+        XCTAssertTrue(isShellAgent("-zsh", shell: nil))
+        XCTAssertTrue(isShellAgent("/bin/bash --login", shell: nil))
+        XCTAssertFalse(isShellAgent("claude --model opus", shell: "/bin/zsh"))
     }
 
     func testPromptListsIssuesThenComments() {
