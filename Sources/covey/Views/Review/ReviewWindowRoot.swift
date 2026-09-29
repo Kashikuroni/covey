@@ -35,9 +35,11 @@ struct ReviewWindowView: View {
     let app: AppModel
     @State private var scope = WorkspaceWindowScope()
     @State private var keyMonitor: Any?
-    /// This window is the key window. `app.reviewWindowFocused` is one flag
+    /// This window is the main window. `app.reviewWindowFocused` is one flag
     /// for all Review windows, so a window only clears it when it set it.
-    @State private var isKey = false
+    /// Main, not key: the comparison popover is a window of its own that
+    /// takes key status, but popovers and sheets never become main.
+    @State private var isMain = false
     @State private var diffFraction: CGFloat = 0.55
     @State private var dragStartFraction: CGFloat?
 
@@ -65,28 +67,31 @@ struct ReviewWindowView: View {
         .task { await model.runPolling() }
         .onAppear {
             installKeyMonitor()
-            // The window usually became key while the model was still loading,
+            // The window usually became main while the model was still loading,
             // before this view could hear the notification.
-            Task { @MainActor in syncKeyState() }
+            Task { @MainActor in syncMainState() }
         }
         .onDisappear {
             if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
             keyMonitor = nil
-            if isKey {
-                isKey = false
+            if isMain {
+                isMain = false
                 app.reviewWindowFocused = false
             }
             model.flush()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
             guard scope.contains(note.object as? NSWindow) else { return }
-            isKey = true
-            app.reviewWindowFocused = true
             Task { await model.checkFreshness() }
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { note in
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeMainNotification)) { note in
             guard scope.contains(note.object as? NSWindow) else { return }
-            isKey = false
+            isMain = true
+            app.reviewWindowFocused = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignMainNotification)) { note in
+            guard scope.contains(note.object as? NSWindow) else { return }
+            isMain = false
             app.reviewWindowFocused = false
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didChangeOcclusionStateNotification)) { note in
@@ -132,7 +137,9 @@ struct ReviewWindowView: View {
                     .onHover { inside in
                         if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
                     }
-                    .gesture(DragGesture(minimumDistance: 1)
+                    // Global space: the handle itself moves as the fraction
+                    // changes, so a local translation would chase its own tail.
+                    .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
                         .onChanged { value in
                             if dragStartFraction == nil { dragStartFraction = diffFraction }
                             let proposed = dragStartFraction! - value.translation.width / max(total, 1)
@@ -142,9 +149,9 @@ struct ReviewWindowView: View {
             }
     }
 
-    private func syncKeyState() {
-        guard !isKey, let window = scope.window, window.isKeyWindow else { return }
-        isKey = true
+    private func syncMainState() {
+        guard !isMain, let window = scope.window, window.isMainWindow else { return }
+        isMain = true
         app.reviewWindowFocused = true
     }
 

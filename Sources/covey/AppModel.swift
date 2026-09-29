@@ -129,8 +129,9 @@ public final class AppModel {
     /// Set by `openReview`; ContentView opens the window and clears it.
     var reviewWindowRequest: ReviewWindowKey?
     @ObservationIgnored var reviewLaunches: [ReviewWindowKey: ReviewLaunch] = [:]
-    /// A Review window is key: the main window's catalog commands stand down
-    /// so ⌘W, ⌘1… never act on the window behind it.
+    /// A Review window is the main window (its popover may be the key one):
+    /// the main window's catalog commands stand down so ⌘W, ⌘1… never act
+    /// on the window behind it.
     var reviewWindowFocused = false
     public private(set) var connected = false
     public private(set) var themeRaw: String = "dark"
