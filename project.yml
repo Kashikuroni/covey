@@ -42,6 +42,8 @@ targets:
     dependencies:
       - package: covey
         product: CoveyKit
+      - package: covey
+        product: CoveyGit
       - package: SwiftTerm
         product: SwiftTerm
       - target: coveyd
