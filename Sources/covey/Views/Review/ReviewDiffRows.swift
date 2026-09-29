@@ -54,9 +54,16 @@ struct ReviewDiffRows: View {
                         .padding(20)
                 }
             }
-            .onChange(of: model.scrollRequest) { _, request in
+            // `initial: true`: opening an issue reloads the diff, which tears this
+            // view down and mounts it again with the request already set. The
+            // scroll waits one tick so the lazy stack has laid out, and the request
+            // is consumed so a later remount never replays a stale one.
+            .onChange(of: model.scrollRequest, initial: true) { _, request in
                 guard let request else { return }
-                withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(request.rowID, anchor: .top) }
+                Task { @MainActor in
+                    withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(request.rowID, anchor: .top) }
+                    if model.scrollRequest == request { model.scrollRequest = nil }
+                }
             }
         }
     }
