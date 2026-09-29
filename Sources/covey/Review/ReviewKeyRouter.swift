@@ -25,14 +25,17 @@ struct ReviewKeyContext: Equatable {
 
 enum ReviewKeyRouter {
     static func route(_ event: ReviewKeyEvent, context: ReviewKeyContext) -> ReviewKeyAction? {
+        // Cyrillic keys map to the Latin key at the same physical position, so
+        // the shortcuts also work on the ЙЦУКЕН layout.
+        let key = event.characters.first.map { String(latinize($0)) } ?? ""
         if event.command {
             let plain = !event.control && !event.option
-            return plain && event.characters.lowercased() == "w" ? .closeWindow : nil
+            return plain && key.lowercased() == "w" ? .closeWindow : nil
         }
         if event.isEscape { return .escape }
         if event.control || event.option || context.textInputFocused || context.modalOpen { return nil }
-        if event.characters == "I" { return .previousIssue }
-        switch event.characters.lowercased() {
+        if key == "I" { return .previousIssue }
+        switch key.lowercased() {
         case "j": return .nextFile
         case "k": return .previousFile
         case "]": return .nextHunk

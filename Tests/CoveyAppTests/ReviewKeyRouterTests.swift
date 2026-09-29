@@ -44,6 +44,20 @@ final class ReviewKeyRouterTests: XCTestCase {
         XCTAssertNil(route("j", control: true))
     }
 
+    func testRussianLayoutRoutesLikeLatin() {
+        let table: [(String, ReviewKeyAction)] = [
+            ("о", .nextFile), ("л", .previousFile), ("к", .toggleReviewed), ("у", .toggleFullFile),
+            ("с", .comment), ("г", .nextUnreviewed), ("а", .fit), ("ш", .nextIssue),
+            ("Ш", .previousIssue), ("ъ", .nextHunk), ("х", .previousHunk),
+        ]
+        for (key, action) in table {
+            XCTAssertEqual(route(key), action, key)
+        }
+        XCTAssertEqual(route("ц", command: true), .closeWindow)
+        XCTAssertNil(route("о", context: ReviewKeyContext(textInputFocused: true)))
+        XCTAssertNil(route("ц"))
+    }
+
     func testHelpListsEveryShortcutOnce() {
         XCTAssertEqual(ReviewKeyRouter.help.count, 15)
         XCTAssertEqual(Set(ReviewKeyRouter.help.map(\.label)).count, 15)
