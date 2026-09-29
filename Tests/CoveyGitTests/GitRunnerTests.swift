@@ -84,6 +84,20 @@ final class GitRunnerTests: XCTestCase {
         XCTAssertTrue(buffers.overflowed)
     }
 
+    /// After the cap trips the runner only waits for the child to die: further
+    /// chunks are discarded, not buffered.
+    func testChunksAfterTheCapTripsAreDiscarded() {
+        let buffers = OutputBuffers(limit: 10)
+        XCTAssertFalse(buffers.append(Data(count: 6), stdout: true))
+        XCTAssertTrue(buffers.append(Data(count: 6), stdout: false))
+        let held = (buffers.stdout.count, buffers.stderr.count)
+        XCTAssertFalse(buffers.append(Data(count: 1000), stdout: true))
+        XCTAssertFalse(buffers.append(Data(count: 1000), stdout: false))
+        XCTAssertEqual(buffers.stdout.count, held.0)
+        XCTAssertEqual(buffers.stderr.count, held.1)
+        XCTAssertTrue(buffers.overflowed)
+    }
+
     /// EOF-leave and detach-leave are mutually exclusive per pipe, so the drain
     /// group is left exactly once for each `enter()`.
     func testDrainGroupLeavesExactlyOncePerPipe() {

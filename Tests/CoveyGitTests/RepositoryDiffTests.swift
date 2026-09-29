@@ -359,6 +359,72 @@ final class RepositoryDiffTests: XCTestCase {
         XCTAssertEqual(reloaded.files.map(\.path), ["a.txt", "late.txt"])
     }
 
+    func testSubdirectoryRepositoryReadsTheWholeWorktree() throws {
+        try repo.write("sub/tracked.txt", "one\n")
+        try repo.commitAll("base")
+        try repo.write("sub/tracked.txt", "one\ntwo\n")
+        try repo.write("root-untracked.txt", "r\n")
+        let sub = Repository(at: "\(repo.path)/sub")
+        let comparison = GitComparison(base: "main")
+        let state = try sub.changes(in: comparison)
+        XCTAssertEqual(state.files.map(\.path), ["root-untracked.txt", "sub/tracked.txt"])
+        XCTAssertEqual(state.files.first { $0.path == "root-untracked.txt" }?.added, 1)
+        XCTAssertNotNil(state.stamps["sub/tracked.txt"])
+        let untracked = try XCTUnwrap(state.files.first { $0.isUntracked })
+        XCTAssertEqual(try sub.diff(of: untracked, in: comparison, mergeBase: state.mergeBase)
+            .hunks.flatMap(\.lines).map(\.text), ["r"])
+        XCTAssertEqual(try sub.fingerprint(of: comparison, paths: state.files.map(\.path)), state.fingerprint)
+    }
+
+    func testUntrackedCountingStopsAtTheFileBudget() throws {
+        for name in ["a.txt", "b.txt", "c.txt"] { try repo.write(name, "x\n") }
+        let state = try git.changes(in: GitComparison(base: "main"), afterListing: nil,
+                                    fileBudget: 2, byteBudget: 1 << 20)
+        XCTAssertEqual(state.files.map(\.added), [1, 1, nil])
+        XCTAssertEqual(state.files.map(\.isUntracked), [true, true, true])
+    }
+
+    func testUntrackedCountingStopsAtTheByteBudget() throws {
+        try repo.write("a.txt", String(repeating: "x\n", count: 10))   // 20 bytes
+        try repo.write("b.txt", String(repeating: "y\n", count: 10))   // 20 bytes
+        let state = try git.changes(in: GitComparison(base: "main"), afterListing: nil,
+                                    fileBudget: 100, byteBudget: 30)
+        XCTAssertEqual(state.files.map(\.added), [10, nil])
+    }
+
+    func testRefHeadPerFileDiff() throws {
+        try repo.write("f.txt", "one\n")
+        try repo.commitAll("base")
+        try repo.sh("git -C '\(repo.path)' checkout -q -b feat")
+        try repo.write("f.txt", "one\ntwo\n")
+        try repo.commitAll("feat")
+        try repo.write("f.txt", "one\ntwo\nuncommitted\n")
+        let comparison = GitComparison(base: "main", head: .ref("feat"))
+        let state = try git.changes(in: comparison)
+        let file = try XCTUnwrap(state.files.first)
+        let diff = try git.diff(of: file, in: comparison, mergeBase: state.mergeBase)
+        XCTAssertEqual(diff.hunks.flatMap(\.lines).filter { $0.kind == .added }.map(\.text), ["two"])
+    }
+
+    func testNotARepositoryIsAFailureNotAnUnknownRef() throws {
+        let plain = "\(NSTemporaryDirectory())covey-not-a-repo-\(UInt32.random(in: 0..<UInt32.max))"
+        try FileManager.default.createDirectory(atPath: plain, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: plain) }
+        XCTAssertThrowsError(try Repository(at: plain).changes(in: GitComparison(base: "main"))) { error in
+            guard case .failed? = (error as? GitError)?.kind else {
+                return XCTFail("expected .failed, got \(error)")
+            }
+        }
+        XCTAssertNil(Repository(at: plain).resolveCommit("main"))
+    }
+
+    func testMergeBaseRefusesOptionShapedInput() {
+        XCTAssertNil(git.mergeBase("--output=/tmp/x", "HEAD"))
+        XCTAssertNil(git.mergeBase("HEAD", "-x"))
+        XCTAssertNil(git.mergeBase("", "HEAD"))
+        XCTAssertNotNil(git.mergeBase("main", "HEAD"))
+    }
+
     func testComparisonLabelAndStorageKey() {
         XCTAssertEqual(GitComparison(base: "main").label, "main…working tree")
         XCTAssertEqual(GitComparison(base: "main", head: .ref("feat")).label, "main…feat")

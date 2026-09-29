@@ -1,13 +1,20 @@
 import Foundation
 
-/// Read-only comparison API for the Review window. Every method expects
-/// `path` to be a worktree TOPLEVEL: git prints paths relative to it.
+/// Read-only comparison API for the Review window. `path` may be any directory
+/// inside a worktree: `changes`, `fingerprint` and `diff` resolve the worktree
+/// toplevel first and do all their work there, because git prints paths
+/// relative to it.
 extension Repository {
     public static let diffTimeout: TimeInterval = 10
     public static let diffOutputLimit = 32 << 20
     /// Untracked files above this size are listed without line counts and
     /// never read.
     public static let untrackedCountLimit: Int64 = 8 << 20
+    /// One load counts lines of at most this many untracked files...
+    public static let untrackedCountFileBudget = 2000
+    /// ...and reads at most this many bytes of them in total. Past either budget
+    /// the remaining untracked files are listed without counts, never read.
+    public static let untrackedCountByteBudget: Int64 = 64 << 20
 
     /// The commit `ref` names, or nil. Refuses option-shaped input outright.
     /// Nil also covers a git failure or timeout; `requireCommit` tells them apart.
@@ -15,6 +22,8 @@ extension Repository {
         (try? lookupCommit(ref)) ?? nil
     }
 
+    /// The merge base of `a` and `b`, or nil (also for a git failure or timeout,
+    /// and for an empty or option-shaped argument, which never reaches git).
     public func mergeBase(_ a: String, _ b: String) -> String? {
         (try? lookupMergeBase(a, b)) ?? nil
     }
@@ -53,8 +62,22 @@ extension Repository {
     /// fingerprint is `unstable:<uuid>`, which no poll ever reproduces, so the
     /// next poll reloads. Otherwise it is exactly what `fingerprint(of:paths:)`
     /// builds now, so an idle view compares equal. Ref…ref has no window.
-    /// `afterListing` is a test seam that injects an edit at step 3.
-    func changes(in comparison: GitComparison, afterListing: (() -> Void)?) throws -> ComparisonState {
+    /// `afterListing` is a test seam that injects an edit at step 3; the budgets
+    /// (see `untrackedCountFileBudget` / `untrackedCountByteBudget`) are a seam
+    /// so a test can exhaust them with a few small files.
+    func changes(in comparison: GitComparison, afterListing: (() -> Void)?,
+                 fileBudget: Int = Repository.untrackedCountFileBudget,
+                 byteBudget: Int64 = Repository.untrackedCountByteBudget) throws -> ComparisonState {
+        let root = try worktreeRoot()
+        return try root.changesAtToplevel(comparison, afterListing: afterListing,
+                                          fileBudget: fileBudget, byteBudget: byteBudget)
+    }
+
+    /// The load itself. `path` MUST be the worktree toplevel (callers go through
+    /// `worktreeRoot()`): git prints repo-relative paths, and the stamps and
+    /// untracked reads below join them to `path`.
+    private func changesAtToplevel(_ comparison: GitComparison, afterListing: (() -> Void)?,
+                                   fileBudget: Int, byteBudget: Int64) throws -> ComparisonState {
         let base = try requireCommit(comparison.base)
         let headRev = try headRevision(comparison)
         guard let mergeBase = try lookupMergeBase(base, headRev) else {
@@ -93,7 +116,7 @@ extension Repository {
                                added: c?.added, removed: c?.removed,
                                isBinary: c.map { $0.added == nil && $0.removed == nil } ?? false)
         }
-        files += untrackedPaths.map(untrackedFile)
+        files += untrackedFiles(untrackedPaths, fileBudget: fileBudget, byteBudget: byteBudget)
         files.sort { $0.path < $1.path }
         // 5
         guard isWorkingTree else {
@@ -116,6 +139,11 @@ extension Repository {
     /// already-changed `paths` — edits to files that were already dirty do not
     /// show in status. Ref…ref: the two resolved commits.
     public func fingerprint(of comparison: GitComparison, paths: [String]) throws -> String {
+        let root = try worktreeRoot()
+        return try root.fingerprintAtToplevel(comparison, paths: paths)
+    }
+
+    private func fingerprintAtToplevel(_ comparison: GitComparison, paths: [String]) throws -> String {
         let base = try requireCommit(comparison.base)
         let headRev = try headRevision(comparison)
         guard case .workingTree = comparison.head else { return "ref:\(base):\(headRev)" }
@@ -132,6 +160,12 @@ extension Repository {
         guard !mergeBase.hasPrefix("-") else {
             throw GitError(kind: .unknownRef(mergeBase), description: "unknown revision '\(mergeBase)'")
         }
+        let root = try worktreeRoot()
+        return try root.diffAtToplevel(of: file, in: comparison, mergeBase: mergeBase, fullFile: fullFile)
+    }
+
+    private func diffAtToplevel(of file: ChangedFile, in comparison: GitComparison, mergeBase: String,
+                                fullFile: Bool) throws -> FileDiff {
         var args = Self.diffArgs(["--no-color", "--no-ext-diff"])
         if fullFile { args.append("--unified=1000000") }
         if file.isUntracked {
@@ -154,6 +188,23 @@ extension Repository {
         return UnifiedDiff.parse(try read(args))
     }
 
+    // MARK: - toplevel
+
+    /// The repository at this worktree's toplevel. `path` may be a subdirectory
+    /// (a plain session's directory often is), where git still prints paths
+    /// relative to the toplevel and `ls-files --others` lists only the
+    /// subdirectory. Any git failure (not a repository, a bare repository, a
+    /// corrupt store) throws `.failed`.
+    func worktreeRoot() throws -> Repository {
+        let args = ["rev-parse", "--show-toplevel"]
+        let out = try GitRunner.execute(in: path, args, readOnly: true, timeout: Self.diffTimeout)
+        guard out.status == 0 else { throw failure(args, out) }
+        // Only the line terminator is trimmed: a directory name may end in a space.
+        let toplevel = out.stdout.trimmingCharacters(in: .newlines)
+        guard !toplevel.isEmpty else { throw failure(args, out) }
+        return Repository(at: toplevel)
+    }
+
     // MARK: - private
 
     /// `git diff` with `diff.suppressBlankEmpty` forced off: a user's `true` makes git
@@ -162,25 +213,37 @@ extension Repository {
         ["-c", "diff.suppressBlankEmpty=false", "diff"] + args
     }
 
-    /// The commit `ref` names; nil when git ran and it does not resolve. Throws
-    /// only when git itself could not answer (launch failure, timeout, output cap).
+    /// The commit `ref` names; nil when git ran and it does not resolve
+    /// (`rev-parse --verify --quiet` exits 1 for that). Any other failure — not a
+    /// repository, a corrupt object store, launch failure, timeout, output cap —
+    /// throws, so it is never mistaken for an unknown revision.
     private func lookupCommit(_ ref: String) throws -> String? {
         guard !ref.isEmpty, !ref.hasPrefix("-") else { return nil }
-        let out = try GitRunner.execute(in: path, ["rev-parse", "--verify", "--quiet", "\(ref)^{commit}"],
-                                        readOnly: true, timeout: Self.diffTimeout)
-        guard out.status == 0 else { return nil }
-        let oid = out.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        return oid.isEmpty ? nil : oid
+        let args = ["rev-parse", "--verify", "--quiet", "\(ref)^{commit}"]
+        let out = try GitRunner.execute(in: path, args, readOnly: true, timeout: Self.diffTimeout)
+        switch out.status {
+        case 0:
+            let oid = out.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            return oid.isEmpty ? nil : oid
+        case 1: return nil
+        default: throw failure(args, out)
+        }
     }
 
-    /// The merge base of `a` and `b`; nil when git ran and found none. Throws only
-    /// when git itself could not answer.
+    /// The merge base of `a` and `b`; nil when git ran and found none (exit 1),
+    /// or when either argument is empty or option-shaped (git is not called).
+    /// Any other failure throws.
     private func lookupMergeBase(_ a: String, _ b: String) throws -> String? {
-        let out = try GitRunner.execute(in: path, ["merge-base", a, b],
-                                        readOnly: true, timeout: Self.diffTimeout)
-        guard out.status == 0 else { return nil }
-        let oid = out.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        return oid.isEmpty ? nil : oid
+        guard ![a, b].contains(where: { $0.isEmpty || $0.hasPrefix("-") }) else { return nil }
+        let args = ["merge-base", a, b]
+        let out = try GitRunner.execute(in: path, args, readOnly: true, timeout: Self.diffTimeout)
+        switch out.status {
+        case 0:
+            let oid = out.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            return oid.isEmpty ? nil : oid
+        case 1: return nil
+        default: throw failure(args, out)
+        }
     }
 
     private func requireCommit(_ ref: String) throws -> String {
@@ -248,19 +311,43 @@ extension Repository {
         return FileStamp(mtime: mtime, size: size)
     }
 
-    /// Counts lines of an untracked file without git; over the cap, unreadable
-    /// or not a regular file (a symlink's own size is its link text, and
-    /// reading would follow it to the target) the counts stay nil and the
-    /// file is never read.
-    private func untrackedFile(_ rel: String) -> ChangedFile {
-        let full = (path as NSString).appendingPathComponent(rel)
-        let attrs = try? FileManager.default.attributesOfItem(atPath: full)
-        let size = (attrs?[.size] as? NSNumber)?.int64Value ?? 0
-        guard (attrs?[.type] as? FileAttributeType) == .typeRegular,
-              size <= Self.untrackedCountLimit,
-              let data = FileManager.default.contents(atPath: full) else {
-            return ChangedFile(path: rel, status: .added, added: nil, removed: nil, isUntracked: true)
+    /// Lists untracked files with line counts, counted without git, in sorted
+    /// path order until a budget is spent: at most `fileBudget` files and
+    /// `byteBudget` bytes read in total. A file whose own size no longer fits the
+    /// byte budget is not read and ends counting for the rest. Every file that is
+    /// not read — past a budget, over `untrackedCountLimit`, unreadable, or not a
+    /// regular file (a symlink's own size is its link text, and reading would
+    /// follow it to the target) — is listed with nil counts.
+    private func untrackedFiles(_ rels: [String], fileBudget: Int, byteBudget: Int64) -> [ChangedFile] {
+        var filesLeft = fileBudget
+        var bytesLeft = byteBudget
+        var files: [ChangedFile] = []
+        for rel in rels.sorted() {
+            let unread = ChangedFile(path: rel, status: .added, added: nil, removed: nil, isUntracked: true)
+            // Past a budget nothing touches the disk any more.
+            guard filesLeft > 0 else { files.append(unread); continue }
+            let full = (path as NSString).appendingPathComponent(rel)
+            let attrs = try? FileManager.default.attributesOfItem(atPath: full)
+            let size = (attrs?[.size] as? NSNumber)?.int64Value ?? 0
+            guard (attrs?[.type] as? FileAttributeType) == .typeRegular,
+                  size <= Self.untrackedCountLimit else { files.append(unread); continue }
+            guard size <= bytesLeft else {
+                filesLeft = 0   // does not fit: no later file is counted either
+                files.append(unread)
+                continue
+            }
+            filesLeft -= 1
+            guard let data = FileManager.default.contents(atPath: full) else {
+                files.append(unread)
+                continue
+            }
+            bytesLeft -= Int64(data.count)
+            files.append(Self.counted(rel, data))
         }
+        return files
+    }
+
+    private static func counted(_ rel: String, _ data: Data) -> ChangedFile {
         if data.prefix(8000).contains(0) {
             return ChangedFile(path: rel, status: .added, added: nil, removed: nil,
                                isBinary: true, isUntracked: true)

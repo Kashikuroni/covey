@@ -92,11 +92,14 @@ final class OutputBuffers: @unchecked Sendable {
     init(limit: Int) { self.limit = limit }
 
     /// True exactly once: for the chunk that first pushes stdout + stderr past the
-    /// limit. The caller terminates the child then, and never again.
+    /// limit. The caller terminates the child then, and never again. Once the
+    /// cap has tripped the run is a failure whatever it holds, so later chunks
+    /// (still in flight until the child dies) are discarded, not buffered.
     func append(_ chunk: Data, stdout: Bool) -> Bool {
         lock.lock(); defer { lock.unlock() }
+        guard !tooLarge else { return false }
         if stdout { out.append(chunk) } else { err.append(chunk) }
-        guard !tooLarge, out.count + err.count > limit else { return false }
+        guard out.count + err.count > limit else { return false }
         tooLarge = true
         return true
     }
