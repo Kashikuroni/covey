@@ -76,6 +76,9 @@ final class ReviewModel {
     var suggestedBase: String?
     var banner: String?
     var toasts: [ReviewToast] = []
+    /// Bumped whenever the comparison changes (`open`). An async result that
+    /// finds it moved belongs to a comparison the user has left and is dropped.
+    @ObservationIgnored var loadGeneration = 0
 
     // Diff panel
     var selectedPath: String?
@@ -86,6 +89,9 @@ final class ReviewModel {
     var currentStop = 0
     var scrollRequest: ScrollRequest?
     @ObservationIgnored var forceLoad: Set<String> = []
+    /// Bumped by every `loadDiff`; only the newest request may publish its
+    /// result, so an older fetch of the same file cannot land last.
+    @ObservationIgnored var diffToken = 0
 
     // Chrome
     var sidebarVisible = true
@@ -148,6 +154,8 @@ final class ReviewModel {
 
     /// Switches to `comparison`: loads its saved record, then the changes.
     func open(_ comparison: GitComparison) async {
+        loadGeneration += 1
+        let generation = loadGeneration
         store.flush()
         let loaded = store.load(worktree: worktree, comparison: comparison)
         record = loaded.record
@@ -164,6 +172,7 @@ final class ReviewModel {
         canvasFitted = false
         do {
             let fresh = try await git.changes(worktree: worktree, comparison: comparison)
+            guard generation == loadGeneration else { return }
             apply(fresh)
             phase = .ready
             banner = nil
@@ -173,6 +182,7 @@ final class ReviewModel {
             persist()
             if canvasViewport.width > 0 { fitCanvas() }
         } catch {
+            guard generation == loadGeneration else { return }
             phase = .needsComparison(error: Self.describeLoad(error))
             comparisonPopoverOpen = true
         }
@@ -281,6 +291,10 @@ final class ReviewModel {
     }
 
     func loadDiff(for file: ChangedFile, showLoading: Bool = true) async {
+        // Bumped before any early return: a synchronous binary/collapsed
+        // outcome also supersedes an older fetch still in flight.
+        diffToken += 1
+        let token = diffToken
         guard let state else { return }
         if file.isBinary {
             diff = .binary
@@ -301,11 +315,11 @@ final class ReviewModel {
         do {
             let loaded = try await git.diff(worktree: worktree, comparison: record.comparison,
                                             mergeBase: state.mergeBase, file: file, fullFile: fullFile)
-            guard selectedPath == file.path else { return }
+            guard token == diffToken, selectedPath == file.path else { return }
             diff = loaded.isBinary ? .binary : .loaded(loaded)
             currentStop = min(currentStop, max(stops.count - 1, 0))
         } catch {
-            guard selectedPath == file.path else { return }
+            guard token == diffToken, selectedPath == file.path else { return }
             diff = .failed(Self.describeDiff(error))
         }
     }
@@ -328,6 +342,7 @@ final class ReviewModel {
 
     func toggleReviewed() async {
         guard let path = selectedPath, let file = file(path) else { return }
+        let generation = loadGeneration
         var review = review(for: path)
         if review.state == .reviewed {
             review.state = .reviewing
@@ -337,6 +352,9 @@ final class ReviewModel {
             review.changedSinceReviewed = false
             review.reviewedDiffHash = await currentHash(of: file)
         }
+        // The hash read can outlive a comparison switch; `record` is then
+        // another comparison's and must not receive this file's state.
+        guard generation == loadGeneration else { return }
         record.files[path] = review
         persist()
     }

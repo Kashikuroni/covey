@@ -36,35 +36,120 @@ final class FakeReviewGit: ReviewGitReading, @unchecked Sendable {
     var diffs: [String: FileDiff] = [:]
     var fullDiffs: [String: FileDiff] = [:]
     var diffError: GitError?
-    private(set) var changesCalls = 0
-    private(set) var fingerprintCalls = 0
-    private(set) var diffCalls = 0
+    /// Per-base answers for `changes`; a base not listed falls back to `state`.
+    var statesByBase: [String: ComparisonState] = [:]
+
+    // Calls run off the main thread and, with a gate held, can overlap, so
+    // the counters and the gate tables sit behind a lock.
+    private let lock = NSLock()
+    private var _changesCalls = 0
+    private var _fingerprintCalls = 0
+    private var _diffCalls = 0
+    private var changesGates: [String: CallGate] = [:]
+    private var diffGates: [Bool: CallGate] = [:]
+
+    var changesCalls: Int { lock.withLock { _changesCalls } }
+    var fingerprintCalls: Int { lock.withLock { _fingerprintCalls } }
+    var diffCalls: Int { lock.withLock { _diffCalls } }
+
+    /// The next `changes` call for `base` parks until the gate is released.
+    func holdNextChanges(base: String) -> CallGate {
+        let gate = CallGate()
+        lock.withLock { changesGates[base] = gate }
+        return gate
+    }
+
+    /// The next `diff` call with this `fullFile` value parks until released.
+    func holdNextDiff(fullFile: Bool) -> CallGate {
+        let gate = CallGate()
+        lock.withLock { diffGates[fullFile] = gate }
+        return gate
+    }
 
     func branchLabel(worktree: String) async -> String? { label }
     func localBranches(worktree: String) async -> [String] { branches }
     func defaultBase(worktree: String) async -> String? { base }
 
     func changes(worktree: String, comparison: GitComparison) async throws -> ComparisonState {
-        changesCalls += 1
+        let gate: CallGate? = lock.withLock {
+            _changesCalls += 1
+            return changesGates.removeValue(forKey: comparison.base)
+        }
+        if let gate { try await gate.hold() }
         if let changesError { throw changesError }
-        guard let state else {
+        guard let answer = statesByBase[comparison.base] ?? state else {
             throw GitError(kind: .unknownRef(comparison.base),
                            description: "unknown revision '\(comparison.base)'")
         }
-        return state
+        return answer
     }
 
     func fingerprint(worktree: String, comparison: GitComparison, paths: [String]) async throws -> String {
-        fingerprintCalls += 1
+        lock.withLock { _fingerprintCalls += 1 }
         if let fingerprintError { throw fingerprintError }
         return fingerprintValue ?? state?.fingerprint ?? ""
     }
 
     func diff(worktree: String, comparison: GitComparison, mergeBase: String,
               file: ChangedFile, fullFile: Bool) async throws -> FileDiff {
-        diffCalls += 1
+        let gate: CallGate? = lock.withLock {
+            _diffCalls += 1
+            return diffGates.removeValue(forKey: fullFile)
+        }
+        if let gate { try await gate.hold() }
         if let diffError { throw diffError }
         return (fullFile ? fullDiffs[file.path] : nil) ?? diffs[file.path] ?? .empty
+    }
+}
+
+/// Parks one fake git call until the test releases it, so a test can
+/// interleave two operations deterministically: wait for the call to arrive,
+/// do something else, then release it (optionally with an error).
+final class CallGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var arrived = false
+    private var arrivalWaiters: [CheckedContinuation<Void, Never>] = []
+    private var held: CheckedContinuation<Void, Error>?
+    private var outcome: Result<Void, Error>?
+
+    /// Called by the fake: returns (or throws) once `release` has run.
+    func hold() async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            lock.lock()
+            arrived = true
+            let waiters = arrivalWaiters
+            arrivalWaiters = []
+            let settled = outcome
+            if settled == nil { held = continuation }
+            lock.unlock()
+            if let settled { continuation.resume(with: settled) }
+            waiters.forEach { $0.resume() }
+        }
+    }
+
+    /// Suspends until the held call has reached the gate.
+    func waitUntilArrived() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            lock.lock()
+            if arrived {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                arrivalWaiters.append(continuation)
+                lock.unlock()
+            }
+        }
+    }
+
+    func release(throwing error: Error? = nil) {
+        let result: Result<Void, Error>
+        if let error { result = .failure(error) } else { result = .success(()) }
+        lock.lock()
+        outcome = result
+        let continuation = held
+        held = nil
+        lock.unlock()
+        continuation?.resume(with: result)
     }
 }
 

@@ -227,6 +227,109 @@ final class ReviewModelCoreTests: XCTestCase {
         XCTAssertFalse(model.diffOpen)
     }
 
+    // MARK: - Stale loads
+
+    func testSwitchingComparisonMidLoadKeepsTheNewOne() async {
+        let git = FakeReviewGit()
+        git.state = comparisonState([changed("main.swift")])
+        git.statesByBase["a"] = comparisonState([changed("only-a.swift")], fingerprint: "fp-a")
+        git.statesByBase["b"] = comparisonState([changed("only-b.swift")], fingerprint: "fp-b")
+        let (model, store) = makeReviewModel(git: git)
+        await model.start()
+        let b = GitComparison(base: "b")
+
+        let held = git.holdNextChanges(base: "a")
+        let slowA = Task { await model.open(GitComparison(base: "a")) }
+        await held.waitUntilArrived()
+        await model.open(b)
+        XCTAssertEqual(model.files.map(\.path), ["only-b.swift"])
+        XCTAssertFalse(model.comparisonPopoverOpen)
+        // The abandoned load must not touch anything, so a reopened popover stays open.
+        model.comparisonPopoverOpen = true
+
+        held.release()
+        await slowA.value
+        XCTAssertEqual(model.record.comparison, b)
+        XCTAssertEqual(model.files.map(\.path), ["only-b.swift"])
+        XCTAssertEqual(model.state?.fingerprint, "fp-b")
+        XCTAssertEqual(Set(model.record.files.keys), ["only-b.swift"])
+        XCTAssertEqual(store.lastComparison(worktree: model.worktree), b)
+        XCTAssertEqual(model.phase, .ready)
+        XCTAssertTrue(model.comparisonPopoverOpen)
+    }
+
+    func testLateFailureOfAnAbandonedLoadIsIgnored() async {
+        let git = FakeReviewGit()
+        git.state = comparisonState([changed("main.swift")])
+        git.statesByBase["b"] = comparisonState([changed("only-b.swift")])
+        let (model, store) = makeReviewModel(git: git)
+        await model.start()
+        let b = GitComparison(base: "b")
+
+        let held = git.holdNextChanges(base: "a")
+        let slowA = Task { await model.open(GitComparison(base: "a")) }
+        await held.waitUntilArrived()
+        await model.open(b)
+
+        held.release(throwing: GitError(kind: .unknownRef("a"), description: "unknown revision 'a'"))
+        await slowA.value
+        XCTAssertEqual(model.phase, .ready)
+        XCTAssertFalse(model.comparisonPopoverOpen)
+        XCTAssertEqual(model.record.comparison, b)
+        XCTAssertEqual(model.files.map(\.path), ["only-b.swift"])
+        XCTAssertEqual(store.lastComparison(worktree: model.worktree), b)
+    }
+
+    func testStaleFullFileResultDoesNotOverwriteHunks() async {
+        let git = FakeReviewGit()
+        git.state = comparisonState([changed("a.swift")])
+        git.diffs["a.swift"] = oneHunk([(.added, nil, 5, "hunk")])
+        git.fullDiffs["a.swift"] = oneHunk([(.context, 1, 1, "top"), (.added, nil, 2, "full")])
+        let (model, _) = makeReviewModel(git: git)
+        await model.start()
+        await model.select("a.swift")
+
+        let held = git.holdNextDiff(fullFile: true)
+        let slowFull = Task { await model.toggleFullFile() }
+        await held.waitUntilArrived()
+        XCTAssertTrue(model.fullFile)
+        await model.toggleFullFile()
+        XCTAssertFalse(model.fullFile)
+        XCTAssertEqual(model.diff, .loaded(git.diffs["a.swift"]!))
+
+        held.release()
+        await slowFull.value
+        XCTAssertFalse(model.fullFile)
+        XCTAssertEqual(model.diff, .loaded(git.diffs["a.swift"]!))
+    }
+
+    func testToggleReviewedAcrossAComparisonSwitchWritesNothing() async {
+        let git = FakeReviewGit()
+        git.state = comparisonState([changed("a.swift")])
+        git.statesByBase["other"] = comparisonState([changed("a.swift")])
+        git.diffs["a.swift"] = oneHunk([(.added, nil, 1, "x")])
+        git.fullDiffs["a.swift"] = oneHunk([(.context, 1, 1, "top"), (.added, nil, 2, "x")])
+        let (model, store) = makeReviewModel(git: git)
+        await model.start()
+        await model.select("a.swift")
+        await model.toggleFullFile()   // full-file mode skips currentHash's fast path
+        let other = GitComparison(base: "other")
+
+        let held = git.holdNextDiff(fullFile: false)
+        let slowToggle = Task { await model.toggleReviewed() }
+        await held.waitUntilArrived()
+        await model.open(other)
+
+        held.release()
+        await slowToggle.value
+        XCTAssertEqual(model.record.comparison, other)
+        XCTAssertNotEqual(model.review(for: "a.swift").state, .reviewed)
+        XCTAssertNil(model.review(for: "a.swift").reviewedDiffHash)
+        store.flush()
+        let saved = store.load(worktree: model.worktree, comparison: other).record
+        XCTAssertNotEqual(saved.files["a.swift"]?.state, .reviewed)
+    }
+
     func testServiceReadsARealRepository() async throws {
         let repo = "\(NSTemporaryDirectory())covey-review-repo-\(UInt32.random(in: 0..<UInt32.max))"
         defer { try? FileManager.default.removeItem(atPath: repo) }
