@@ -10,13 +10,13 @@ extension Repository {
     public static let untrackedCountLimit: Int64 = 8 << 20
 
     /// The commit `ref` names, or nil. Refuses option-shaped input outright.
+    /// Nil also covers a git failure or timeout; `requireCommit` tells them apart.
     public func resolveCommit(_ ref: String) -> String? {
-        guard !ref.isEmpty, !ref.hasPrefix("-") else { return nil }
-        return try? git(["rev-parse", "--verify", "--quiet", "\(ref)^{commit}"], readOnly: true)
+        (try? lookupCommit(ref)) ?? nil
     }
 
     public func mergeBase(_ a: String, _ b: String) -> String? {
-        try? git(["merge-base", a, b], readOnly: true)
+        (try? lookupMergeBase(a, b)) ?? nil
     }
 
     /// `main` → `master` → the branch `origin/HEAD` points at → nil. Not the
@@ -24,10 +24,14 @@ extension Repository {
     /// remote copy, which would hide the branch's work.
     public func defaultBase() -> String? {
         for candidate in ["main", "master"] where branchExists(candidate) { return candidate }
-        if let remote = try? git(["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
-                                 readOnly: true),
-           !remote.isEmpty {
-            return remote
+        // `origin/HEAD` can dangle (its target branch was deleted); only a target
+        // that still resolves to a commit is a base.
+        if let out = try? GitRunner.execute(in: path, ["symbolic-ref", "--quiet", "--short",
+                                                        "refs/remotes/origin/HEAD"],
+                                            readOnly: true, timeout: Self.diffTimeout),
+           out.status == 0 {
+            let remote = out.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !remote.isEmpty, resolveCommit(remote) != nil { return remote }
         }
         return nil
     }
@@ -53,7 +57,7 @@ extension Repository {
     func changes(in comparison: GitComparison, afterListing: (() -> Void)?) throws -> ComparisonState {
         let base = try requireCommit(comparison.base)
         let headRev = try headRevision(comparison)
-        guard let mergeBase = mergeBase(base, headRev) else {
+        guard let mergeBase = try lookupMergeBase(base, headRev) else {
             throw GitError(kind: .unknownRef(comparison.base),
                            description: "'\(comparison.base)' shares no history with \(headRev)")
         }
@@ -65,7 +69,8 @@ extension Repository {
         let status0 = isWorkingTree ? try statusSnapshot() : ""
         // 2
         let entries = NameStatus.parse(
-            try read(["diff", "--no-color", "--no-ext-diff", "--name-status", "-z", "-M"] + range))
+            try read(Self.diffArgs(["--no-color", "--no-ext-diff", "--name-status", "-z", "-M"]
+                                   + range + ["--"])))
         var untrackedPaths: [String] = []
         if isWorkingTree {
             let listed = Set(entries.map(\.path))
@@ -79,7 +84,8 @@ extension Repository {
         afterListing?()
         // 4
         let counts = Numstat.byPath(
-            try read(["diff", "--no-color", "--no-ext-diff", "--numstat", "-z", "-M"] + range))
+            try read(Self.diffArgs(["--no-color", "--no-ext-diff", "--numstat", "-z", "-M"]
+                                   + range + ["--"])))
         var files = entries.map { entry -> ChangedFile in
             let c = counts[entry.path]
             return ChangedFile(path: entry.path, oldPath: entry.oldPath,
@@ -126,7 +132,7 @@ extension Repository {
         guard !mergeBase.hasPrefix("-") else {
             throw GitError(kind: .unknownRef(mergeBase), description: "unknown revision '\(mergeBase)'")
         }
-        var args = ["diff", "--no-color", "--no-ext-diff"]
+        var args = Self.diffArgs(["--no-color", "--no-ext-diff"])
         if fullFile { args.append("--unified=1000000") }
         if file.isUntracked {
             args += ["--no-index", "--", "/dev/null", file.path]
@@ -150,8 +156,35 @@ extension Repository {
 
     // MARK: - private
 
+    /// `git diff` with `diff.suppressBlankEmpty` forced off: a user's `true` makes git
+    /// print a blank context line as a bare "\n", which line numbering must not depend on.
+    private static func diffArgs(_ args: [String]) -> [String] {
+        ["-c", "diff.suppressBlankEmpty=false", "diff"] + args
+    }
+
+    /// The commit `ref` names; nil when git ran and it does not resolve. Throws
+    /// only when git itself could not answer (launch failure, timeout, output cap).
+    private func lookupCommit(_ ref: String) throws -> String? {
+        guard !ref.isEmpty, !ref.hasPrefix("-") else { return nil }
+        let out = try GitRunner.execute(in: path, ["rev-parse", "--verify", "--quiet", "\(ref)^{commit}"],
+                                        readOnly: true, timeout: Self.diffTimeout)
+        guard out.status == 0 else { return nil }
+        let oid = out.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return oid.isEmpty ? nil : oid
+    }
+
+    /// The merge base of `a` and `b`; nil when git ran and found none. Throws only
+    /// when git itself could not answer.
+    private func lookupMergeBase(_ a: String, _ b: String) throws -> String? {
+        let out = try GitRunner.execute(in: path, ["merge-base", a, b],
+                                        readOnly: true, timeout: Self.diffTimeout)
+        guard out.status == 0 else { return nil }
+        let oid = out.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return oid.isEmpty ? nil : oid
+    }
+
     private func requireCommit(_ ref: String) throws -> String {
-        guard let oid = resolveCommit(ref) else {
+        guard let oid = try lookupCommit(ref) else {
             throw GitError(kind: .unknownRef(ref), description: "unknown revision '\(ref)'")
         }
         return oid

@@ -38,8 +38,8 @@ enum ProcessRunner {
                 let chunk = handle.availableData
                 if chunk.isEmpty {
                     handle.readabilityHandler = nil
-                    drained.leave()
-                } else if !buffers.append(chunk, stdout: isStdout) {
+                    if buffers.finish(stdout: isStdout) { drained.leave() }
+                } else if buffers.append(chunk, stdout: isStdout) {
                     process.terminate()
                 }
             }
@@ -47,9 +47,12 @@ enum ProcessRunner {
         let exited = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in exited.signal() }
 
+        // Every `enter()` above is matched by exactly one `leave()`: the EOF
+        // handler's, or this one for a pipe that never reached EOF.
         func detach() {
             outPipe.fileHandleForReading.readabilityHandler = nil
             errPipe.fileHandleForReading.readabilityHandler = nil
+            for _ in 0..<buffers.abandonOpenPipes() { drained.leave() }
         }
 
         do {
@@ -74,21 +77,52 @@ enum ProcessRunner {
     }
 }
 
-private final class OutputBuffers: @unchecked Sendable {
+/// The shared, lock-guarded state of one run: the captured bytes, the output cap,
+/// and which pipes still owe the drain group a `leave()`.
+final class OutputBuffers: @unchecked Sendable {
     private let lock = NSLock()
     private let limit: Int
     private var out = Data()
     private var err = Data()
     private var tooLarge = false
+    // Each pipe is open until it reaches EOF or is abandoned by `detach`.
+    private var stdoutOpen = true
+    private var stderrOpen = true
 
     init(limit: Int) { self.limit = limit }
 
-    /// False once stdout + stderr pass the limit; the caller then kills the child.
+    /// True exactly once: for the chunk that first pushes stdout + stderr past the
+    /// limit. The caller terminates the child then, and never again.
     func append(_ chunk: Data, stdout: Bool) -> Bool {
         lock.lock(); defer { lock.unlock() }
         if stdout { out.append(chunk) } else { err.append(chunk) }
-        if out.count + err.count > limit { tooLarge = true }
-        return !tooLarge
+        guard !tooLarge, out.count + err.count > limit else { return false }
+        tooLarge = true
+        return true
+    }
+
+    /// A pipe reached EOF. True when the caller now owns that pipe's group
+    /// `leave()`; false when detach already settled it.
+    func finish(stdout: Bool) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if stdout {
+            guard stdoutOpen else { return false }
+            stdoutOpen = false
+        } else {
+            guard stderrOpen else { return false }
+            stderrOpen = false
+        }
+        return true
+    }
+
+    /// Settles every pipe that has not reached EOF and returns how many group
+    /// `leave()`s the caller owes for them. A later `finish` then returns false.
+    func abandonOpenPipes() -> Int {
+        lock.lock(); defer { lock.unlock() }
+        let owed = (stdoutOpen ? 1 : 0) + (stderrOpen ? 1 : 0)
+        stdoutOpen = false
+        stderrOpen = false
+        return owed
     }
 
     var stdout: Data { lock.lock(); defer { lock.unlock() }; return out }

@@ -113,4 +113,26 @@ final class ParserTests: XCTestCase {
         XCTAssertEqual(hunk.lines[2].text, "\u{200D}c")
         XCTAssertEqual(hunk.lines.map(\.newNumber), [nil, 1, 2])
     }
+
+    /// `diff.suppressBlankEmpty=true` prints a blank context line as a bare "\n".
+    func testBareEmptyLineInsideHunkIsBlankContextAndKeepsNumbering() {
+        let diff = UnifiedDiff.parse("@@ -1,4 +1,4 @@\n one\n\n-three\n+THREE\n four\n")
+        XCTAssertEqual(diff.hunks.count, 1)
+        XCTAssertEqual(diff.hunks[0].lines, [
+            DiffLine(kind: .context, oldNumber: 1, newNumber: 1, text: "one"),
+            DiffLine(kind: .context, oldNumber: 2, newNumber: 2, text: ""),
+            DiffLine(kind: .removed, oldNumber: 3, newNumber: nil, text: "three"),
+            DiffLine(kind: .added, oldNumber: nil, newNumber: 3, text: "THREE"),
+            DiffLine(kind: .context, oldNumber: 4, newNumber: 4, text: "four"),
+        ])
+    }
+
+    /// The empty piece after the final newline is a split artefact, not a line.
+    func testTrailingNewlineAddsNoLineOnceCountsAreExhausted() {
+        let plain = UnifiedDiff.parse("@@ -1,2 +1,2 @@\n one\n four\n")
+        XCTAssertEqual(plain.hunks[0].lines.count, 2)
+        let suppressed = UnifiedDiff.parse("@@ -1,3 +1,3 @@\n one\n\n four\n\n")
+        XCTAssertEqual(suppressed.hunks[0].lines.map(\.text), ["one", "", "four"])
+        XCTAssertEqual(suppressed.hunks[0].lines.map(\.newNumber), [1, 2, 3])
+    }
 }

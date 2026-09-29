@@ -22,6 +22,34 @@ final class RepositoryDiffTests: XCTestCase {
         XCTAssertEqual(git.defaultBase(), "origin/trunk")
     }
 
+    /// `origin/HEAD` can point at a branch that is gone; that is no base.
+    func testDefaultBaseIgnoresDanglingOriginHead() throws {
+        try repo.sh("git -C '\(repo.path)' branch -m main trunk")
+        try repo.sh("git -C '\(repo.path)' symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/gone")
+        XCTAssertNil(git.defaultBase())
+    }
+
+    /// A user's `diff.suppressBlankEmpty=true` must not shift line numbers after a blank line.
+    func testDiffNumbersSurviveSuppressBlankEmptyConfig() throws {
+        try repo.sh("git -C '\(repo.path)' config diff.suppressBlankEmpty true")
+        try repo.write("f.txt", "a\nb\n\nc\nd\n")
+        try repo.commitAll("base")
+        try repo.write("f.txt", "a\nb\n\nc\nD\n")
+        let comparison = GitComparison(base: "main")
+        let state = try git.changes(in: comparison)
+        let file = try XCTUnwrap(state.files.first)
+
+        let diff = try git.diff(of: file, in: comparison, mergeBase: state.mergeBase)
+        XCTAssertEqual(diff.hunks.count, 1)
+        // Three lines of context: the blank line (new line 3) is inside the hunk.
+        XCTAssertEqual(diff.hunks[0].lines.map(\.text), ["b", "", "c", "d", "D"])
+        XCTAssertEqual(diff.hunks[0].lines.map(\.newNumber), [2, 3, 4, nil, 5])
+
+        let full = try git.diff(of: file, in: comparison, mergeBase: state.mergeBase, fullFile: true)
+        XCTAssertEqual(full.hunks.flatMap(\.lines).compactMap(\.newNumber), [1, 2, 3, 4, 5])
+        XCTAssertEqual(full.hunks.flatMap(\.lines).filter { $0.kind == .added }.first?.newNumber, 5)
+    }
+
     func testWorkingTreeChangesCoverEveryKind() throws {
         try repo.write("a.txt", "one\n")
         try repo.write("b.txt", "bee\n")

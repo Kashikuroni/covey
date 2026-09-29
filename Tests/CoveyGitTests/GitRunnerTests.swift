@@ -74,6 +74,30 @@ final class GitRunnerTests: XCTestCase {
         }
     }
 
+    /// The output cap trips once, so the runner terminates the child once.
+    func testOutputCapTripsExactlyOnce() {
+        let buffers = OutputBuffers(limit: 10)
+        XCTAssertFalse(buffers.append(Data(count: 6), stdout: true))
+        XCTAssertTrue(buffers.append(Data(count: 6), stdout: false))
+        XCTAssertFalse(buffers.append(Data(count: 6), stdout: true))
+        XCTAssertFalse(buffers.append(Data(count: 6), stdout: false))
+        XCTAssertTrue(buffers.overflowed)
+    }
+
+    /// EOF-leave and detach-leave are mutually exclusive per pipe, so the drain
+    /// group is left exactly once for each `enter()`.
+    func testDrainGroupLeavesExactlyOncePerPipe() {
+        let buffers = OutputBuffers(limit: 10)
+        XCTAssertTrue(buffers.finish(stdout: true))      // stdout reached EOF: its leave is the handler's
+        XCTAssertFalse(buffers.finish(stdout: true))     // a repeated EOF never leaves twice
+        XCTAssertEqual(buffers.abandonOpenPipes(), 1)    // only stderr is still owed
+        XCTAssertFalse(buffers.finish(stdout: false))    // a handler still in flight loses to detach
+        XCTAssertEqual(buffers.abandonOpenPipes(), 0)    // detach is idempotent
+
+        let untouched = OutputBuffers(limit: 10)
+        XCTAssertEqual(untouched.abandonOpenPipes(), 2)  // timeout / launch-failure path
+    }
+
     func testRunnerMapsTimeoutToGitError() throws {
         XCTAssertThrowsError(try GitRunner.execute(
             in: repo.path, ["-c", "alias.slow=!sleep 5", "slow"], readOnly: true, timeout: 0.3)) { error in
