@@ -126,6 +126,12 @@ public final class AppModel {
             }
         }
     }
+    /// Set by `openReview`; ContentView opens the window and clears it.
+    var reviewWindowRequest: ReviewWindowKey?
+    @ObservationIgnored var reviewLaunches: [ReviewWindowKey: ReviewLaunch] = [:]
+    /// A Review window is key: the main window's catalog commands stand down
+    /// so ⌘W, ⌘1… never act on the window behind it.
+    var reviewWindowFocused = false
     public private(set) var connected = false
     public private(set) var themeRaw: String = "dark"
     public private(set) var splitPct: Int = 38
@@ -1038,7 +1044,8 @@ public final class AppModel {
     }
 
     func commandAvailability(_ command: AppCommand) -> CommandAvailability {
-        CommandRules.availability(for: command, context: commandContext)
+        if reviewWindowFocused { return .disabled(reason: "Review window is focused") }
+        return CommandRules.availability(for: command, context: commandContext)
     }
 
     private var commandContext: CommandContext {
@@ -1132,6 +1139,8 @@ public final class AppModel {
             issueBrowser.screen = .list
             setFocus(.inspector)
             activateIssues()
+        case .openReview:
+            openReviewForSelected()
         case .promoteWorktree:
             modal = selected.map(Modal.promote)
         case .deleteSessionBranch:

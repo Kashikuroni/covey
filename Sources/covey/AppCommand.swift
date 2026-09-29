@@ -7,7 +7,7 @@ enum AppCommand: String, CaseIterable, Hashable {
     case selectSession6, selectSession7, selectSession8, selectSession9
     case killSession, renameSession, restartSession, restartAllClaudeSessions
     case moveSessionUp, moveSessionDown
-    case createGitHubIssue, openIssueList, promoteWorktree, deleteSessionBranch
+    case createGitHubIssue, openIssueList, openReview, promoteWorktree, deleteSessionBranch
     case cleanupMergedBranches, returnToRepositoryRoot
     case splitTerminalVertically, splitTerminalHorizontally, closeTerminalSplit
     case toggleViewTerminal
@@ -152,6 +152,9 @@ enum CommandCatalog {
                    ["new issue", "github issue", "создать задачу github", "новый issue"]),
         descriptor(.openIssueList, "Open Issue List", .git,
                    ["issues", "list issues", "список задач", "открыть issues"]),
+        descriptor(.openReview, "Open Review", .git,
+                   ["review", "code review", "diff review", "ревью", "просмотр изменений"],
+                   .init(key: "r", modifiers: [.command, .option], display: "⌥⌘R")),
         descriptor(.promoteWorktree, "Promote Worktree to Root", .git,
                    ["promote", "worktree root", "перенести worktree в корень", "сделать основной веткой"]),
         descriptor(.deleteSessionBranch, "Delete Session Branch", .git,

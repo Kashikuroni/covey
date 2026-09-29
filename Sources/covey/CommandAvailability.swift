@@ -84,7 +84,7 @@ enum CommandRules {
             return !context.hasSelectedSession || context.selectedHasGit
                 ? .enabled : .disabled(reason: "Not a Git repository")
 
-        case .openIssueList, .cleanupMergedBranches:
+        case .openIssueList, .openReview, .cleanupMergedBranches:
             guard context.hasSelectedSession else {
                 return .disabled(reason: "No session selected")
             }
