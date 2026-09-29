@@ -90,7 +90,7 @@ enum IssueTitle {
 
     /// The first non-empty line, trimmed, at most `limit` characters.
     static func make(from text: String) -> String {
-        let first = text.split(separator: "\n", omittingEmptySubsequences: true)
+        let first = text.split(omittingEmptySubsequences: true, whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .first { !$0.isEmpty } ?? ""
         return first.count > limit ? String(first.prefix(limit - 1)) + "…" : first

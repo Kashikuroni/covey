@@ -103,5 +103,27 @@ final class ReviewStoreTests: XCTestCase {
         let title = IssueTitle.make(from: long)
         XCTAssertEqual(title.count, 60)
         XCTAssertTrue(title.hasSuffix("…"))
+        XCTAssertEqual(IssueTitle.make(from: "Short title\r\nbody line"), "Short title")
+        XCTAssertEqual(IssueTitle.make(from: "A\rB"), "A")
+    }
+
+    func testDebouncedSaveWritesWithoutFlush() {
+        let store = ReviewStore(root: root, debounce: 0.05)
+        let record = sampleRecord()
+        store.save(record)
+
+        // Poll until write completes (up to ~2 seconds, 20ms intervals)
+        let maxWait = 2.0
+        let pollInterval = 0.02
+        let deadline = Date().addingTimeInterval(maxWait)
+        while store.writeCount == 0 && Date() < deadline {
+            Thread.sleep(forTimeInterval: pollInterval)
+        }
+
+        XCTAssertEqual(store.writeCount, 1)
+
+        // Verify a fresh store can load the written record
+        let loaded = ReviewStore(root: root).load(worktree: worktree, comparison: comparison)
+        XCTAssertEqual(loaded.record, record)
     }
 }
