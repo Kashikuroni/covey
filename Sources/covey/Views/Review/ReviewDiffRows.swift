@@ -10,16 +10,26 @@ struct ReviewDiffRows: View {
     var body: some View {
         let threads = model.threads(for: path)
         let outdated = model.outdatedItems(for: path)
+        // Items (and a composer) on a line this diff does not render would
+        // otherwise vanish: outside every hunk, or an old-side anchor on a
+        // line that is context again. They are listed on top instead.
+        let rendered = DiffSplitLayout.renderedKeys(diff, layout: model.layout)
+        let unshown = model.unshownItems(for: path, rendered: rendered)
+        let composerUnshown = model.composer.map {
+            $0.anchor.path == path && !rendered.contains($0.anchor.threadKey)
+        } ?? false
         ScrollViewReader { proxy in
             ScrollView(.vertical) {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if !outdated.isEmpty {
-                        Text("NOT ON A CURRENT LINE")
-                            .font(ReviewFont.caption(10))
-                            .foregroundStyle(tk.warn)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 8)
+                        sectionHeader("NOT ON A CURRENT LINE")
                         ForEach(outdated) { item in ReviewThreadItemView(item: item, model: model, tk: tk) }
+                    }
+                    if !unshown.isEmpty || composerUnshown {
+                        sectionHeader(model.fullFile ? "NOT ON A SHOWN LINE"
+                                                     : "NOT ON A SHOWN LINE — PRESS E FOR THE FULL FILE")
+                        ForEach(unshown) { item in ReviewThreadItemView(item: item, model: model, tk: tk) }
+                        if composerUnshown { ReviewComposerView(model: model, tk: tk) }
                     }
                     if diff.hunks.isEmpty {
                         Text("No line changes — mode or metadata only.")
@@ -38,13 +48,13 @@ struct ReviewDiffRows: View {
                         if model.layout == .split {
                             ForEach(DiffSplitLayout.rows(hunk, hunkIndex: hunkIndex)) { row in
                                 SplitRowView(row: row, model: model, tk: tk).id(row.id)
-                                annotations(for: splitKeys(row), threads: threads)
+                                annotations(for: DiffSplitLayout.splitKeys(row), threads: threads)
                             }
                         } else {
                             ForEach(Array(hunk.lines.enumerated()), id: \.offset) { index, line in
                                 UnifiedRowView(line: line, model: model, tk: tk)
                                     .id(DiffSplitLayout.rowID(hunk: hunkIndex, line: index))
-                                annotations(for: unifiedKeys(line), threads: threads)
+                                annotations(for: DiffSplitLayout.unifiedKeys(line), threads: threads)
                             }
                         }
                     }
@@ -68,6 +78,14 @@ struct ReviewDiffRows: View {
         }
     }
 
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(ReviewFont.caption(10))
+            .foregroundStyle(tk.warn)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 8)
+    }
+
     @ViewBuilder
     private func annotations(for keys: [ThreadKey], threads: [ThreadKey: [ReviewThreadItem]]) -> some View {
         ForEach(keys, id: \.self) { key in
@@ -77,24 +95,6 @@ struct ReviewDiffRows: View {
                 ReviewComposerView(model: model, tk: tk)
             }
         }
-    }
-
-    /// Old-side keys exist only for removed lines: context lines are anchored on the new side.
-    private func splitKeys(_ row: SplitRow) -> [ThreadKey] {
-        var keys: [ThreadKey] = []
-        if let left = row.left, left.kind == .removed, let n = left.oldNumber {
-            keys.append(ThreadKey(side: .old, line: n))
-        }
-        if let right = row.right, let n = right.newNumber {
-            keys.append(ThreadKey(side: .new, line: n))
-        }
-        return keys
-    }
-
-    private func unifiedKeys(_ line: DiffLine) -> [ThreadKey] {
-        if let n = line.newNumber { return [ThreadKey(side: .new, line: n)] }
-        if let n = line.oldNumber { return [ThreadKey(side: .old, line: n)] }
-        return []
     }
 }
 

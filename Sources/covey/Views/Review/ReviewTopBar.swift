@@ -134,6 +134,8 @@ struct ComparisonEditor: View {
         }
         .padding(16)
         .frame(width: 460)
+        // The popover is a window of its own; it follows covey's theme too.
+        .preferredColorScheme(tk.isDark ? .dark : .light)
         .onAppear {
             let current = model.record.comparison
             base = current.base.isEmpty ? (model.suggestedBase ?? "") : current.base

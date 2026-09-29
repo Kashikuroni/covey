@@ -3,6 +3,14 @@ import AppKit
 import CoveyGit
 import CoveyKit
 
+/// Ends text editing (the path filter, the composer) so the review keys
+/// reach the key monitor again. Called by clicks on cards, tree rows and
+/// the canvas, which take no focus themselves.
+@MainActor
+func resignReviewTextFocus() {
+    NSApp.keyWindow?.makeFirstResponder(nil)
+}
+
 /// Scene content of one Review window.
 struct ReviewWindowRoot: View {
     let key: ReviewWindowKey
@@ -62,6 +70,10 @@ struct ReviewWindowView: View {
             }
         }
         .overlay(alignment: .bottom) { ReviewToastStack(toasts: model.toasts, tk: tk) }
+        // Native controls (pickers, text fields, the composer) follow covey's
+        // theme, not the macOS appearance.
+        .preferredColorScheme(app.themeRaw == "light" ? .light : .dark)
+        .tint(tk.accent)
         .background { WorkspaceWindowReader(scope: scope) }
         .navigationTitle("Review · \(projectDefaultName(model.projectRoot))")
         .task { await model.runPolling() }
@@ -160,6 +172,14 @@ struct ReviewWindowView: View {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             guard scope.contains(event.window) else { return event }
+            // Esc in a text field (the path filter) only ends editing there:
+            // routed, it would close the diff or drop a composer draft while
+            // the field kept focus. The composer's TextEditor is not a field
+            // editor, so Esc there still unwinds as usual.
+            if event.keyCode == 53, (event.window?.firstResponder as? NSTextView)?.isFieldEditor == true {
+                event.window?.makeFirstResponder(nil)
+                return nil
+            }
             let flags = event.modifierFlags
             let key = ReviewKeyEvent(characters: event.charactersIgnoringModifiers ?? "",
                                      isEscape: event.keyCode == 53,

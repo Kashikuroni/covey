@@ -141,6 +141,7 @@ private struct ReviewTreeRowView: View {
         .background(isSelected ? tk.cardHover : Color.clear)
         .contentShape(Rectangle())
         .onTapGesture {
+            resignReviewTextFocus()
             switch row.kind {
             case .directory(let path, _): model.toggleDirectory(path)
             case .file(let file): Task { await model.select(file.path) }
@@ -207,23 +208,20 @@ private struct ReviewIssueRow: View {
                     .font(ReviewFont.caption(10))
                     .foregroundStyle(issue.severity.color(tk))
             }
-            Text(ReviewPrompt.location(issue.anchor)).font(ReviewFont.mono(11)).foregroundStyle(tk.t2)
-            if let note = issue.note {
-                Text(note).font(.system(size: 11.5))
-                    .foregroundStyle(issue.anchorState == .tracked ? tk.t3 : tk.warn)
-            }
             HStack(spacing: 6) {
-                Text(issue.status.rawValue)
-                    .font(.system(size: 11))
-                    .foregroundStyle(issue.status.color(tk))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 1)
-                    .overlay(RoundedRectangle(cornerRadius: Tokens.rSm).stroke(tk.bd3))
-                Spacer()
+                Text(ReviewPrompt.location(issue.anchor)).font(ReviewFont.mono(11)).foregroundStyle(tk.t2)
+                Spacer(minLength: 6)
                 if issue.status == .open {
                     ReviewButton(title: "Send →", tk: tk) { model.beginSend(issue: issue.id) }
                 }
             }
+            if let note = issue.note {
+                Text(note).font(.system(size: 11.5))
+                    .foregroundStyle(issue.anchorState == .tracked ? tk.t3 : tk.warn)
+            }
+            // Every issue can be settled from the list, also one whose line
+            // is not shown or whose file left the comparison.
+            ReviewIssueStatusButtons(issue: issue, model: model, compact: true, tk: tk)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)

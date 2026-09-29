@@ -80,22 +80,7 @@ struct ReviewIssueCard: View {
                     .foregroundStyle(issue.anchorState == .tracked ? tk.t3 : tk.warn)
             }
             HStack(spacing: 4) {
-                ForEach(IssueStatus.allCases, id: \.self) { status in
-                    // The styling lives inside the label: a plain button hit-tests
-                    // its label only, so the padded box must be the label.
-                    Button { model.setStatus(status, forIssue: issue.id) } label: {
-                        Text(status.rawValue)
-                            .font(.system(size: 11))
-                            .padding(.horizontal, 8)
-                            .frame(height: 22)
-                            .foregroundStyle(status == issue.status ? tk.bg : tk.t3)
-                            .background(status == issue.status ? tk.t1 : Color.clear)
-                            .overlay(RoundedRectangle(cornerRadius: Tokens.rSm).stroke(tk.bd3))
-                            .clipShape(RoundedRectangle(cornerRadius: Tokens.rSm))
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
+                ReviewIssueStatusButtons(issue: issue, model: model, tk: tk)
                 Spacer()
                 if issue.status == .open {
                     ReviewButton(title: "Send issue to \(model.target?.name ?? "agent") →",
@@ -110,6 +95,51 @@ struct ReviewIssueCard: View {
         .overlay(RoundedRectangle(cornerRadius: Tokens.rSm).stroke(tk.bd3))
         .clipShape(RoundedRectangle(cornerRadius: Tokens.rSm))
         .opacity(issue.status.isActive ? 1 : 0.6)
+    }
+}
+
+/// Open / In Progress / Resolved / Dismissed for one issue: on its inline
+/// card, and (compact) on its Issues-tab row, where an issue whose line is
+/// not shown — or whose file left the comparison — can still be settled.
+struct ReviewIssueStatusButtons: View {
+    let issue: ReviewIssue
+    @Bindable var model: ReviewModel
+    var compact = false
+    let tk: Tokens
+
+    var body: some View {
+        HStack(spacing: compact ? 3 : 4) {
+            ForEach(IssueStatus.allCases, id: \.self) { status in
+                // The styling lives inside the label: a plain button hit-tests
+                // its label only, so the padded box must be the label.
+                Button { model.setStatus(status, forIssue: issue.id) } label: {
+                    Text(status.rawValue)
+                        .font(.system(size: compact ? 10.5 : 11))
+                        .lineLimit(1)
+                        .fixedSize()
+                        .padding(.horizontal, compact ? 6 : 8)
+                        .frame(height: compact ? 20 : 22)
+                        .foregroundStyle(foreground(status))
+                        .background(status == issue.status && !compact ? tk.t1 : Color.clear)
+                        .overlay(RoundedRectangle(cornerRadius: Tokens.rSm).stroke(stroke(status)))
+                        .clipShape(RoundedRectangle(cornerRadius: Tokens.rSm))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(status == issue.status ? "Status: \(status.rawValue)" : "Mark \(status.rawValue)")
+            }
+        }
+    }
+
+    /// The card fills the current status; the compact row outlines it in the
+    /// status color, as the list's status pill did.
+    private func foreground(_ status: IssueStatus) -> Color {
+        guard status == issue.status else { return tk.t3 }
+        return compact ? status.color(tk) : tk.bg
+    }
+
+    private func stroke(_ status: IssueStatus) -> Color {
+        compact && status == issue.status ? status.color(tk) : tk.bd3
     }
 }
 
@@ -128,6 +158,7 @@ struct ReviewComposerView: View {
                 TextEditor(text: Binding(get: { model.composer?.draft ?? "" },
                                          set: { model.composer?.draft = $0 }))
                     .font(.system(size: 13))
+                    .foregroundStyle(tk.t1)
                     .scrollContentBackground(.hidden)
                     .padding(6)
                     .frame(minHeight: 64, maxHeight: 160)

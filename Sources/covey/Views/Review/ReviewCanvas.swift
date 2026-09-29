@@ -33,6 +33,9 @@ struct ReviewCanvas: View {
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
             .clipped()
             .contentShape(Rectangle())
+            // Simultaneous: a click on a card or a toolbar button also ends
+            // text editing, and the card/button still gets its own tap.
+            .simultaneousGesture(TapGesture().onEnded { resignReviewTextFocus() })
             .gesture(DragGesture(minimumDistance: 3)
                 .onChanged { value in
                     if dragOrigin == nil { dragOrigin = model.canvas }
@@ -73,7 +76,10 @@ struct ReviewCanvas: View {
                                    dimmed: !model.matchesFilter(file), tk: tk)
                         .frame(width: frame.rect.width, height: frame.rect.height)
                         .offset(x: frame.rect.minX, y: frame.rect.minY)
-                        .onTapGesture { Task { await model.select(file.path) } }
+                        .onTapGesture {
+                            resignReviewTextFocus()
+                            Task { await model.select(file.path) }
+                        }
                 }
             }
         }
