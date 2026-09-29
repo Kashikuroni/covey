@@ -174,6 +174,9 @@ final class ReviewModel {
             let fresh = try await git.changes(worktree: worktree, comparison: comparison)
             guard generation == loadGeneration else { return }
             apply(fresh)
+            await recheckAnchors()
+            // The re-check awaits git; a switch during it abandons this open.
+            guard generation == loadGeneration else { return }
             phase = .ready
             banner = nil
             failureStreak = 0
