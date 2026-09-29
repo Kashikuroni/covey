@@ -33,6 +33,24 @@ extension Repository {
     }
 
     public func changes(in comparison: GitComparison) throws -> ComparisonState {
+        try changes(in: comparison, afterListing: nil)
+    }
+
+    /// One load of a comparison, read in a fixed window so an edit that lands
+    /// mid-load can never be baked into the returned fingerprint:
+    ///
+    /// 1. `status0`, before any listing read.
+    /// 2. The path listing: name-status (+ ls-files for the working tree).
+    /// 3. `stamps1` of the listed paths, then `status1`; `afterListing` runs here.
+    /// 4. Content reads: numstat, untracked line counting.
+    /// 5. `stamps2`, then `status2`.
+    ///
+    /// If the status text or the stamps moved anywhere in the window the
+    /// fingerprint is `unstable:<uuid>`, which no poll ever reproduces, so the
+    /// next poll reloads. Otherwise it is exactly what `fingerprint(of:paths:)`
+    /// builds now, so an idle view compares equal. Ref…ref has no window.
+    /// `afterListing` is a test seam that injects an edit at step 3.
+    func changes(in comparison: GitComparison, afterListing: (() -> Void)?) throws -> ComparisonState {
         let base = try requireCommit(comparison.base)
         let headRev = try headRevision(comparison)
         guard let mergeBase = mergeBase(base, headRev) else {
@@ -40,29 +58,50 @@ extension Repository {
                            description: "'\(comparison.base)' shares no history with \(headRev)")
         }
         let range = rangeArgs(comparison, mergeBase: mergeBase, headRev: headRev)
-        let names = try read(["diff", "--no-color", "--no-ext-diff", "--name-status", "-z", "-M"] + range)
-        let counts = Numstat.byPath(try read(["diff", "--no-color", "--no-ext-diff", "--numstat", "-z", "-M"] + range))
+        var isWorkingTree = false
+        if case .workingTree = comparison.head { isWorkingTree = true }
 
-        var files = NameStatus.parse(names).map { entry -> ChangedFile in
+        // 1
+        let status0 = isWorkingTree ? try statusSnapshot() : ""
+        // 2
+        let entries = NameStatus.parse(
+            try read(["diff", "--no-color", "--no-ext-diff", "--name-status", "-z", "-M"] + range))
+        var untrackedPaths: [String] = []
+        if isWorkingTree {
+            let listed = Set(entries.map(\.path))
+            let untracked = try read(["ls-files", "--others", "--exclude-standard", "--full-name", "-z"])
+            untrackedPaths = untracked.split(separator: "\0").map(String.init).filter { !listed.contains($0) }
+        }
+        let paths = (entries.map(\.path) + untrackedPaths).sorted()
+        // 3
+        let stamps1 = isWorkingTree ? stamps(of: paths) : [:]
+        let status1 = isWorkingTree ? try statusSnapshot() : ""
+        afterListing?()
+        // 4
+        let counts = Numstat.byPath(
+            try read(["diff", "--no-color", "--no-ext-diff", "--numstat", "-z", "-M"] + range))
+        var files = entries.map { entry -> ChangedFile in
             let c = counts[entry.path]
             return ChangedFile(path: entry.path, oldPath: entry.oldPath,
                                status: NameStatus.status(for: entry.code),
                                added: c?.added, removed: c?.removed,
                                isBinary: c.map { $0.added == nil && $0.removed == nil } ?? false)
         }
-        var stamps: [String: FileStamp] = [:]
-        if case .workingTree = comparison.head {
-            let listed = Set(files.map(\.path))
-            let untracked = try read(["ls-files", "--others", "--exclude-standard", "--full-name", "-z"])
-            for rel in untracked.split(separator: "\0").map(String.init) where !listed.contains(rel) {
-                files.append(untrackedFile(rel))
-            }
-            for file in files { stamps[file.path] = stamp(of: file.path) }
-        }
+        files += untrackedPaths.map(untrackedFile)
         files.sort { $0.path < $1.path }
-        let fingerprint = try fingerprint(of: comparison, base: base, headRev: headRev,
-                                          paths: files.map(\.path), stamps: stamps)
-        return ComparisonState(mergeBase: mergeBase, files: files, stamps: stamps,
+        // 5
+        guard isWorkingTree else {
+            return ComparisonState(mergeBase: mergeBase, files: files, stamps: [:],
+                                   fingerprint: "ref:\(base):\(headRev)")
+        }
+        let stamps2 = stamps(of: paths)
+        let status2 = try statusSnapshot()
+        let moved = status0 != status1 || status1 != status2 || stamps1 != stamps2
+        let fingerprint = moved
+            ? "unstable:\(UUID().uuidString)"
+            : workingTreeFingerprint(base: base, headRev: headRev, status: status2,
+                                     paths: paths, stamps: stamps2)
+        return ComparisonState(mergeBase: mergeBase, files: files, stamps: stamps2,
                                fingerprint: fingerprint)
     }
 
@@ -73,11 +112,11 @@ extension Repository {
     public func fingerprint(of comparison: GitComparison, paths: [String]) throws -> String {
         let base = try requireCommit(comparison.base)
         let headRev = try headRevision(comparison)
-        var stamps: [String: FileStamp] = [:]
-        if case .workingTree = comparison.head {
-            for p in paths { stamps[p] = stamp(of: p) }
-        }
-        return try fingerprint(of: comparison, base: base, headRev: headRev, paths: paths, stamps: stamps)
+        guard case .workingTree = comparison.head else { return "ref:\(base):\(headRev)" }
+        let stamps = stamps(of: paths)
+        let status = try statusSnapshot()
+        return workingTreeFingerprint(base: base, headRev: headRev, status: status,
+                                      paths: paths, stamps: stamps)
     }
 
     public func diff(of file: ChangedFile, in comparison: GitComparison, mergeBase: String,
@@ -93,7 +132,12 @@ extension Repository {
             args += ["--no-index", "--", "/dev/null", file.path]
             let out = try GitRunner.execute(in: path, args, readOnly: true,
                                             timeout: Self.diffTimeout, outputLimit: Self.diffOutputLimit)
-            guard out.status == 0 || out.status == 1 else { throw failure(args, out) }
+            // `--no-index` exits 1 when the files differ, but real errors (a vanished
+            // file, a nested repository, a symlink to a directory) exit 1 too, with
+            // nothing on stdout: only a printed diff makes exit 1 a success.
+            guard out.status == 0 || (out.status == 1 && !out.stdout.isEmpty) else {
+                throw failure(args, out)
+            }
             return UnifiedDiff.parse(out.stdout)
         }
         args += ["-M", mergeBase]
@@ -127,10 +171,21 @@ extension Repository {
         }
     }
 
-    private func fingerprint(of comparison: GitComparison, base: String, headRev: String,
-                             paths: [String], stamps: [String: FileStamp]) throws -> String {
-        guard case .workingTree = comparison.head else { return "ref:\(base):\(headRev)" }
-        let status = try read(["status", "--porcelain=v2", "-z", "--untracked-files=all"])
+    /// Index-cached and cheap; the text is part of the working-tree fingerprint.
+    private func statusSnapshot() throws -> String {
+        try read(["status", "--porcelain=v2", "-z", "--untracked-files=all"])
+    }
+
+    private func stamps(of paths: [String]) -> [String: FileStamp] {
+        var stamps: [String: FileStamp] = [:]
+        for p in paths { stamps[p] = stamp(of: p) }
+        return stamps
+    }
+
+    /// The one place the working-tree token is built, shared by a load and a poll
+    /// so that an unchanged tree yields equal strings.
+    private func workingTreeFingerprint(base: String, headRev: String, status: String,
+                                        paths: [String], stamps: [String: FileStamp]) -> String {
         let stampText = paths.sorted().map { p -> String in
             guard let s = stamps[p] else { return "\(p)=-" }
             return "\(p)=\(s.mtime):\(s.size)"

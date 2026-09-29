@@ -159,6 +159,54 @@ final class RepositoryDiffTests: XCTestCase {
         XCTAssertEqual(fresh.hunks.flatMap(\.lines).map(\.kind), [.added, .added])
     }
 
+    /// `git diff --no-index` exits 1 both for "files differ" and for real errors; only the
+    /// former prints a diff. A vanished file must surface, not read as an empty diff.
+    func testUntrackedDiffOfVanishedFileThrows() throws {
+        try repo.write("gone.txt", "x\n")
+        let comparison = GitComparison(base: "main")
+        let state = try git.changes(in: comparison)
+        let file = try XCTUnwrap(byPath(state)["gone.txt"])
+        XCTAssertTrue(file.isUntracked)
+        try FileManager.default.removeItem(atPath: "\(repo.path)/gone.txt")
+
+        XCTAssertThrowsError(try git.diff(of: file, in: comparison, mergeBase: state.mergeBase)) { error in
+            guard let kind = (error as? GitError)?.kind, case .failed = kind else {
+                return XCTFail("expected GitError.failed, got \(error)")
+            }
+        }
+    }
+
+    func testUntrackedDiffOfSymlinkToDirectoryThrows() throws {
+        let target = "\(NSTemporaryDirectory())covey-git-dirtarget-\(UInt32.random(in: 0..<UInt32.max))"
+        try FileManager.default.createDirectory(atPath: target, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: target) }
+        try FileManager.default.createSymbolicLink(atPath: "\(repo.path)/dlnk", withDestinationPath: target)
+        let comparison = GitComparison(base: "main")
+        let state = try git.changes(in: comparison)
+        let file = try XCTUnwrap(byPath(state)["dlnk"])
+        XCTAssertTrue(file.isUntracked)
+
+        XCTAssertThrowsError(try git.diff(of: file, in: comparison, mergeBase: state.mergeBase)) { error in
+            guard let kind = (error as? GitError)?.kind, case .failed = kind else {
+                return XCTFail("expected GitError.failed, got \(error)")
+            }
+        }
+    }
+
+    /// Guards the "exit 1 needs stdout" rule against over-tightening.
+    func testUntrackedDiffOfEmptyAndBinaryFilesDoesNotThrow() throws {
+        try repo.write("empty.txt", "")
+        try Data("a\0b".utf8).write(to: URL(fileURLWithPath: "\(repo.path)/blob.bin"))
+        let comparison = GitComparison(base: "main")
+        let state = try git.changes(in: comparison)
+        let files = byPath(state)
+
+        let empty = try git.diff(of: try XCTUnwrap(files["empty.txt"]), in: comparison, mergeBase: state.mergeBase)
+        XCTAssertTrue(empty.hunks.isEmpty)
+        let blob = try git.diff(of: try XCTUnwrap(files["blob.bin"]), in: comparison, mergeBase: state.mergeBase)
+        XCTAssertTrue(blob.isBinary)
+    }
+
     func testDetachedHeadComparisonLoads() throws {
         try repo.write("x.txt", "x\n")
         try repo.commitAll("x")
@@ -219,6 +267,68 @@ final class RepositoryDiffTests: XCTestCase {
 
         try repo.sh("git -C '\(repo.path)' -c user.email=t@t -c user.name=t commit -q --allow-empty -m moved")
         XCTAssertNotEqual(third, try git.fingerprint(of: comparison, paths: paths))
+    }
+
+    /// A load nothing interrupted returns the very token the next poll computes, so an idle
+    /// view is not reloaded forever.
+    func testQuietLoadFingerprintEqualsNextPoll() throws {
+        try repo.write("a.txt", "one\n")
+        try repo.write("b.txt", "bee\n")
+        try repo.write("c.txt", (1...20).map { "line \($0)" }.joined(separator: "\n") + "\n")
+        try repo.commitAll("base")
+        try repo.write("a.txt", "one\ntwo\n")                                    // modified
+        try FileManager.default.removeItem(atPath: "\(repo.path)/b.txt")         // deleted (no stamp)
+        try repo.sh("git -C '\(repo.path)' mv c.txt d.txt")                     // renamed
+        try repo.write("new dir/fresh.txt", "x\n")                               // untracked
+        let comparison = GitComparison(base: "main")
+
+        let state = try git.changes(in: comparison)
+        XCTAssertFalse(state.fingerprint.hasPrefix("unstable:"))
+        XCTAssertEqual(state.fingerprint,
+                       try git.fingerprint(of: comparison, paths: state.files.map(\.path)))
+        // Ref comparisons never had a window: their token is the two commits.
+        let refs = GitComparison(base: "main", head: .ref("HEAD"))
+        let refState = try git.changes(in: refs)
+        XCTAssertEqual(refState.fingerprint, try git.fingerprint(of: refs, paths: []))
+    }
+
+    /// An edit that lands after the path listing (same size, so status does not move; only
+    /// the stamp does) must not be baked into the stored token.
+    func testMidLoadEditOfTrackedFileMakesFingerprintUnstable() throws {
+        try repo.write("a.txt", "one\n")
+        try repo.commitAll("base")
+        try repo.write("a.txt", "one\ntwo\n")
+        let comparison = GitComparison(base: "main")
+
+        let state = try git.changes(in: comparison, afterListing: {
+            try? self.repo.write("a.txt", "one\nTWO\n")
+            try? FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(60)],
+                                                   ofItemAtPath: "\(self.repo.path)/a.txt")
+        })
+        XCTAssertTrue(state.fingerprint.hasPrefix("unstable:"))
+        XCTAssertNotEqual(state.fingerprint,
+                          try git.fingerprint(of: comparison, paths: state.files.map(\.path)))
+        // The reload the mismatch triggers is quiet and settles.
+        let reloaded = try git.changes(in: comparison)
+        XCTAssertEqual(reloaded.fingerprint,
+                       try git.fingerprint(of: comparison, paths: reloaded.files.map(\.path)))
+    }
+
+    func testMidLoadNewUntrackedFileMakesFingerprintUnstable() throws {
+        try repo.write("a.txt", "one\n")
+        try repo.commitAll("base")
+        try repo.write("a.txt", "one\ntwo\n")
+        let comparison = GitComparison(base: "main")
+
+        let state = try git.changes(in: comparison, afterListing: {
+            try? self.repo.write("late.txt", "arrived during the load\n")
+        })
+        XCTAssertEqual(state.files.map(\.path), ["a.txt"])   // not in this listing...
+        XCTAssertTrue(state.fingerprint.hasPrefix("unstable:"))   // ...so the token must never match
+        XCTAssertNotEqual(state.fingerprint,
+                          try git.fingerprint(of: comparison, paths: state.files.map(\.path)))
+        let reloaded = try git.changes(in: comparison)
+        XCTAssertEqual(reloaded.files.map(\.path), ["a.txt", "late.txt"])
     }
 
     func testComparisonLabelAndStorageKey() {
