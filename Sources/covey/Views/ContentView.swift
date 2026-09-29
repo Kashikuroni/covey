@@ -24,6 +24,7 @@ func shouldRestoreCommandPaletteResponder(inputMode: InputMode) -> Bool {
 
 struct ContentView: View {
     @Bindable var model: AppModel
+    @Environment(\.openWindow) private var openWindow
     @State private var keyMonitor: Any?
     @State private var windowScope = WorkspaceWindowScope()
     @State private var paletteState = CommandPaletteState()
@@ -113,6 +114,11 @@ struct ContentView: View {
                     CommandPaletteView(model: model, state: $paletteState)
                 }
             }
+        }
+        .onChange(of: model.reviewWindowRequest) { _, key in
+            guard let key else { return }
+            openWindow(id: ReviewWindowKey.sceneID, value: key)
+            model.consumeReviewWindowRequest()
         }
         .onChange(of: model.commandPalettePresented) { _, presented in
             if presented {

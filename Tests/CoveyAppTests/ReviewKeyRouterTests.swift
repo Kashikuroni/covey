@@ -80,6 +80,28 @@ final class ReviewKeyRouterTests: XCTestCase {
         XCTAssertFalse(model.keysOverlayOpen)
     }
 
+    func testDiffKeysReopenThePanelAfterEscape() async {
+        let git = FakeReviewGit()
+        git.state = comparisonState([changed("a.swift")])
+        git.diffs["a.swift"] = oneHunk([(.added, nil, 1, "x")])
+        let (model, _) = makeReviewModel(git: git)
+        await model.start()
+        await model.select("a.swift")
+        XCTAssertTrue(model.diffOpen)
+        for action in [ReviewKeyAction.nextHunk, .previousHunk, .comment] {
+            await model.escape()
+            XCTAssertFalse(model.diffOpen, "Esc closes the panel before \(action)")
+            await model.perform(action)
+            XCTAssertTrue(model.diffOpen, "\(action) reopens the panel")
+        }
+        XCTAssertNotNil(model.composer, "C after Esc opens a composer in the visible panel")
+        // Nothing selected: nothing to reopen.
+        await model.select(nil)
+        model.diffOpen = false
+        await model.perform(.nextHunk)
+        XCTAssertFalse(model.diffOpen)
+    }
+
     func testOpenReviewNeedsAGitSession() {
         var context = CommandContext()
         XCTAssertEqual(CommandRules.availability(for: .openReview, context: context),

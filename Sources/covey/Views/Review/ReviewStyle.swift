@@ -127,6 +127,7 @@ struct ReviewChip: View {
                 .background(on ? tk.t2 : Color.clear)
                 .overlay(RoundedRectangle(cornerRadius: Tokens.rSm).stroke(tk.bd3))
                 .clipShape(RoundedRectangle(cornerRadius: Tokens.rSm))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

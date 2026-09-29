@@ -81,15 +81,20 @@ struct ReviewIssueCard: View {
             }
             HStack(spacing: 4) {
                 ForEach(IssueStatus.allCases, id: \.self) { status in
-                    Button(status.rawValue) { model.setStatus(status, forIssue: issue.id) }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 11))
-                        .padding(.horizontal, 8)
-                        .frame(height: 22)
-                        .foregroundStyle(status == issue.status ? tk.bg : tk.t3)
-                        .background(status == issue.status ? tk.t1 : Color.clear)
-                        .overlay(RoundedRectangle(cornerRadius: Tokens.rSm).stroke(tk.bd3))
-                        .clipShape(RoundedRectangle(cornerRadius: Tokens.rSm))
+                    // The styling lives inside the label: a plain button hit-tests
+                    // its label only, so the padded box must be the label.
+                    Button { model.setStatus(status, forIssue: issue.id) } label: {
+                        Text(status.rawValue)
+                            .font(.system(size: 11))
+                            .padding(.horizontal, 8)
+                            .frame(height: 22)
+                            .foregroundStyle(status == issue.status ? tk.bg : tk.t3)
+                            .background(status == issue.status ? tk.t1 : Color.clear)
+                            .overlay(RoundedRectangle(cornerRadius: Tokens.rSm).stroke(tk.bd3))
+                            .clipShape(RoundedRectangle(cornerRadius: Tokens.rSm))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
                 Spacer()
                 if issue.status == .open {
@@ -132,15 +137,18 @@ struct ReviewComposerView: View {
                 HStack(spacing: 6) {
                     Text("Severity").font(.system(size: 11)).foregroundStyle(tk.t3)
                     ForEach(IssueSeverity.allCases, id: \.self) { severity in
-                        Button(severity.rawValue) { model.composer?.severity = severity }
-                            .buttonStyle(.plain)
-                            .font(.system(size: 11))
-                            .padding(.horizontal, 8)
-                            .frame(height: 24)
-                            .foregroundStyle(composer.severity == severity ? tk.bg : tk.t2)
-                            .background(composer.severity == severity ? severity.color(tk) : Color.clear)
-                            .overlay(RoundedRectangle(cornerRadius: Tokens.rSm).stroke(tk.bd3))
-                            .clipShape(RoundedRectangle(cornerRadius: Tokens.rSm))
+                        Button { model.composer?.severity = severity } label: {
+                            Text(severity.rawValue)
+                                .font(.system(size: 11))
+                                .padding(.horizontal, 8)
+                                .frame(height: 24)
+                                .foregroundStyle(composer.severity == severity ? tk.bg : tk.t2)
+                                .background(composer.severity == severity ? severity.color(tk) : Color.clear)
+                                .overlay(RoundedRectangle(cornerRadius: Tokens.rSm).stroke(tk.bd3))
+                                .clipShape(RoundedRectangle(cornerRadius: Tokens.rSm))
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                     }
                     Spacer()
                     ReviewButton(title: "Cancel", tk: tk) { model.composer = nil }
