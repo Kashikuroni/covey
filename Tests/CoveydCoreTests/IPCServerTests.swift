@@ -1,5 +1,6 @@
 import XCTest
 @testable import CoveydCore
+import CoveyGit
 import CoveyKit
 
 final class FakeSink: ClientSink {
@@ -352,8 +353,8 @@ final class IPCServerTests: XCTestCase {
         waitUntil({ sink.captured.contains {
             if case .response(5, .ok) = $0 { return true }; return false
         } }, "cleanup ok")
-        XCTAssertFalse(GitOps.branchExists(repo, "merged-b"))
-        XCTAssertTrue(GitOps.branchExists(repo, "main"), "protected skipped, not failed")
+        XCTAssertFalse(Repository(at: repo).branchExists("merged-b"))
+        XCTAssertTrue(Repository(at: repo).branchExists("main"), "protected skipped, not failed")
         // promote with a companion: the shell dies, then the tree promotes.
         let wt = "\(repo)/.worktrees/feat"
         let p = Process()
@@ -475,8 +476,8 @@ final class IPCServerTests: XCTestCase {
             if case .response(1, .ok) = $0 { return true }
             return false
         } }, "switch and delete succeeds")
-        XCTAssertEqual(GitOps.currentBranch(repo), "main")
-        XCTAssertFalse(GitOps.branchExists(repo, "feat"))
+        XCTAssertEqual(Repository(at: repo).currentBranch(), "main")
+        XCTAssertFalse(Repository(at: repo).branchExists("feat"))
         registry.kill(name: "plain")
     }
 
@@ -523,9 +524,9 @@ final class IPCServerTests: XCTestCase {
             }
             return false
         } }, "worktree session is rejected")
-        XCTAssertEqual(GitOps.currentBranch(wt), "feat")
-        XCTAssertTrue(GitOps.branchExists(repo, "feat"))
-        XCTAssertTrue(GitOps.branchExists(repo, "main"))
+        XCTAssertEqual(Repository(at: wt).currentBranch(), "feat")
+        XCTAssertTrue(Repository(at: repo).branchExists("feat"))
+        XCTAssertTrue(Repository(at: repo).branchExists("main"))
         registry.kill(name: "worktree")
     }
 
@@ -567,8 +568,8 @@ final class IPCServerTests: XCTestCase {
             }
             return false
         } }, "external linked worktree is rejected")
-        XCTAssertEqual(GitOps.currentBranch(wt), "feat")
-        XCTAssertTrue(GitOps.branchExists(repo, "feat"))
+        XCTAssertEqual(Repository(at: wt).currentBranch(), "feat")
+        XCTAssertTrue(Repository(at: repo).branchExists("feat"))
         registry.kill(name: "external")
     }
 
@@ -629,7 +630,7 @@ final class IPCServerTests: XCTestCase {
             return false
         } }, "kill replies only after cleanup")
         XCTAssertFalse(FileManager.default.fileExists(atPath: wtPath))
-        XCTAssertFalse(GitOps.branchExists(repo, "feat"))
+        XCTAssertFalse(Repository(at: repo).branchExists("feat"))
     }
 
     func testKillDeleteBranchPreservesShutdownTimeUntrackedFile() throws {
@@ -675,7 +676,7 @@ final class IPCServerTests: XCTestCase {
             return false
         } }, "shutdown-time dirty state is reported")
         XCTAssertEqual(try String(contentsOfFile: "\(wt)/late.txt", encoding: .utf8), "late")
-        XCTAssertTrue(GitOps.branchExists(repo, "feat"))
+        XCTAssertTrue(Repository(at: repo).branchExists("feat"))
     }
 
     func testKillDeleteBranchPreservesShutdownTimeCommit() throws {
@@ -695,7 +696,7 @@ final class IPCServerTests: XCTestCase {
             process.waitUntilExit()
             XCTAssertEqual(process.terminationStatus, 0)
         }
-        let initialTip = try XCTUnwrap(GitOps.localBranchOID(repo, "feat"))
+        let initialTip = try XCTUnwrap(Repository(at: repo).localBranchOID("feat"))
         let registry = SessionRegistry()
         _ = try registry.create(
             dir: wt, agent: "sh",
@@ -722,7 +723,7 @@ final class IPCServerTests: XCTestCase {
             return false
         } }, "shutdown-time commit is reported")
         XCTAssertTrue(FileManager.default.fileExists(atPath: wt))
-        XCTAssertNotEqual(try GitOps.localBranchOID(repo, "feat"), initialTip)
+        XCTAssertNotEqual(try Repository(at: repo).localBranchOID("feat"), initialTip)
     }
 
     func testKillDeleteBranchWaitsForCompanionBeforeFinalValidation() throws {
@@ -775,7 +776,7 @@ final class IPCServerTests: XCTestCase {
             try String(contentsOfFile: "\(wt)/companion.txt", encoding: .utf8),
             "companion"
         )
-        XCTAssertTrue(GitOps.branchExists(repo, "feat"))
+        XCTAssertTrue(Repository(at: repo).branchExists("feat"))
     }
 
     func testKillDeleteBranchRejectsDirtyWorktreeWithoutMutation() throws {
@@ -831,7 +832,7 @@ final class IPCServerTests: XCTestCase {
         } }, "dirty worktree deletion rejected")
         XCTAssertNotNil(registry.get(name: "dirty"))
         XCTAssertTrue(FileManager.default.fileExists(atPath: path))
-        XCTAssertTrue(GitOps.branchExists(repo, "dirty-feat"))
+        XCTAssertTrue(Repository(at: repo).branchExists("dirty-feat"))
 
         if registry.get(name: "dirty") != nil {
             try? FileManager.default.removeItem(atPath: "\(path)/untracked.txt")
@@ -891,7 +892,7 @@ final class IPCServerTests: XCTestCase {
         } }, "protected worktree deletion rejected")
         XCTAssertNotNil(registry.get(name: "protected"))
         XCTAssertTrue(FileManager.default.fileExists(atPath: path))
-        XCTAssertTrue(GitOps.branchExists(repo, "dev"))
+        XCTAssertTrue(Repository(at: repo).branchExists("dev"))
 
         if registry.get(name: "protected") != nil {
             registry.markWorktreeRemoval(name: "protected")

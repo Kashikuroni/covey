@@ -1,4 +1,5 @@
 import Foundation
+import CoveyGit
 import CoveyKit
 
 /// IO orchestration of session creation (port of create.rs create_session):
@@ -35,18 +36,19 @@ public enum CreateService {
             return Prepared(finalDir: spec.dir, argv: argv, label: label,
                             worktreeRepo: nil, resumeCmd: resumeCmd)
         }
-        guard let repo = GitOps.repoRoot(spec.dir) else {
-            throw GitOps.GitError("not a git repo: \(spec.dir)")
+        guard let repo = Repository(at: spec.dir).toplevel() else {
+            throw GitError("not a git repo: \(spec.dir)")
         }
+        let root = Repository(at: repo)
         let wtFor = { (branch: String) in "\(repo)/.worktrees/\(branch)" }
 
         switch wt {
         case .new(let branch, let base):
-            if let err = validateBranch(branch) { throw GitOps.GitError(err) }
-            try GitOps.ensureGitignore(repo, entry: ".worktrees/")
+            if let err = validateBranch(branch) { throw GitError(err) }
+            try root.ensureGitignore(entry: ".worktrees/")
             let path = wtFor(branch)
-            try GitOps.prepareWorktree(repo: repo, wtPath: path, newBranch: branch, base: base)
-            GitOps.seedWorktreeIgnored(repo: repo, wtPath: path)
+            try root.addWorktree(at: path, newBranch: branch, base: base)
+            root.seedIgnoredFiles(into: path)
             return Prepared(finalDir: path, argv: argv, label: label,
                             worktreeRepo: repo, resumeCmd: resumeCmd)
         case .existing(let branch):
@@ -54,10 +56,10 @@ public enum CreateService {
                                           label: label, resumeCmd: resumeCmd) {
                 return p
             }
-            try GitOps.ensureGitignore(repo, entry: ".worktrees/")
+            try root.ensureGitignore(entry: ".worktrees/")
             let path = wtFor(branch)
-            try GitOps.prepareWorktreeExisting(repo: repo, wtPath: path, branch: branch)
-            GitOps.seedWorktreeIgnored(repo: repo, wtPath: path)
+            try root.addWorktree(at: path, existingBranch: branch)
+            root.seedIgnoredFiles(into: path)
             return Prepared(finalDir: path, argv: argv, label: label,
                             worktreeRepo: repo, resumeCmd: resumeCmd)
         case .checkout(let branch):
@@ -65,12 +67,12 @@ public enum CreateService {
                                           label: label, resumeCmd: resumeCmd) {
                 return p
             }
-            try GitOps.checkout(repo: repo, branch: branch)
+            try root.checkout(branch)
             return Prepared(finalDir: repo, argv: argv, label: label,
                             worktreeRepo: nil, resumeCmd: resumeCmd)
         case .checkoutNew(let branch, let base):
-            if let err = validateBranch(branch) { throw GitOps.GitError(err) }
-            try GitOps.createBranch(repo, branch, base: base)
+            if let err = validateBranch(branch) { throw GitError(err) }
+            try root.createBranch(branch, from: base)
             return Prepared(finalDir: repo, argv: argv, label: label,
                             worktreeRepo: nil, resumeCmd: resumeCmd)
         }
@@ -81,7 +83,7 @@ public enum CreateService {
     /// removable worktree session.
     private static func checkedOutPrepared(repo: String, branch: String, argv: [String],
                                            label: String, resumeCmd: String?) -> Prepared? {
-        guard let path = GitOps.worktreeForBranch(repo, branch) else { return nil }
+        guard let path = Repository(at: repo).worktreePath(forBranch: branch) else { return nil }
         if sameDir(path, repo) {
             return Prepared(finalDir: repo, argv: argv, label: label,
                             worktreeRepo: nil, resumeCmd: resumeCmd)
@@ -99,7 +101,7 @@ public enum CreateService {
     private static func resolveCommand(_ command: String) -> String {
         guard let bin = command.split(separator: " ").first.map(String.init),
               !bin.contains("/"),
-              let path = GitOps.resolveAgentPath(bin)
+              let path = AgentPath.resolve(bin)
         else { return command }
         return path + command.dropFirst(bin.count)
     }
@@ -109,7 +111,7 @@ public enum CreateService {
     /// is untouched and never passes through a shell.
     private static func resolveArgv(_ parts: [String]) -> [String] {
         guard let bin = parts.first, !bin.contains("/"),
-              let path = GitOps.resolveAgentPath(bin)
+              let path = AgentPath.resolve(bin)
         else { return parts }
         var resolved = parts
         resolved[0] = path

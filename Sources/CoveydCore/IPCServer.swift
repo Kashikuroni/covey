@@ -1,4 +1,5 @@
 import Foundation
+import CoveyGit
 import CoveyKit
 
 /// Dispatches client requests against a `SessionRegistry` and multiplexes daemon
@@ -299,25 +300,26 @@ public final class IPCServer {
             catch { reply(.error(code: "restartFailed", message: "\(error)")) }
 
         case let .gitInfo(dir):
-            let root = GitOps.repoRoot(expandTilde(dir))
+            let root = Repository(at: expandTilde(dir)).toplevel()
+            let repo = root.map(Repository.init(at:))
             reply(.gitInfo(repoRoot: root,
-                           currentBranch: root.flatMap { GitOps.currentBranch($0) },
-                           branches: root.map { GitOps.localBranches($0) } ?? [],
-                           worktrees: root.map { GitOps.worktrees($0) } ?? [:]))
+                           currentBranch: repo?.currentBranch(),
+                           branches: repo?.localBranches() ?? [],
+                           worktrees: repo?.worktrees() ?? [:]))
 
         case let .promote(name):
             guard let session = registry.get(name: name) else { return notFound(name) }
             guard let repo = session.worktreeRepo else {
                 return reply(.error(code: "promoteFailed", message: "not a worktree session"))
             }
-            guard let branch = GitOps.currentBranch(session.dir) else {
+            guard let branch = Repository(at: session.dir).currentBranch() else {
                 return reply(.error(code: "promoteFailed", message: "no branch checked out"))
             }
             // The companion shell lives inside the worktree — take it down
             // before the tree is removed.
             if let comp = registry.companionName(of: name) { registry.kill(name: comp) }
             do {
-                try GitOps.promoteWorktree(repo: repo, wtDir: session.dir, branch: branch)
+                try Repository(at: repo).promoteWorktree(at: session.dir, branch: branch)
                 reply(.ok)
             } catch { reply(.error(code: "promoteFailed", message: "\(error)")) }
 
@@ -327,18 +329,17 @@ public final class IPCServer {
                 return reply(.error(code: "deleteBranchFailed",
                                     message: "cannot switch a worktree session"))
             }
-            guard let repo = GitOps.repoRoot(session.dir) else {
+            guard let root = Repository(at: session.dir).toplevel() else {
                 return reply(.error(code: "deleteBranchFailed", message: "not a git repo"))
             }
             do {
-                guard try GitOps.isPrimaryWorktree(repo) else {
-                    throw GitOps.GitError("cannot switch a linked worktree session")
+                let repo = Repository(at: root)
+                guard try repo.isPrimaryWorktree() else {
+                    throw GitError("cannot switch a linked worktree session")
                 }
-                try GitOps.switchAndDeleteBranch(
-                    repo: repo,
-                    expectedBranch: expectedBranch,
-                    checkoutBranch: checkoutBranch
-                )
+                try repo.switchAndDeleteBranch(expected: expectedBranch,
+                                               checkout: checkoutBranch,
+                                               protected: protectedBranches)
                 gitMonitor?.forget(name: name)
                 gitMonitor?.poke(name: name, dir: session.dir)
                 reply(.ok)
@@ -347,34 +348,36 @@ public final class IPCServer {
             }
 
         case let .deleteBranch(dir, branch):
-            guard let repo = GitOps.repoRoot(expandTilde(dir)) else {
+            guard let root = Repository(at: expandTilde(dir)).toplevel() else {
                 return reply(.error(code: "deleteBranchFailed", message: "not a git repo"))
             }
-            do { try GitOps.deleteBranch(repo: repo, branch: branch); reply(.ok) }
-            catch { reply(.error(code: "deleteBranchFailed", message: "\(error)")) }
+            do {
+                try Repository(at: root).deleteBranch(branch, protected: protectedBranches)
+                reply(.ok)
+            } catch { reply(.error(code: "deleteBranchFailed", message: "\(error)")) }
 
         case let .mergedBranches(dir):
-            let repo = GitOps.repoRoot(expandTilde(dir))
-            reply(.branches(repo.map { GitOps.listMergedBranches($0) } ?? []))
+            let root = Repository(at: expandTilde(dir)).toplevel()
+            reply(.branches(root.map { Repository(at: $0).mergedBranches() } ?? []))
 
         case let .branchStatus(name):
             guard let session = registry.get(name: name) else { return notFound(name) }
             guard let repo = session.worktreeRepo,
-                  let branch = GitOps.currentBranch(session.dir) else {
+                  let branch = Repository(at: session.dir).currentBranch() else {
                 return reply(.error(code: "branchStatusFailed",
                                     message: "not a worktree session"))
             }
-            let dirty = GitOps.isDirty(session.dir)
-            let merged = GitOps.listMergedBranches(repo).contains(branch)
+            let dirty = Repository(at: session.dir).isDirty()
+            let merged = Repository(at: repo).mergedBranches().contains(branch)
             reply(.branchStatus(dirty: dirty, merged: merged))
 
         case let .cleanupBranches(dir, branches):
-            guard let repo = GitOps.repoRoot(expandTilde(dir)) else {
+            guard let root = Repository(at: expandTilde(dir)).toplevel() else {
                 return reply(.error(code: "cleanupFailed", message: "not a git repo"))
             }
             var failures: [String] = []
             for branch in branches where !protectedBranches.contains(branch) {
-                do { try GitOps.deleteBranch(repo: repo, branch: branch) }
+                do { try Repository(at: root).deleteBranch(branch, protected: protectedBranches) }
                 catch { failures.append("\(branch): \(error)") }
             }
             failures.isEmpty

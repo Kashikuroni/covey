@@ -1,5 +1,6 @@
 import XCTest
 @testable import CoveydCore
+import CoveyGit
 import CoveyKit
 
 final class CreateServiceTests: XCTestCase {
@@ -21,7 +22,7 @@ final class CreateServiceTests: XCTestCase {
         p.executableURL = URL(fileURLWithPath: "/bin/sh")
         p.arguments = ["-c", cmd]
         try p.run(); p.waitUntilExit()
-        guard p.terminationStatus == 0 else { throw GitOps.GitError("sh failed: \(cmd)") }
+        guard p.terminationStatus == 0 else { throw GitError("sh failed: \(cmd)") }
     }
 
     func testPlainAgentPrepared() throws {
@@ -65,7 +66,7 @@ final class CreateServiceTests: XCTestCase {
             worktree: .new(branch: "feat", base: "main")))
         XCTAssertTrue(p.finalDir.hasSuffix(".worktrees/feat"))
         XCTAssertNotNil(p.worktreeRepo)
-        XCTAssertTrue(GitOps.branchExists(repo, "feat"))
+        XCTAssertTrue(Repository(at: repo).branchExists("feat"))
     }
 
     func testWorktreeExistingCheckedOutInRoot() throws {
@@ -91,7 +92,7 @@ final class CreateServiceTests: XCTestCase {
         XCTAssertNil(p.worktreeRepo)
         XCTAssertEqual(URL(fileURLWithPath: p.finalDir).lastPathComponent,
                        URL(fileURLWithPath: repo).lastPathComponent)
-        XCTAssertEqual(GitOps.currentBranch(repo), "main", "no switch happened")
+        XCTAssertEqual(Repository(at: repo).currentBranch(), "main", "no switch happened")
     }
 
     func testCheckoutBranchWithWorktreeOpensIt() throws {
@@ -101,7 +102,7 @@ final class CreateServiceTests: XCTestCase {
             dir: repo, agent: "sh", worktree: .checkout(branch: "other")))
         XCTAssertTrue(p.finalDir.hasSuffix(".worktrees/other"))
         XCTAssertNotNil(p.worktreeRepo, "existing worktree session is removable")
-        XCTAssertEqual(GitOps.currentBranch(repo), "main", "root untouched")
+        XCTAssertEqual(Repository(at: repo).currentBranch(), "main", "root untouched")
     }
 
     func testCheckoutSwitchesRootBranch() throws {
@@ -111,14 +112,14 @@ final class CreateServiceTests: XCTestCase {
         XCTAssertNil(p.worktreeRepo)
         XCTAssertEqual(URL(fileURLWithPath: p.finalDir).lastPathComponent,
                        URL(fileURLWithPath: repo).lastPathComponent)
-        XCTAssertEqual(GitOps.currentBranch(repo), "other", "switched in root")
+        XCTAssertEqual(Repository(at: repo).currentBranch(), "other", "switched in root")
     }
 
     func testCheckoutNewCreatesBranchInRoot() throws {
         let p = try CreateService.prepare(CreateSpec(
             dir: repo, agent: "sh", worktree: .checkoutNew(branch: "feat", base: "main")))
         XCTAssertNil(p.worktreeRepo)
-        XCTAssertEqual(GitOps.currentBranch(repo), "feat")
+        XCTAssertEqual(Repository(at: repo).currentBranch(), "feat")
         XCTAssertFalse(FileManager.default.fileExists(atPath: "\(repo)/.worktrees/feat"),
                        "no worktree was created")
     }

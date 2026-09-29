@@ -14,8 +14,8 @@ enum ProcessFailure: Error, Equatable {
 }
 
 /// Runs a child with both pipes drained concurrently. Reading stdout to EOF
-/// before touching stderr (what `GitOps.run` did) deadlocks as soon as the
-/// child fills the stderr pipe buffer and blocks writing to it.
+/// before touching stderr (what the old daemon-side runner did) deadlocks as
+/// soon as the child fills the stderr pipe buffer and blocks writing to it.
 enum ProcessRunner {
     static func run(executable: String, arguments: [String],
                     environment: [String: String],

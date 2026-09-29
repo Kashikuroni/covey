@@ -1,4 +1,5 @@
 import Foundation
+import CoveyGit
 import CoveyKit
 
 public enum RegistryError: Error, Equatable {
@@ -38,7 +39,7 @@ public final class SessionRegistry {
         let path: String
         let branch: String
         let expectedOID: String
-        let completion: (Result<Void, GitOps.GitError>) -> Void
+        let completion: (Result<Void, GitError>) -> Void
     }
     private var pendingBranchDeletion: [String: PendingBranchDeletion] = [:]
 
@@ -180,7 +181,7 @@ public final class SessionRegistry {
         }
         guard pendingBranchDeletion[name] == nil else {
             lock.unlock()
-            throw GitOps.GitError("branch deletion is already in progress")
+            throw GitError("branch deletion is already in progress")
         }
         let target = dir ?? entry.session.dir
         lock.unlock()
@@ -216,39 +217,39 @@ public final class SessionRegistry {
     /// again immediately before removing the worktree.
     public func scheduleBranchDeletion(
         name: String,
-        completion: @escaping (Result<Void, GitOps.GitError>) -> Void
+        completion: @escaping (Result<Void, GitError>) -> Void
     ) throws {
         lock.lock()
         guard let entry = entries[name], let repo = entry.session.worktreeRepo else {
             lock.unlock()
-            throw GitOps.GitError("not a worktree session")
+            throw GitError("not a worktree session")
         }
         guard pendingBranchDeletion[name] == nil else {
             lock.unlock()
-            throw GitOps.GitError("branch deletion is already in progress")
+            throw GitError("branch deletion is already in progress")
         }
         let path = entry.session.dir
         lock.unlock()
 
-        guard let branch = GitOps.currentBranch(path) else {
-            throw GitOps.GitError("no branch checked out")
+        guard let branch = Repository(at: path).currentBranch() else {
+            throw GitError("no branch checked out")
         }
         guard !protectedBranches.contains(branch) else {
-            throw GitOps.GitError("branch '\(branch)' is protected")
+            throw GitError("branch '\(branch)' is protected")
         }
-        try GitOps.requireCleanWorktree(path)
-        guard let expectedOID = try GitOps.localBranchOID(repo, branch) else {
-            throw GitOps.GitError("branch '\(branch)' does not exist")
+        try Repository(at: path).requireClean()
+        guard let expectedOID = try Repository(at: repo).localBranchOID(branch) else {
+            throw GitError("branch '\(branch)' does not exist")
         }
 
         lock.lock()
         guard pendingBranchDeletion[name] == nil else {
             lock.unlock()
-            throw GitOps.GitError("branch deletion is already in progress")
+            throw GitError("branch deletion is already in progress")
         }
         guard entries[name]?.session.dir == path else {
             lock.unlock()
-            throw GitOps.GitError("session changed during branch deletion")
+            throw GitError("session changed during branch deletion")
         }
         pendingWorktreeRemoval[name] = (repo: repo, path: path)
         pendingBranchDeletion[name] = PendingBranchDeletion(
@@ -314,7 +315,7 @@ public final class SessionRegistry {
         }
         guard pendingBranchDeletion[name] == nil else {
             lock.unlock()
-            throw GitOps.GitError("branch deletion is already in progress")
+            throw GitError("branch deletion is already in progress")
         }
         if entries[newName] != nil {
             lock.unlock(); throw RegistryError.duplicateName(newName)
@@ -420,7 +421,7 @@ public final class SessionRegistry {
         if let branchDeletion {
             finishBranchDeletion(branchDeletion, removal: removal)
         } else if let removal {
-            try? GitOps.removeWorktree(repo: removal.repo, wtPath: removal.path)
+            try? Repository(at: removal.repo).removeWorktree(at: removal.path)
         }
         onExit?(id, code)
     }
@@ -432,28 +433,28 @@ public final class SessionRegistry {
         do {
             guard removal?.repo == deletion.repo,
                   removal?.path == deletion.path else {
-                throw GitOps.GitError("worktree cleanup state is unavailable")
+                throw GitError("worktree cleanup state is unavailable")
             }
-            try GitOps.requireCleanWorktree(deletion.path)
-            guard GitOps.currentBranch(deletion.path) == deletion.branch else {
-                throw GitOps.GitError("worktree branch changed during shutdown")
+            try Repository(at: deletion.path).requireClean()
+            guard Repository(at: deletion.path).currentBranch() == deletion.branch else {
+                throw GitError("worktree branch changed during shutdown")
             }
-            guard try GitOps.localBranchOID(deletion.repo, deletion.branch)
+            guard try Repository(at: deletion.repo).localBranchOID(deletion.branch)
                     == deletion.expectedOID else {
-                throw GitOps.GitError("branch changed during shutdown")
+                throw GitError("branch changed during shutdown")
             }
-            try GitOps.removeWorktree(repo: deletion.repo, wtPath: deletion.path)
-            try GitOps.deleteBranch(
-                repo: deletion.repo,
-                branch: deletion.branch,
+            try Repository(at: deletion.repo).removeWorktree(at: deletion.path)
+            try Repository(at: deletion.repo).deleteBranch(
+                deletion.branch,
                 force: true,
-                expectedOID: deletion.expectedOID
+                expectedOID: deletion.expectedOID,
+                protected: protectedBranches
             )
             deletion.completion(.success(()))
-        } catch let error as GitOps.GitError {
+        } catch let error as GitError {
             deletion.completion(.failure(error))
         } catch {
-            deletion.completion(.failure(GitOps.GitError("\(error)")))
+            deletion.completion(.failure(GitError("\(error)")))
         }
     }
 
