@@ -83,6 +83,66 @@ final class LimitsTests: XCTestCase {
         XCTAssertEqual(graph.note, LinkGraph.incompleteNote)
     }
 
+    /// `a.ts` imports `./b` on both sides (a kept link). Cancelled while its
+    /// base text is read, the head pair alone would read as `added`: a
+    /// half-collected change is dropped instead.
+    func testCancellationBetweenAChangesHeadAndBaseNeverShowsAWrongState() async {
+        let fake = FakeProvider(common: ["b.ts": ""],
+                                base: ["a.ts": "import './b'\n"], head: ["a.ts": "import './b'\n// edited\n"])
+        let provider = FailingProvider(fake, at: "a.ts", side: .base, error: CancellationError())
+        let graph = await LinkGraphBuilder().build(changes: fake.changes(), provider: provider)
+        XCTAssertEqual(describe(graph), [])
+        XCTAssertFalse(graph.complete)
+        XCTAssertEqual(graph.note, LinkGraph.incompleteNote)
+    }
+
+    /// `a.ts` is collected whole; `c.ts` is cancelled half-way (any error
+    /// counts once the task is cancelled): only `c.ts`'s pairs are dropped.
+    func testAnyErrorBetweenAChangesHeadAndBaseWhileCancelledDropsOnlyThatChange() async {
+        let fake = FakeProvider(common: ["b.ts": ""],
+                                base: ["a.ts": "import './b'\n", "c.ts": "import './b'\n"],
+                                head: ["a.ts": "import './b'\n// edited\n", "c.ts": "import './b'\n// edited\n"])
+        let provider = FailingProvider(fake, at: "c.ts", side: .base, error: FakeError(description: "killed"),
+                                       cancelling: true)
+        let task = Task { await LinkGraphBuilder().build(changes: fake.changes(), provider: provider) }
+        let graph = await task.value
+        XCTAssertEqual(describe(graph), ["a.ts → b.ts kept"])
+        XCTAssertFalse(graph.complete)
+        XCTAssertEqual(graph.note, LinkGraph.incompleteNote)
+    }
+
+    /// Nothing is asked of the provider once the build is out of time.
+    func testCancelledBuildDoesNotAskTheProviderForAnything() async throws {
+        let spy = SpyProvider(FakeProvider(common: ["z.stub": "plainword"], base: ["core.stub": "one"],
+                                           head: ["core.stub": "two"]))
+        let session = BuildSession(changes: spy.fake.changes(), provider: spy, limits: .standard,
+                                   cache: ParseCache(), languages: [CappedStubLanguage()])
+        let task = Task { () -> LinkGraph in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await session.run()
+        }
+        let graph = try await task.value
+        XCTAssertEqual(spy.calls, [])
+        XCTAssertFalse(graph.complete)
+        XCTAssertEqual(graph.note, LinkGraph.incompleteNote)
+    }
+
+    /// A build that runs out of time during the keyword search skips the
+    /// remaining lookups (here the scoped word's).
+    func testOutOfTimeDuringTheKeywordSearchSkipsTheRemainingLookups() async throws {
+        let spy = SpyProvider(FakeProvider(common: ["z.stub": "plainword", "a.stub": "broadword"],
+                                           base: ["core.stub": "one"], head: ["core.stub": "two"]))
+        spy.cancelOnMentioning = true
+        let session = BuildSession(changes: spy.fake.changes(), provider: spy, limits: .standard,
+                                   cache: ParseCache(), languages: [CappedStubLanguage()])
+        let task = Task { try await session.run() }
+        let graph = try await task.value
+        XCTAssertEqual(spy.calls.filter { $0.hasPrefix("filesMentioning") }, ["filesMentioning plainword"])
+        XCTAssertEqual(describe(graph), [])
+        XCTAssertFalse(graph.complete)
+        XCTAssertEqual(graph.note, LinkGraph.incompleteNote)
+    }
+
     /// A crate root used by hundreds of files: every link comes back (the
     /// UI caps what it shows), within the standard budget.
     func testHubFileWithHundredsOfIncomingLinksStaysWithinBudget() async {
@@ -106,17 +166,20 @@ final class LimitsTests: XCTestCase {
     }
 }
 
-/// Reads `fake`, but throws `error` when `path` is read (after cancelling the
-/// running task, when `cancelling`).
+/// Reads `fake`, but throws `error` when `path` is read (on `side` only, when
+/// given; after cancelling the running task, when `cancelling`).
 private struct FailingProvider: SourceProvider {
     let fake: FakeProvider
     let path: String
+    let side: SourceSide?
     let error: any Error
     let cancelling: Bool
 
-    init(_ fake: FakeProvider, at path: String, error: any Error, cancelling: Bool = false) {
+    init(_ fake: FakeProvider, at path: String, side: SourceSide? = nil, error: any Error,
+         cancelling: Bool = false) {
         self.fake = fake
         self.path = path
+        self.side = side
         self.error = error
         self.cancelling = cancelling
     }
@@ -124,7 +187,7 @@ private struct FailingProvider: SourceProvider {
     func files(_ side: SourceSide) async throws -> [String] { try await fake.files(side) }
 
     func text(_ path: String, _ side: SourceSide) async throws -> String? {
-        if path == self.path {
+        if path == self.path && (self.side ?? side) == side {
             if cancelling { withUnsafeCurrentTask { $0?.cancel() } }
             throw error
         }
@@ -132,6 +195,38 @@ private struct FailingProvider: SourceProvider {
     }
 
     func filesMentioning(_ words: [String]) async throws -> [String] { try await fake.filesMentioning(words) }
+}
+
+/// Reads `fake` and logs every call; cancels the running task in the first
+/// `filesMentioning` when `cancelOnMentioning`.
+private final class SpyProvider: SourceProvider, @unchecked Sendable {
+    let fake: FakeProvider
+    var cancelOnMentioning = false
+    private let lock = NSLock()
+    private var log: [String] = []
+
+    init(_ fake: FakeProvider) { self.fake = fake }
+
+    /// `files head`, `text a.ts`, `filesMentioning w1 w2`, … in call order.
+    var calls: [String] { lock.withLock { log } }
+
+    private func record(_ call: String) { lock.withLock { log.append(call) } }
+
+    func files(_ side: SourceSide) async throws -> [String] {
+        record("files \(side)")
+        return try await fake.files(side)
+    }
+
+    func text(_ path: String, _ side: SourceSide) async throws -> String? {
+        record("text \(path)")
+        return try await fake.text(path, side)
+    }
+
+    func filesMentioning(_ words: [String]) async throws -> [String] {
+        record("filesMentioning " + words.joined(separator: " "))
+        if cancelOnMentioning { withUnsafeCurrentTask { $0?.cancel() } }
+        return try await fake.filesMentioning(words)
+    }
 }
 
 /// `.stub` files: every one references `core.stub`, which is found by the

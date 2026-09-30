@@ -32,6 +32,9 @@ final class BuildSession {
     private var complete = true
     private let deadline: ContinuousClock.Instant
     private var timedOut = false
+    /// The changed file being collected (head, then base): its pairs are
+    /// complete only once both sides are in.
+    private var inFlight: String?
 
     init(changes: [ChangedSource], provider: any SourceProvider, limits: GraphLimits,
          cache: ParseCache, languages: [any SourceLanguage]) {
@@ -62,21 +65,26 @@ final class BuildSession {
             try await collect()
         } catch where error is CancellationError || Task.isCancelled {
             // A cancelled build (whatever the provider threw) is a stopped one:
-            // keep what was found.
+            // keep what was found, except a change caught between its head and
+            // base sides: its head-only pairs would read as `added`.
             timedOut = true
             complete = false
+            if let inFlight { pairs = pairs.filter { $0.key.from != inFlight } }
         }
         return try await graph()
     }
 
     private func collect() async throws {
+        guard !outOfTime() else { return }
         head = SideIndex(side: .head, files: try await provider.files(.head), store: store)
         base = SideIndex(side: .base, files: try await provider.files(.base), store: store,
                          formerPaths: formerPaths)
         for change in changes {
             guard !outOfTime() else { break }
+            inFlight = change.path
             if let path = change.headPath { try await collectHead(path, fromUnchanged: false) }
             if let basePath = change.basePath { try await collectBase(change.path, at: basePath) }
+            inFlight = nil
         }
         if !outOfTime() { try await incoming() }
     }
@@ -151,6 +159,7 @@ final class BuildSession {
         // A scoped word counts only where it can reach a changed file: inside `within`.
         var broad = Set<String>()
         for word in Set(scoped.map(\.word)).sorted() {
+            guard !outOfTime() else { return }
             let scopes = scoped.filter { $0.word == word }.map(\.within)
             let hits = try await provider.filesMentioning([word])
             broad.formUnion(hits.filter { hit in scopes.contains { Paths.contains($0, hit) } })
