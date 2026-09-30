@@ -30,12 +30,15 @@ final class BuildSession {
     private var base: SideIndex!
     private var pairs: [LinkKey: Pair] = [:]
     private var complete = true
+    private let deadline: ContinuousClock.Instant
+    private var timedOut = false
 
     init(changes: [ChangedSource], provider: any SourceProvider, limits: GraphLimits,
          cache: ParseCache, languages: [any SourceLanguage]) {
         self.changes = changes.sorted { $0.path < $1.path }
         self.provider = provider
         self.limits = limits
+        self.deadline = ContinuousClock.now.advanced(by: limits.budget)
         var gone: [String: String] = [:]
         var formerPaths: [String: String] = [:]
         for change in changes {
@@ -55,15 +58,37 @@ final class BuildSession {
     }
 
     func run() async throws -> LinkGraph {
+        do {
+            try await collect()
+        } catch where error is CancellationError || Task.isCancelled {
+            // A cancelled build (whatever the provider threw) is a stopped one:
+            // keep what was found.
+            timedOut = true
+            complete = false
+        }
+        return try await graph()
+    }
+
+    private func collect() async throws {
         head = SideIndex(side: .head, files: try await provider.files(.head), store: store)
         base = SideIndex(side: .base, files: try await provider.files(.base), store: store,
                          formerPaths: formerPaths)
         for change in changes {
+            guard !outOfTime() else { break }
             if let path = change.headPath { try await collectHead(path, fromUnchanged: false) }
             if let basePath = change.basePath { try await collectBase(change.path, at: basePath) }
         }
-        try await incoming()
-        return try await graph()
+        if !outOfTime() { try await incoming() }
+    }
+
+    /// True once the budget is spent or the build was cancelled; the graph
+    /// is then incomplete and holds what was found so far.
+    private func outOfTime() -> Bool {
+        if !timedOut && (ContinuousClock.now >= deadline || Task.isCancelled) {
+            timedOut = true
+            complete = false
+        }
+        return timedOut
     }
 
     // MARK: - collecting
@@ -119,21 +144,30 @@ final class BuildSession {
                 scoped.formUnion(resolver.scopedKeywords(for: path))
             }
         }
-        var mentioning = Set<String>()
+        var plain = Set<String>()
         if !words.isEmpty {
-            mentioning.formUnion(try await provider.filesMentioning(words.sorted()))
+            plain.formUnion(try await provider.filesMentioning(words.sorted()))
         }
         // A scoped word counts only where it can reach a changed file: inside `within`.
+        var broad = Set<String>()
         for word in Set(scoped.map(\.word)).sorted() {
             let scopes = scoped.filter { $0.word == word }.map(\.within)
             let hits = try await provider.filesMentioning([word])
-            mentioning.formUnion(hits.filter { hit in scopes.contains { Paths.contains($0, hit) } })
+            broad.formUnion(hits.filter { hit in scopes.contains { Paths.contains($0, hit) } })
         }
-        let candidates = mentioning.filter { path in
+        func eligible(_ path: String) -> Bool {
             !changedHead.contains(path) && head.contains(path)
                 && store.language(of: path).map { languageIDs.contains($0.id) } == true
-        }.sorted()
+        }
+        // Precise hits first: broad scoped words (`crate`, `from`, …) hit many
+        // files and must not crowd the cap out from under the precise ones.
+        var candidates = plain.filter(eligible).sorted() + broad.subtracting(plain).filter(eligible).sorted()
+        if candidates.count > limits.maxCandidates {
+            candidates = Array(candidates.prefix(limits.maxCandidates))
+            complete = false
+        }
         for path in candidates {
+            guard !outOfTime() else { break }
             try await collectHead(path, fromUnchanged: true)
         }
     }

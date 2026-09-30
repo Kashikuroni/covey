@@ -6,6 +6,8 @@ import Foundation
 public actor LinkGraphBuilder {
     public let limits: GraphLimits
     nonisolated let cache = ParseCache()
+    /// Counts `build` calls; only the latest trims the cache.
+    private var latest = 0
 
     /// Every supported language; files of any other language are nodes
     /// without links.
@@ -17,15 +19,23 @@ public actor LinkGraphBuilder {
 
     /// Links of every changed file (outgoing, head and base) and into every
     /// changed file from unchanged ones. Never throws: a failure yields
-    /// `LinkGraph.unavailable(reason)`.
+    /// `LinkGraph.unavailable(reason)`; a spent budget, the candidate cap or a
+    /// cancelled task yield an incomplete graph with what was found.
     public func build(changes: [ChangedSource], provider: any SourceProvider) async -> LinkGraph {
+        latest += 1
+        let mine = latest
         let session = BuildSession(changes: changes, provider: provider, limits: limits,
                                    cache: cache, languages: Self.languages)
         do {
             let graph = try await session.run()
-            if graph.complete { cache.retain(only: session.store.usedKeys) }
+            // `run` suspends, so builds overlap: only the newest one knows
+            // which parses are still wanted.
+            if graph.complete && mine == latest { cache.retain(only: session.store.usedKeys) }
             return graph
         } catch {
+            if error is CancellationError || Task.isCancelled {
+                return LinkGraph(links: [], usages: [:], complete: false, note: LinkGraph.incompleteNote)
+            }
             return .unavailable("\(error)")
         }
     }

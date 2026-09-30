@@ -122,6 +122,28 @@ final class BuilderTests: XCTestCase {
         XCTAssertEqual(describe(graph), ["Cart.swift → Pay.swift added [PayClient]"])
     }
 
+    /// Builds overlap on the actor while one waits for the provider. The
+    /// stale one, finishing last, must not evict what the newer one parsed.
+    func testOverlappingBuildsLeaveTheNewerBuildsParsesCached() async {
+        let builder = LinkGraphBuilder()
+        let slow = FakeProvider(common: ["Pay.swift": "struct PayClient {}"],
+                                base: ["Cart.swift": "let a = 1"], head: ["Cart.swift": "let c = PayClient()"])
+        slow.readDelay = .milliseconds(150)
+        let fast = FakeProvider(common: ["Pay.swift": "struct PayClient {}"],
+                                base: ["Cart.swift": "let a = 1"], head: ["Cart.swift": "let c = PayClient(); _ = 2"])
+        async let stale = builder.build(changes: slow.changes(), provider: slow)
+        try? await Task.sleep(for: .milliseconds(30))
+        async let newer = builder.build(changes: fast.changes(), provider: fast)
+        let newerGraph = await newer
+        _ = await stale
+        XCTAssertEqual(describe(newerGraph), ["Cart.swift → Pay.swift added [PayClient]"])
+
+        let parsed = builder.cache.parseCount
+        _ = await builder.build(changes: fast.changes(), provider: fast)
+        XCTAssertEqual(builder.cache.parseCount, parsed, "the newer build's parses survived the stale build")
+        XCTAssertEqual(builder.cache.count, 3, "the next build trims the stale version: Pay, Cart at base, Cart at head")
+    }
+
     /// A scoped keyword finds files only inside its directory: `marker` is
     /// mentioned in `pkg/` and `other/`, and only the `pkg/` file is read.
     func testScopedKeywordHitsOutsideTheirDirectoryAreDropped() async throws {
