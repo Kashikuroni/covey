@@ -222,7 +222,7 @@ final class ReviewModelAnnotationTests: XCTestCase {
         XCTAssertEqual(model.record.issues[0].sentTo, "origin")
         XCTAssertNotNil(model.record.comments[0].sentAt)
         XCTAssertNil(model.sendDraft)
-        XCTAssertEqual(model.toasts.last?.text, "Sent 2 items to origin")
+        XCTAssertEqual(model.toasts.last?.text, "Sent to origin · ⌥⌘R to watch")
         XCTAssertEqual(model.unsentCount, 0)
     }
 

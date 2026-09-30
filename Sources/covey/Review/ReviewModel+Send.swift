@@ -143,7 +143,6 @@ extension ReviewModel {
         }
         sendDraft = nil
         sendError = nil
-        let count = draft.issueIDs.count + draft.commentIDs.count
-        toast("Sent \(count) item\(count == 1 ? "" : "s") to \(name)")
+        toast("Sent to \(name) · ⌥⌘R to watch")
     }
 }

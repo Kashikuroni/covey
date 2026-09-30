@@ -126,13 +126,29 @@ public final class AppModel {
             }
         }
     }
-    /// Set by `openReview`; ContentView opens the window and clears it.
+    // Old separate-window plumbing: since Review became a window mode
+    // (`windowMode`) nothing raises the request or reads the focus flag; it
+    // goes with `ReviewWindowRoot`.
     var reviewWindowRequest: ReviewWindowKey?
     @ObservationIgnored var reviewLaunches: [ReviewWindowKey: ReviewLaunch] = [:]
-    /// A Review window is the main window (its popover may be the key one):
-    /// the main window's catalog commands stand down so ⌘W, ⌘1… never act
-    /// on the window behind it.
     var reviewWindowFocused = false
+    /// What the main window shows. Not persisted: covey starts in `.sessions`.
+    /// Changed only by `AppModel+Review`.
+    var windowMode: WindowMode = .sessions
+    /// The one live review. It survives trips back to the sessions and is
+    /// replaced only when Review opens for another worktree.
+    var review: ReviewModel?
+    /// The main window is fully covered; the review stops polling then.
+    @ObservationIgnored var mainWindowOccluded = false
+    /// Bumped by every Review entry and exit, so a toplevel that git resolves
+    /// for a superseded entry is dropped.
+    @ObservationIgnored var reviewEntryGeneration = 0
+    /// Worktree toplevel of a directory, nil outside git (test seam).
+    @ObservationIgnored var resolveReviewWorktree: @Sendable (String) async -> String? = { dir in
+        await AppModel.gitToplevel(dir)
+    }
+    /// Builds the review for an opening (test seam; nil = the production model).
+    @ObservationIgnored var reviewModelFactory: ((ReviewOpening) -> ReviewModel)?
     public private(set) var connected = false
     public private(set) var themeRaw: String = "dark"
     public private(set) var splitPct: Int = 38
@@ -258,6 +274,9 @@ public final class AppModel {
 
     /// Route a view command to the focused pane's terminal (fallback: selected).
     private func sendTerminalCommand(_ cmd: TerminalCommand) {
+        // Review hides the terminals; none may take the keyboard behind it
+        // (sheet dismissal, the palette and the limits overlay all ask).
+        if cmd == .focus, windowMode == .review { return }
         let target = focusedPane ?? selected
         if let target { terminalCommands[target]?(cmd) }
     }
@@ -1045,8 +1064,7 @@ public final class AppModel {
     }
 
     func commandAvailability(_ command: AppCommand) -> CommandAvailability {
-        if reviewWindowFocused { return .disabled(reason: "Review window is focused") }
-        return CommandRules.availability(for: command, context: commandContext)
+        CommandRules.availability(for: command, context: commandContext)
     }
 
     private var commandContext: CommandContext {
@@ -1089,7 +1107,9 @@ public final class AppModel {
             terminalFocused: focus == .terminal && inputMode == .normal,
             agentPaneCount: agentPaneCount,
             canCloseFocusedPane: focusedPane == activeShell
-                || (visibleSplitTree?.contains(session: focusedPane ?? "") ?? false))
+                || (visibleSplitTree?.contains(session: focusedPane ?? "") ?? false),
+            reviewOpen: windowMode == .review,
+            hasActiveReview: review != nil)
     }
 
     func perform(_ command: AppCommand) {
@@ -1141,7 +1161,7 @@ public final class AppModel {
             setFocus(.inspector)
             activateIssues()
         case .toggleReview:
-            openReviewForSelected()
+            Task { await toggleReview() }
         case .promoteWorktree:
             modal = selected.map(Modal.promote)
         case .deleteSessionBranch:
