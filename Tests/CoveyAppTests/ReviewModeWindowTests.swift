@@ -49,7 +49,8 @@ final class ReviewModeWindowTests: XCTestCase {
         window.contentView = root
         let mounted = await eventually { self.terminalViews(in: root).count == 1 }
         XCTAssertTrue(mounted)
-        _ = await eventually { model.resizesSent > 0 }
+        let resized = await eventually { model.resizesSent > 0 }
+        XCTAssertTrue(resized, "precondition: the counter sees resizes")
         await settle(root)
         let pane = try XCTUnwrap(terminalViews(in: root).first)
         let before = (lease: lease(of: pane), frame: pane.frame, resizes: model.resizesSent)
@@ -67,7 +68,7 @@ final class ReviewModeWindowTests: XCTestCase {
         XCTAssertFalse(window.firstResponder === pane)
         await settle(root)
 
-        model.leaveReview()
+        await model.leaveReview()
         let back = await eventually { !pane.isParked }
         XCTAssertTrue(back)
         XCTAssertFalse(pane.isHidden)
@@ -113,7 +114,8 @@ final class ReviewModeWindowTests: XCTestCase {
         defer { window.orderOut(nil) }
         let mounted = await eventually { self.terminalViews(in: root).count == 1 }
         XCTAssertTrue(mounted)
-        _ = await eventually { model.resizesSent > 0 }
+        let resized = await eventually { model.resizesSent > 0 }
+        XCTAssertTrue(resized, "precondition: the counter sees resizes")
         await settle(root)
         let pane = try XCTUnwrap(terminalViews(in: root).first)
         let before = (lease: lease(of: pane), frame: pane.frame, resizes: model.resizesSent)
@@ -228,7 +230,7 @@ final class ReviewModeWindowTests: XCTestCase {
         XCTAssertEqual(Array(fixture.git.fingerprintWorktrees.dropFirst(polled)), ["/usr"],
                        "only the review on screen polls, and it does")
 
-        model.leaveReview()
+        await model.leaveReview()
         let gone = await eventually { self.views(CanvasScrollMonitor.MonitorView.self, in: root).isEmpty }
         XCTAssertTrue(gone)
         let atLeave = fixture.git.fingerprintCalls

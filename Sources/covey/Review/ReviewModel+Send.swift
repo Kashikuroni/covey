@@ -143,6 +143,7 @@ extension ReviewModel {
         }
         sendDraft = nil
         sendError = nil
+        directory.didSendReview(to: name)
         toast("Sent to \(name) · ⌥⌘R to watch")
     }
 }

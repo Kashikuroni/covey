@@ -2,8 +2,9 @@ import SwiftUI
 import CoveyKit
 
 /// The worktree under review, first in the Review top bar. Picking another
-/// one is ⌥⌘R for it: the live review if it is for that worktree, else a
-/// new one (the old one is flushed). The send target picker is separate.
+/// one is ⌥⌘R for it (`AppModel.pickReviewWorktree`): its session becomes the
+/// selection, and the review is the live one if it is for that worktree,
+/// else a new one (the old one is flushed). The send target picker is separate.
 struct ReviewWorktreePicker: View {
     let app: AppModel
     let review: ReviewModel
@@ -27,7 +28,10 @@ struct ReviewWorktreePicker: View {
         .help("The worktree under review")
         // Sessions come and go, and move between directories.
         .task(id: app.visibleSessions.map(\.dir)) {
-            choices = await app.reviewWorktreeChoices()
+            let fresh = await app.reviewWorktreeChoices()
+            // A newer session list restarted the task: its answer wins.
+            guard !Task.isCancelled else { return }
+            choices = fresh
         }
     }
 
@@ -39,9 +43,6 @@ struct ReviewWorktreePicker: View {
 
     private func pick(_ choice: ReviewWorktreeChoice) {
         guard choice.worktree != review.worktree else { return }
-        Task {
-            await app.openReview(ReviewOpening(worktree: choice.worktree, projectRoot: choice.projectRoot,
-                                               originSession: choice.session))
-        }
+        Task { await app.pickReviewWorktree(choice) }
     }
 }

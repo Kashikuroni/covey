@@ -195,10 +195,11 @@ struct ContentView: View {
         case .endEditing:
             event.window?.makeFirstResponder(nil)
             return nil
-        case .sessions:
-            return handleSessionsKey(event)
+        case .overlay:
+            model.applyReviewOverlayKey(keyInput(from: event))
+            return nil
         case .perform(.closeReview):
-            model.leaveReview()
+            Task { await model.leaveReview() }
             return nil
         case .perform(let action):
             Task { await review.perform(action) }

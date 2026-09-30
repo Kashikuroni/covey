@@ -26,6 +26,10 @@ extension AppModel: ReviewSessionDirectory {
     func sendToSession(_ name: String, bytes: [UInt8]) async throws {
         try await client.input(name: name, bytes: bytes)
     }
+
+    func didSendReview(to name: String) {
+        pendingWatchSession = name
+    }
 }
 
 extension AppModel {
@@ -39,7 +43,7 @@ extension AppModel {
     /// session's worktree — or, with nothing selected, the live review.
     func toggleReview() async {
         if windowMode == .review {
-            leaveReview()
+            await leaveReview()
             return
         }
         guard let name = selected, let session = sessions.first(where: { $0.name == name }) else {
@@ -84,9 +88,20 @@ extension AppModel {
     }
 
     /// Back to the sessions. The review keeps its state and stops polling.
-    func leaveReview() {
+    /// After a send the session it went to is selected first — once, and
+    /// only while it is still a visible session — so "⌥⌘R to watch" shows
+    /// that agent; its pane swaps in while still parked.
+    func leaveReview() async {
         reviewEntryGeneration += 1
         guard windowMode == .review else { return }
+        if let name = pendingWatchSession {
+            pendingWatchSession = nil
+            if visibleSessions.contains(where: { $0.name == name }) {
+                await select(name)
+                // Another trip back finished while the selection attached.
+                guard windowMode == .review else { return }
+            }
+        }
         windowMode = .sessions
         syncReviewVisibility()
         review?.flush()
@@ -117,10 +132,42 @@ extension AppModel {
         return ReviewWorktrees.choices(candidates, toplevels: toplevels)
     }
 
-    /// Entering Review looks for the agent's changes at once.
+    /// The Review top bar's worktree picker: ⌥⌘R for `choice`. Its session
+    /// becomes the selection too — the pane behind Review swaps while parked,
+    /// a selection change, not a mode switch — so ⌥⌘R back and forth comes
+    /// back to the picked review. Leaving Review meanwhile drops the pick.
+    func pickReviewWorktree(_ choice: ReviewWorktreeChoice) async {
+        reviewEntryGeneration += 1
+        let generation = reviewEntryGeneration
+        if visibleSessions.contains(where: { $0.name == choice.session }) {
+            await select(choice.session)
+        }
+        guard generation == reviewEntryGeneration else { return }
+        await openReview(ReviewOpening(worktree: choice.worktree, projectRoot: choice.projectRoot,
+                                       originSession: choice.session))
+    }
+
+    /// A key while a main-window overlay (limits, help) is open over Review:
+    /// only the overlay's own actions run (`ReviewModeKeys.overlayAction`).
+    func applyReviewOverlayKey(_ key: KeyInput) {
+        let context = KeyRouter.Context(mode: inputMode, focus: focus, vimMode: vimMode,
+                                        sheetOpen: modal != nil)
+        if let action = ReviewModeKeys.overlayAction(key, context: context) { apply(action) }
+    }
+
+    /// Entering Review looks for the agent's changes at once. A review whose
+    /// worktree is gone — or is back after it was gone — starts over instead:
+    /// `start()` lands in `.missingWorktree` or loads it again. It is an
+    /// entry of its own, so a toplevel still on its way for an earlier one
+    /// cannot replace the review just shown.
     private func show(_ review: ReviewModel) async {
+        reviewEntryGeneration += 1
         windowMode = .review
         syncReviewVisibility()
-        await review.checkFreshness()
+        if review.phase == .missingWorktree || review.worktreeIsGone {
+            await review.start()
+        } else {
+            await review.checkFreshness()
+        }
     }
 }

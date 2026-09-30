@@ -90,6 +90,7 @@ struct StatusBar: View {
         // the hidden workspace — and every terminal in it — keeps its size.
         .opacity(reviewing ? 0 : 1)
         .allowsHitTesting(!reviewing)
+        .accessibilityHidden(reviewing)
         .overlay(alignment: .leading) {
             if reviewing {
                 HStack(spacing: 10) {

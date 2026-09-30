@@ -33,9 +33,11 @@ enum CommandRules {
     /// What still works while Review covers the workspace: the toggle back and
     /// app-level commands. Nothing here acts on the hidden sessions or changes
     /// the workspace's size (a new size would reach every agent as SIGWINCH).
+    /// Add Project is not one: the project it adds becomes the selection,
+    /// which deselects the session behind Review and unmounts its pane.
     static let availableInReview: Set<AppCommand> = [
         .toggleReview, .toggleTheme, .cycleUsagePlacement, .showLimitsDetail,
-        .addProject, .settings, .searchLogs,
+        .settings, .searchLogs,
     ]
 
     static func availability(

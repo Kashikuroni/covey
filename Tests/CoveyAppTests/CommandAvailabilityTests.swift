@@ -101,6 +101,9 @@ final class CommandAvailabilityTests: XCTestCase {
             .splitTerminalHorizontally, .closeTerminalSplit, .focusSessionList, .focusAgent,
             .focusIssues, .focusTerminalSplit, .focusTrace, .toggleInspector, .toggleSessionsPanel,
             .toggleTopBar, .toggleStatusBar, .showKeyboardHelp,
+            // Adding a project selects it: the session behind Review would
+            // be deselected and its pane unmounted.
+            .addProject,
         ]
         for command in blocked {
             XCTAssertEqual(CommandRules.availability(for: command, context: context),
@@ -110,7 +113,9 @@ final class CommandAvailabilityTests: XCTestCase {
 
     func testReviewModeKeepsTheToggleAndAppCommands() {
         let context = CommandContext(reviewOpen: true)
-        XCTAssertTrue(CommandRules.availableInReview.contains(.toggleReview))
+        XCTAssertEqual(CommandRules.availableInReview, [
+            .toggleReview, .toggleTheme, .cycleUsagePlacement, .showLimitsDetail, .settings, .searchLogs,
+        ])
         for command in CommandRules.availableInReview {
             XCTAssertEqual(CommandRules.availability(for: command, context: context), .enabled, "\(command)")
         }

@@ -137,6 +137,9 @@ public final class AppModel {
     /// Bumped by every Review entry and exit, so a toplevel that git resolves
     /// for a superseded entry is dropped.
     @ObservationIgnored var reviewEntryGeneration = 0
+    /// The session the last review went to ("⌥⌘R to watch"): the next trip
+    /// back to the sessions selects it, once.
+    @ObservationIgnored var pendingWatchSession: String?
     /// Worktree toplevel of a directory, nil outside git (test seam).
     @ObservationIgnored var resolveReviewWorktree: @Sendable (String) async -> String? = { dir in
         await AppModel.gitToplevel(dir)

@@ -37,10 +37,20 @@ extension ReviewModel {
             }
         } catch {
             guard generation == loadGeneration else { return }
+            // Removed under the review: there is nothing to retry.
+            if worktreeIsGone {
+                phase = .missingWorktree
+                banner = nil
+                return
+            }
             failureStreak += 1
             banner = Self.describeLoad(error)
         }
     }
+
+    /// The worktree's directory is no longer on disk (removed, or cleaned up
+    /// with its branch).
+    var worktreeIsGone: Bool { !FileManager.default.fileExists(atPath: worktree) }
 
     /// Re-reads the comparison in place: keeps selection, composer and
     /// scroll; refreshes the open diff without a loading flash. Every await

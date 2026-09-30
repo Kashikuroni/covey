@@ -49,12 +49,19 @@ final class CoveyTerminalView: TerminalView {
     var isParked = false {
         didSet {
             guard isParked != oldValue else { return }
-            isHidden = isParked
             if isParked {
-                stopStateSampler()
+                // Before hiding: AppKit hands a hidden first responder's status
+                // on along the key-view loop — to a split sibling not parked
+                // yet, which would then take keys and send focus reports.
                 if window?.firstResponder === self { window?.makeFirstResponder(nil) }
-            } else if window != nil {
-                startStateSampler()
+                swallowNextMouseUp = false
+                isHidden = true
+                stopStateSampler()
+            } else {
+                isHidden = false
+                // Output fed while hidden drew nothing: redraw the whole pane.
+                needsDisplay = true
+                if window != nil { startStateSampler() }
             }
             // Manual check: a Review visit shows up as a park/unpark pair.
             PaneLayoutLog.note(isParked ? "park" : "unpark", [("name", logName)])

@@ -11,11 +11,14 @@ struct ReviewTarget: Equatable, Identifiable {
 }
 
 /// What Review needs from the app: which sessions it may send
-/// to, and a way to write bytes into one. `AppModel` is the production one.
+/// to, a way to write bytes into one, and a word once a review has reached
+/// one. `AppModel` is the production one.
 @MainActor
 protocol ReviewSessionDirectory: AnyObject {
     func reviewTargets(projectRoot: String) -> [ReviewTarget]
     func sendToSession(_ name: String, bytes: [UInt8]) async throws
+    /// The whole review reached `name` ("⌥⌘R to watch").
+    func didSendReview(to name: String)
 }
 
 private let knownShells: Set<String> = ["sh", "bash", "zsh", "fish", "dash", "ksh", "tcsh", "nu"]

@@ -448,4 +448,28 @@ final class CoveyTerminalViewTests: XCTestCase {
         XCTAssertFalse(view.claimsPointer(at: inside), "clicks and wheel belong to Review")
         XCTAssertFalse(window.firstResponder === view, "keys must not reach a hidden agent")
     }
+
+    /// A split: AppKit hands a hidden first responder's status on along the
+    /// key-view loop. Parked while still first responder, the agent pane
+    /// would pass the keyboard to its shell sibling — not parked yet, so
+    /// that one would take keys (and send focus reports) behind Review.
+    @MainActor
+    func testParkingTheFocusedPaneOfASplitHandsTheKeyboardToNoTerminal() {
+        let agent = CoveyTerminalView(frame: NSRect(x: 0, y: 0, width: 200, height: 300))
+        let shell = CoveyTerminalView(frame: NSRect(x: 200, y: 0, width: 200, height: 300))
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        root.addSubview(agent)
+        root.addSubview(shell)
+        agent.nextKeyView = shell
+        shell.nextKeyView = agent
+        let window = NSWindow(contentRect: root.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = root
+        XCTAssertTrue(window.makeFirstResponder(agent))
+
+        agent.isParked = true
+        XCTAssertFalse(window.firstResponder is CoveyTerminalView,
+                       "no terminal has the keyboard, got \(String(describing: window.firstResponder))")
+        shell.isParked = true
+        XCTAssertFalse(window.firstResponder is CoveyTerminalView)
+    }
 }

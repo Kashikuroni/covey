@@ -93,6 +93,25 @@ final class ReviewModelFreshnessTests: XCTestCase {
         XCTAssertEqual(model.pollDelay, 3)
     }
 
+    /// The worktree was removed under the review (its branch merged and the
+    /// worktree cleaned up): not a Retry banner for ever — the review is gone.
+    func testAFailedCheckOnAVanishedWorktreeIsAMissingWorktree() async throws {
+        let dir = "\(NSTemporaryDirectory())covey-worktree-\(UInt32.random(in: 0..<UInt32.max))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let git = FakeReviewGit()
+        git.state = comparisonState([changed("a.swift")])
+        let (model, _) = makeReviewModel(git: git, worktree: dir)
+        await model.start()
+        XCTAssertEqual(model.phase, .ready, "precondition: the review loaded")
+
+        try FileManager.default.removeItem(atPath: dir)
+        git.fingerprintError = GitError(kind: .failed(status: 128), description: "fatal: cannot change to '\(dir)'")
+        await model.checkFreshness()
+        XCTAssertEqual(model.phase, .missingWorktree)
+        XCTAssertNil(model.banner)
+    }
+
     /// The fingerprint read works but the reload behind it keeps failing: the
     /// backoff must keep growing instead of resetting on every fingerprint.
     func testBackoffGrowsWhenTheReloadKeepsFailing() async {

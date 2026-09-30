@@ -29,8 +29,8 @@ enum ReviewModeKeyDecision: Equatable {
     case swallow
     /// Esc in a single-line field: end editing there and nothing else.
     case endEditing
-    /// A main-window overlay owns the keys: run the sessions key path.
-    case sessions
+    /// A main-window overlay owns the keys: `ReviewModeKeys.overlayAction`.
+    case overlay
     /// `ReviewModel.perform`, except `.closeReview`, which leaves Review.
     case perform(ReviewKeyAction)
 }
@@ -55,12 +55,33 @@ enum ReviewModeKeys {
             return .perform(.closeReview)
         }
         if blocked { return .pass }
-        if input.appOverlayOpen { return .sessions }
+        if input.appOverlayOpen { return .overlay }
         // Routed, Esc would close the diff or drop a composer draft while the
         // field kept focus.
         if input.key.isEscape, input.fieldEditorFocused { return .endEditing }
         guard let action = ReviewKeyRouter.route(input.key, context: context) else { return .pass }
         if input.isRepeat, noRepeat.contains(action) { return .swallow }
         return .perform(action)
+    }
+
+    /// A key for a main-window overlay (limits, help) open over Review: the
+    /// overlay's own action as the sessions router maps it, Esc closes it
+    /// whatever the vim mode, and nil (swallow) for the rest. The router's
+    /// other actions belong to the sessions hidden behind Review — ⇧Tab and
+    /// ⇧Enter would write into an agent nobody sees; ⌃q, ⌃h/⌃l and ⌃\ would
+    /// move the hidden workspace's focus.
+    static func overlayAction(_ key: KeyInput, context: KeyRouter.Context) -> KeyAction? {
+        if let action = KeyRouter.route(key, context: context), isOverlayAction(action) { return action }
+        return key.special == .escape ? .closeOverlay : nil
+    }
+
+    private static func isOverlayAction(_ action: KeyAction) -> Bool {
+        switch action {
+        case .closeOverlay, .limitsSelectNext, .limitsSelectPrev,
+             .limitsEnableSelected, .limitsDisableSelected:
+            return true
+        default:
+            return false
+        }
     }
 }

@@ -223,6 +223,7 @@ final class ReviewModelAnnotationTests: XCTestCase {
         XCTAssertNotNil(model.record.comments[0].sentAt)
         XCTAssertNil(model.sendDraft)
         XCTAssertEqual(model.toasts.last?.text, "Sent to origin · ⌥⌘R to watch")
+        XCTAssertEqual(directory.delivered, ["origin"], "the app hears where to watch")
         XCTAssertEqual(model.unsentCount, 0)
     }
 
@@ -236,6 +237,7 @@ final class ReviewModelAnnotationTests: XCTestCase {
         XCTAssertEqual(model.record.issues[0].status, .open)
         XCTAssertNil(model.record.issues[0].sentAt)
         XCTAssertNotNil(model.sendDraft)
+        XCTAssertEqual(directory.delivered, [], "nothing to watch")
     }
 
     func testSendWarningsForBusyAgentAndOtherWorktree() async {

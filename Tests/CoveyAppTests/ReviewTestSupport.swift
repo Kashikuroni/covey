@@ -13,12 +13,18 @@ final class FakeDirectory: ReviewSessionDirectory {
     var targets: [ReviewTarget] = []
     var sent: [(name: String, bytes: [UInt8])] = []
     var failure: Error?
+    /// Every session a whole review reached.
+    var delivered: [String] = []
 
     func reviewTargets(projectRoot: String) -> [ReviewTarget] { targets }
 
     func sendToSession(_ name: String, bytes: [UInt8]) async throws {
         if let failure { throw failure }
         sent.append((name, bytes))
+    }
+
+    func didSendReview(to name: String) {
+        delivered.append(name)
     }
 }
 
@@ -179,10 +185,11 @@ func oneHunk(_ lines: [(DiffLine.Kind, Int?, Int?, String)]) -> FileDiff {
 
 @MainActor
 func makeReviewModel(git: FakeReviewGit, directory: FakeDirectory? = nil,
-                     store: ReviewStore? = nil) -> (ReviewModel, ReviewStore) {
+                     store: ReviewStore? = nil,
+                     worktree: String = NSTemporaryDirectory()) -> (ReviewModel, ReviewStore) {
     let store = store ?? ReviewStore(
         root: "\(NSTemporaryDirectory())covey-reviews-\(UInt32.random(in: 0..<UInt32.max))", debounce: 0)
-    let model = ReviewModel(worktree: NSTemporaryDirectory(), projectRoot: "/proj", originSession: "origin",
+    let model = ReviewModel(worktree: worktree, projectRoot: "/proj", originSession: "origin",
                             git: git, store: store, directory: directory)
     model.enterDelay = .zero
     model.toastDuration = .seconds(60)

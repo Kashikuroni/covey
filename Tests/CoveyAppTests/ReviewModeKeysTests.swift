@@ -56,9 +56,48 @@ final class ReviewModeKeysTests: XCTestCase {
         XCTAssertEqual(decide("j") { $0.sheetOpen = true }, .pass)
     }
 
-    func testAMainWindowOverlayGoesToTheSessionsRouter() {
-        XCTAssertEqual(decide("j") { $0.appOverlayOpen = true }, .sessions)
-        XCTAssertEqual(decide("", escape: true) { $0.appOverlayOpen = true }, .sessions)
+    func testAMainWindowOverlayOwnsTheKeys() {
+        XCTAssertEqual(decide("j") { $0.appOverlayOpen = true }, .overlay)
+        XCTAssertEqual(decide("", escape: true) { $0.appOverlayOpen = true }, .overlay)
+    }
+
+    /// Review leaves the focus where it was: often on the hidden terminal.
+    private func overlay(_ mode: InputMode, vim: Bool, focus: AppModel.Focus = .terminal,
+                         _ key: KeyInput) -> KeyAction? {
+        ReviewModeKeys.overlayAction(key, context: KeyRouter.Context(mode: mode, focus: focus,
+                                                                     vimMode: vim, sheetOpen: false))
+    }
+
+    func testTheOverlaysOwnKeysAct() {
+        XCTAssertEqual(overlay(.limits, vim: true, KeyInput(char: "j")), .limitsSelectNext)
+        XCTAssertEqual(overlay(.limits, vim: true, KeyInput(char: "k")), .limitsSelectPrev)
+        XCTAssertEqual(overlay(.limits, vim: true, KeyInput(char: "h")), .limitsDisableSelected)
+        XCTAssertEqual(overlay(.limits, vim: true, KeyInput(char: "l")), .limitsEnableSelected)
+        XCTAssertEqual(overlay(.limits, vim: true, KeyInput(char: "q")), .closeOverlay)
+        XCTAssertEqual(overlay(.help, vim: true, KeyInput(char: "x")), .closeOverlay)
+    }
+
+    func testEscapeClosesTheOverlayWhateverTheVimMode() {
+        for mode in [InputMode.limits, .help, .selectSession] {
+            for vim in [true, false] {
+                XCTAssertEqual(overlay(mode, vim: vim, KeyInput(special: .escape)), .closeOverlay,
+                               "\(mode) vim \(vim)")
+            }
+        }
+    }
+
+    /// The sessions router would send these to the hidden agent (⇧Tab,
+    /// ⇧Enter) or act on the hidden workspace (⌃q, ⌃h/⌃l, ⌃\, s-mode digits).
+    func testNothingReachesTheHiddenSessions() {
+        let chords = [KeyInput(isShift: true, special: .tab), KeyInput(isShift: true, special: .enter),
+                      KeyInput(char: "q", isControl: true), KeyInput(char: "h", isControl: true),
+                      KeyInput(char: "l", isControl: true), KeyInput(char: "\\", isControl: true)]
+        for key in chords {
+            XCTAssertNil(overlay(.limits, vim: false, key), "\(key)")
+            XCTAssertNil(overlay(.help, vim: false, key), "\(key)")
+        }
+        XCTAssertNil(overlay(.selectSession, vim: true, focus: .sessions, KeyInput(char: "2")),
+                     "no session switch behind Review")
     }
 
     func testAnOpenReviewModalOnlyTakesEscape() {
