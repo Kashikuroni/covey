@@ -150,4 +150,35 @@ final class ScriptTests: XCTestCase {
         ])
         XCTAssertFalse(fake.readPaths(.head).contains("src/other/page.ts"))
     }
+
+    /// `'.'`, `'..'` and `'dir/'` name a directory, as in Node and TypeScript:
+    /// a sibling `src/api.ts` is not `src/api`, only `src/api/index.*` is.
+    func testDotDotDotAndTrailingSlashSpecifiersResolveToTheFoldersIndexNotASiblingFile() async {
+        let fake = FakeProvider(
+            common: ["src/api/client.ts": "import { x } from '.'\n",
+                     "src/api/sub/deep.ts": "import { y } from '..'\n",
+                     "src/app.ts": "import { z } from './api/'\n"],
+            base: ["src/api.ts": "export const other = 1\n",
+                   "src/api/index.ts": "export const x = 1\n"],
+            head: ["src/api.ts": "export const other = 2\n",
+                   "src/api/index.ts": "export const x = 2\n"])
+        let graph = await buildGraph(fake)
+        XCTAssertEqual(describe(graph), [
+            "src/api/client.ts → src/api/index.ts kept [x]",
+            "src/api/sub/deep.ts → src/api/index.ts kept [y]",
+            "src/app.ts → src/api/index.ts kept [z]",
+        ])
+    }
+
+    /// The same rule for a bare specifier found through `baseUrl`.
+    func testTrailingSlashThroughBaseUrlResolvesToTheFoldersIndex() async {
+        let fake = FakeProvider(head: [
+            "tsconfig.json": "{ \"compilerOptions\": { \"baseUrl\": \"src\" } }",
+            "src/main.ts": "import { a } from 'lib/'\n",
+            "src/lib.ts": "export const other = 1\n",
+            "src/lib/index.ts": "export const a = 1\n",
+        ])
+        let graph = await buildGraph(fake)
+        XCTAssertEqual(describe(graph), ["src/main.ts → src/lib/index.ts added [a]"])
+    }
 }

@@ -104,15 +104,17 @@ final class ScriptResolver: ReferenceResolver {
 
     func resolve(_ spec: String, from path: String) async throws -> String? {
         let dir = Paths.dirname(path)
+        let folderOnly = Self.namesFolder(spec)
         if spec == "." || spec == ".." || spec.hasPrefix("./") || spec.hasPrefix("../") {
-            return Paths.normalize(dir, spec).flatMap { file($0) }
+            return Paths.normalize(dir, spec).flatMap { file($0, folderOnly: folderOnly) }
         }
         guard !spec.hasPrefix("/") else { return nil }
         if let config = try await config(for: dir) {
             for candidate in config.candidates(for: spec) {
-                if let found = file(candidate) { return found }
+                if let found = file(candidate, folderOnly: folderOnly) { return found }
             }
-            if let baseUrl = config.baseUrl, let found = Paths.normalize(baseUrl, spec).flatMap({ file($0) }) {
+            if let baseUrl = config.baseUrl,
+               let found = Paths.normalize(baseUrl, spec).flatMap({ file($0, folderOnly: folderOnly) }) {
                 return found
             }
         }
@@ -120,25 +122,35 @@ final class ScriptResolver: ReferenceResolver {
             if spec == package.name { return entry(of: package) }
             if spec.hasPrefix(package.name + "/") {
                 return Paths.normalize(package.dir, String(spec.dropFirst(package.name.count + 1)))
-                    .flatMap { file($0) }
+                    .flatMap { file($0, folderOnly: folderOnly) }
             }
         }
         return nil
     }
 
+    /// A specifier whose last segment is `.` or `..`, or that ends in `/`,
+    /// names a folder (as in Node and TypeScript): only its `index.*` counts,
+    /// never a sibling file such as `src/api.ts` for `src/api`.
+    private static func namesFolder(_ spec: String) -> Bool {
+        spec.hasSuffix("/") || spec == "." || spec == ".." || spec.hasSuffix("/.") || spec.hasSuffix("/..")
+    }
+
     /// `path` as a source file: as written, `.js` written for a `.ts` file,
-    /// with an extension added, or `path/index.*`.
-    func file(_ path: String) -> String? {
-        if ScriptLanguage.extensions.contains(where: { path.hasSuffix($0) }) && side.contains(path) {
-            return path
-        }
-        for (js, ts) in [(".js", [".ts", ".tsx"]), (".jsx", [".tsx"]), (".mjs", [".mts"]), (".cjs", [".cts"])]
-        where path.hasSuffix(js) {
-            let stem = String(path.dropLast(js.count))
-            if let found = ts.map({ stem + $0 }).first(where: { side.contains($0) }) { return found }
-        }
-        if let found = ScriptLanguage.extensions.map({ path + $0 }).first(where: { side.contains($0) }) {
-            return found
+    /// with an extension added, or `path/index.*`. With `folderOnly`, `path`
+    /// is a folder and only `path/index.*` is tried.
+    func file(_ path: String, folderOnly: Bool = false) -> String? {
+        if !folderOnly {
+            if ScriptLanguage.extensions.contains(where: { path.hasSuffix($0) }) && side.contains(path) {
+                return path
+            }
+            for (js, ts) in [(".js", [".ts", ".tsx"]), (".jsx", [".tsx"]), (".mjs", [".mts"]), (".cjs", [".cts"])]
+            where path.hasSuffix(js) {
+                let stem = String(path.dropLast(js.count))
+                if let found = ts.map({ stem + $0 }).first(where: { side.contains($0) }) { return found }
+            }
+            if let found = ScriptLanguage.extensions.map({ path + $0 }).first(where: { side.contains($0) }) {
+                return found
+            }
         }
         return ScriptLanguage.extensions.map { Paths.join(path, "index" + $0) }.first { side.contains($0) }
     }
