@@ -72,7 +72,7 @@ final class AppModelReviewTests: XCTestCase {
         let hasGit = await eventually { model.sessions.first?.git != nil }
         XCTAssertTrue(hasGit)
 
-        model.perform(.openReview)
+        model.perform(.toggleReview)
         let requested = await eventually { model.reviewWindowRequest != nil }
         XCTAssertTrue(requested)
         let key = try XCTUnwrap(model.reviewWindowRequest)

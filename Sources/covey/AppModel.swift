@@ -1140,7 +1140,7 @@ public final class AppModel {
             issueBrowser.screen = .list
             setFocus(.inspector)
             activateIssues()
-        case .openReview:
+        case .toggleReview:
             openReviewForSelected()
         case .promoteWorktree:
             modal = selected.map(Modal.promote)

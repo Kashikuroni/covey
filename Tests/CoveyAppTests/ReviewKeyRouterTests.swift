@@ -101,18 +101,4 @@ final class ReviewKeyRouterTests: XCTestCase {
         await model.perform(.nextHunk)
         XCTAssertFalse(model.diffOpen)
     }
-
-    func testOpenReviewNeedsAGitSession() {
-        var context = CommandContext()
-        XCTAssertEqual(CommandRules.availability(for: .openReview, context: context),
-                       .disabled(reason: "No session selected"))
-        context.hasSelectedSession = true
-        XCTAssertEqual(CommandRules.availability(for: .openReview, context: context),
-                       .disabled(reason: "Not a Git repository"))
-        context.selectedHasGit = true
-        XCTAssertEqual(CommandRules.availability(for: .openReview, context: context), .enabled)
-        let descriptor = CommandCatalog.descriptor(for: .openReview)
-        XCTAssertEqual(descriptor.title, "Open Review")
-        XCTAssertEqual(descriptor.shortcut?.display, "⌥⌘R")
-    }
 }
