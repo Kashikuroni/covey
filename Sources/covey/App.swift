@@ -130,18 +130,6 @@ struct CoveyApp: App {
                     set: { model?.setVimMode($0) }))
             }
         }
-        WindowGroup("Review", id: ReviewWindowKey.sceneID, for: ReviewWindowKey.self) { $key in
-            if let model, let key {
-                ReviewWindowRoot(key: key, app: model)
-            } else {
-                Text("Review is not available yet")
-                    .frame(minWidth: 420, minHeight: 240)
-            }
-        }
-        .defaultSize(width: 1440, height: 900)
-        // A restored Review window would appear before AppModel exists and
-        // could become `windows.first`, which the main window styles itself by.
-        .restorationBehavior(.disabled)
         MenuBarExtra(isInserted: Binding(
             get: { model?.menuBarLimitsEnabled ?? false },
             set: { model?.setMenuBarLimitsEnabled($0) }

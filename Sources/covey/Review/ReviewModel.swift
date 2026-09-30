@@ -50,7 +50,7 @@ struct SendDraft: Equatable {
     var commentIDs: Set<UUID>
 }
 
-/// State and behavior of one Review window. Stored state is internal (not
+/// State and behavior of one review. Stored state is internal (not
 /// private(set)) because the +Annotations/+Send/+Freshness extensions live
 /// in their own files; views change it only through methods, except for
 /// plain UI toggles bound directly (filter, layout, tabs).
@@ -101,6 +101,9 @@ final class ReviewModel {
     var collapsedDirs: Set<String> = []
     var comparisonPopoverOpen = false
     var keysOverlayOpen = false
+    /// Share of the width the diff panel takes (0.3…0.8); it survives trips
+    /// back to the sessions.
+    var diffFraction: CGFloat = 0.55
 
     // Canvas
     var canvas = CanvasTransform()

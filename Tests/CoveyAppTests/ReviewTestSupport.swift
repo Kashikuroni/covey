@@ -44,12 +44,15 @@ final class FakeReviewGit: ReviewGitReading, @unchecked Sendable {
     private let lock = NSLock()
     private var _changesCalls = 0
     private var _fingerprintCalls = 0
+    private var _fingerprintWorktrees: [String] = []
     private var _diffCalls = 0
     private var changesGates: [String: CallGate] = [:]
     private var diffGates: [Bool: CallGate] = [:]
 
     var changesCalls: Int { lock.withLock { _changesCalls } }
     var fingerprintCalls: Int { lock.withLock { _fingerprintCalls } }
+    /// The worktree of every `fingerprint` call, in order: who is polling.
+    var fingerprintWorktrees: [String] { lock.withLock { _fingerprintWorktrees } }
     var diffCalls: Int { lock.withLock { _diffCalls } }
 
     /// The next `changes` call for `base` parks until the gate is released.
@@ -85,7 +88,10 @@ final class FakeReviewGit: ReviewGitReading, @unchecked Sendable {
     }
 
     func fingerprint(worktree: String, comparison: GitComparison, paths: [String]) async throws -> String {
-        lock.withLock { _fingerprintCalls += 1 }
+        lock.withLock {
+            _fingerprintCalls += 1
+            _fingerprintWorktrees.append(worktree)
+        }
         if let fingerprintError { throw fingerprintError }
         return fingerprintValue ?? state?.fingerprint ?? ""
     }

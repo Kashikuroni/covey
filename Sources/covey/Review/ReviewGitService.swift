@@ -1,7 +1,7 @@
 import Foundation
 import CoveyGit
 
-/// The git reads a Review window makes. Async and off the main thread;
+/// The git reads a review makes. Async and off the main thread;
 /// `ReviewGitService` is the real one, tests script a fake.
 protocol ReviewGitReading: Sendable {
     func branchLabel(worktree: String) async -> String?

@@ -24,7 +24,6 @@ func shouldRestoreCommandPaletteResponder(inputMode: InputMode) -> Bool {
 
 struct ContentView: View {
     @Bindable var model: AppModel
-    @Environment(\.openWindow) private var openWindow
     @State private var keyMonitor: Any?
     @State private var windowScope = WorkspaceWindowScope()
     @State private var paletteState = CommandPaletteState()
@@ -38,7 +37,7 @@ struct ContentView: View {
             if model.showHeader {
                 TopBar(model: model)
             }
-            workspace
+            mainArea
             if model.showFooter {
                 StatusBar(model: model)
             }
@@ -115,10 +114,20 @@ struct ContentView: View {
                 }
             }
         }
-        .onChange(of: model.reviewWindowRequest) { _, key in
-            guard let key else { return }
-            openWindow(id: ReviewWindowKey.sceneID, value: key)
-            model.consumeReviewWindowRequest()
+        .onChange(of: model.windowMode) { _, mode in
+            // Nothing hidden may keep the keyboard: not a terminal, not the
+            // sessions filter, not an inspector editor.
+            if mode == .review { windowScope.window?.makeFirstResponder(nil) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didChangeOcclusionStateNotification)) { note in
+            guard let window = note.object as? NSWindow, window === windowScope.window else { return }
+            model.setMainWindowOccluded(!window.occlusionState.contains(.visible))
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+            // Back from another app: look for the agent's changes now.
+            guard (note.object as? NSWindow) === windowScope.window,
+                  model.windowMode == .review, let review = model.review else { return }
+            Task { await review.checkFreshness() }
         }
         .onChange(of: model.commandPalettePresented) { _, presented in
             if presented {
@@ -127,7 +136,8 @@ struct ContentView: View {
                 let responder = palettePreviousResponder
                 palettePreviousResponder = nil
                 DispatchQueue.main.async {
-                    if shouldRestoreCommandPaletteResponder(inputMode: model.inputMode),
+                    if model.windowMode == .sessions,
+                       shouldRestoreCommandPaletteResponder(inputMode: model.inputMode),
                        model.modal == nil,
                        let window = NSApp.keyWindow,
                        let responder {
@@ -139,65 +149,138 @@ struct ContentView: View {
         }
         .onAppear {
             keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                guard windowScope.contains(event.window) else { return event }
-                // Reserve physical ⌘W for Covey before AppKit can choose
-                // File→Close: close a terminal split, consume it everywhere else.
-                if isCommandW(event) {
-                    if model.commandPalettePresented { return nil }
-                    switch commandWHandling(focus: model.focus,
-                                            inputMode: model.inputMode,
-                                            modalPresented: model.modal != nil) {
-                    case .consume:
-                        return nil
-                    case .perform(let command):
-                        model.perform(command)
-                        return nil
-                    }
-                }
-                // ⌘-anything else belongs to the menu system.
-                guard !event.modifierFlags.contains(.command) else { return event }
-                // The search field owns every non-Command key while the
-                // palette is open; none may reach the workspace router.
-                if model.commandPalettePresented { return event }
-                // Inspector focus chords must escape its text fields: ⌃h/l
-                // never type text (those emacs bindings are sacrificed).
-                if model.focus == .inspector,
-                   event.modifierFlags.intersection([.command, .shift, .option, .control]) == .control,
-                   let raw = event.charactersIgnoringModifiers?.first,
-                   ["h", "l"].contains(latinize(raw)) {
-                    let context = KeyRouter.Context(mode: model.inputMode,
-                                                    focus: model.focus,
-                                                    vimMode: model.vimMode,
-                                                    sheetOpen: model.modal != nil)
-                    if let action = KeyRouter.route(keyInput(from: event), context: context) {
-                        model.apply(action)
-                        return nil
-                    }
-                }
-                // The inspector zone owns its plain keys (vim editors and the
-                // preview are not NSTextViews); only its global control chords
-                // above escape into the app router.
-                if model.focus == .inspector, model.inputMode == .normal {
-                    return event
-                }
-                // While a text field edits (filter, sheets), keys are its own.
-                if let responder = event.window?.firstResponder, responder is NSTextView {
-                    return event
-                }
-                let context = KeyRouter.Context(mode: model.inputMode,
-                                                focus: model.focus,
-                                                vimMode: model.vimMode,
-                                                sheetOpen: model.modal != nil)
-                guard let action = KeyRouter.route(keyInput(from: event), context: context) else {
-                    return event
-                }
-                model.apply(action)
-                return nil
+                handleKeyDown(event)
             }
         }
         .onDisappear {
             if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
             keyMonitor = nil
+        }
+    }
+
+    /// The window's one key monitor: Review's keys while Review is shown,
+    /// the sessions' otherwise.
+    private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
+        guard windowScope.contains(event.window) else { return event }
+        if model.windowMode == .review, let review = model.review {
+            return handleReviewKey(event, review: review)
+        }
+        return handleSessionsKey(event)
+    }
+
+    /// Review's half (formerly the Review window's own monitor); the
+    /// decision itself is `ReviewModeKeys.decide`.
+    private func handleReviewKey(_ event: NSEvent, review: ReviewModel) -> NSEvent? {
+        let responder = event.window?.firstResponder
+        let flags = event.modifierFlags
+        let input = ReviewModeKeyInput(
+            key: ReviewKeyEvent(characters: event.charactersIgnoringModifiers ?? "",
+                                isEscape: event.keyCode == 53,
+                                command: flags.contains(.command),
+                                control: flags.contains(.control),
+                                option: flags.contains(.option)),
+            isRepeat: event.isARepeat,
+            isCommandW: isCommandW(event),
+            fieldEditorFocused: (responder as? NSTextView)?.isFieldEditor == true,
+            textInputFocused: responder is NSText,
+            paletteOpen: model.commandPalettePresented,
+            sheetOpen: model.modal != nil,
+            appOverlayOpen: model.inputMode != .normal,
+            reviewModalOpen: review.sendDraft != nil || review.keysOverlayOpen)
+        switch ReviewModeKeys.decide(input) {
+        case .pass:
+            return event
+        case .swallow:
+            return nil
+        case .endEditing:
+            event.window?.makeFirstResponder(nil)
+            return nil
+        case .sessions:
+            return handleSessionsKey(event)
+        case .perform(.closeReview):
+            model.leaveReview()
+            return nil
+        case .perform(let action):
+            Task { await review.perform(action) }
+            return nil
+        }
+    }
+
+    private func handleSessionsKey(_ event: NSEvent) -> NSEvent? {
+        // Reserve physical ⌘W for Covey before AppKit can choose
+        // File→Close: close a terminal split, consume it everywhere else.
+        if isCommandW(event) {
+            if model.commandPalettePresented { return nil }
+            switch commandWHandling(focus: model.focus,
+                                    inputMode: model.inputMode,
+                                    modalPresented: model.modal != nil) {
+            case .consume:
+                return nil
+            case .perform(let command):
+                model.perform(command)
+                return nil
+            }
+        }
+        // ⌘-anything else belongs to the menu system.
+        guard !event.modifierFlags.contains(.command) else { return event }
+        // The search field owns every non-Command key while the
+        // palette is open; none may reach the workspace router.
+        if model.commandPalettePresented { return event }
+        // Inspector focus chords must escape its text fields: ⌃h/l
+        // never type text (those emacs bindings are sacrificed).
+        if model.focus == .inspector,
+           event.modifierFlags.intersection([.command, .shift, .option, .control]) == .control,
+           let raw = event.charactersIgnoringModifiers?.first,
+           ["h", "l"].contains(latinize(raw)) {
+            let context = KeyRouter.Context(mode: model.inputMode,
+                                            focus: model.focus,
+                                            vimMode: model.vimMode,
+                                            sheetOpen: model.modal != nil)
+            if let action = KeyRouter.route(keyInput(from: event), context: context) {
+                model.apply(action)
+                return nil
+            }
+        }
+        // The inspector zone owns its plain keys (vim editors and the
+        // preview are not NSTextViews); only its global control chords
+        // above escape into the app router.
+        if model.focus == .inspector, model.inputMode == .normal {
+            return event
+        }
+        // While a text field edits (filter, sheets), keys are its own.
+        if let responder = event.window?.firstResponder, responder is NSTextView {
+            return event
+        }
+        let context = KeyRouter.Context(mode: model.inputMode,
+                                        focus: model.focus,
+                                        vimMode: model.vimMode,
+                                        sheetOpen: model.modal != nil)
+        guard let action = KeyRouter.route(keyInput(from: event), context: context) else {
+            return event
+        }
+        model.apply(action)
+        return nil
+    }
+
+    /// Review lies over the sessions workspace, which stays mounted at its
+    /// size — invisible and deaf to the mouse — so a mode switch resizes no
+    /// terminal and no agent gets a SIGWINCH.
+    private var mainArea: some View {
+        let reviewing = model.windowMode == .review
+        return ZStack {
+            workspace
+                .opacity(reviewing ? 0 : 1)
+                .allowsHitTesting(!reviewing)
+                .accessibilityHidden(reviewing)
+            if reviewing, let review = model.review {
+                ReviewModeView(model: review, app: model)
+                    // A replaced review is a new view: none of the old one's
+                    // state, change handlers or poll loop carries over.
+                    .id(ObjectIdentifier(review))
+                    .padding(.horizontal, Tokens.edge)
+                    .padding(.top, model.showHeader ? 0 : Tokens.edge)
+                    .padding(.bottom, model.showFooter ? 0 : Tokens.edge)
+            }
         }
     }
 

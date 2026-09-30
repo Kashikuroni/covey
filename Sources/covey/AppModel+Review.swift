@@ -109,9 +109,4 @@ extension AppModel {
         syncReviewVisibility()
         await review.checkFreshness()
     }
-
-    // Kept for the Review window until the main window hosts Review (Task 6).
-    func reviewLaunch(for key: ReviewWindowKey) -> ReviewLaunch? { reviewLaunches[key] }
-
-    func consumeReviewWindowRequest() { reviewWindowRequest = nil }
 }

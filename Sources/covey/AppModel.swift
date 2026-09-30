@@ -126,12 +126,6 @@ public final class AppModel {
             }
         }
     }
-    // Old separate-window plumbing: since Review became a window mode
-    // (`windowMode`) nothing raises the request or reads the focus flag; it
-    // goes with `ReviewWindowRoot`.
-    var reviewWindowRequest: ReviewWindowKey?
-    @ObservationIgnored var reviewLaunches: [ReviewWindowKey: ReviewLaunch] = [:]
-    var reviewWindowFocused = false
     /// What the main window shows. Not persisted: covey starts in `.sessions`.
     /// Changed only by `AppModel+Review`.
     var windowMode: WindowMode = .sessions

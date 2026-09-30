@@ -7,7 +7,9 @@ extension ReviewModel {
 
     var pollDelay: Double { Self.pollBackoff[min(failureStreak, Self.pollBackoff.count - 1)] }
 
-    /// Runs for the window's lifetime (`.task`); an occluded window skips checks.
+    /// Runs while the review is on screen (`ReviewModeView`'s `.task`, keyed by
+    /// this model); while `isVisible` is false — the sessions are shown or the
+    /// window is occluded — it skips checks.
     func runPolling() async {
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(pollDelay))

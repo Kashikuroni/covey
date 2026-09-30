@@ -10,7 +10,7 @@ struct ReviewTarget: Equatable, Identifiable {
     let status: Status
 }
 
-/// What the Review window needs from the app: which sessions it may send
+/// What Review needs from the app: which sessions it may send
 /// to, and a way to write bytes into one. `AppModel` is the production one.
 @MainActor
 protocol ReviewSessionDirectory: AnyObject {
