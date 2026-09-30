@@ -1,6 +1,9 @@
 import SwiftUI
 
 private let commandPaletteHint = ("⌘P", "commands")
+
+/// The footer while Review is shown; Review's own keys are behind `?`.
+let reviewStatusBarHints: [(String, String)] = [("⌘W", "sessions"), ("?", "keys"), commandPaletteHint]
 private let panelFocusHint = ("ctrl + 1...5", "Panels")
 
 private func withPalette(_ hints: [(String, String)]) -> [(String, String)] {
@@ -67,6 +70,7 @@ struct StatusBar: View {
     }
 
     var body: some View {
+        let reviewing = model.windowMode == .review
         HStack(spacing: 12) {
             if model.filterActive {
                 filterRow
@@ -82,6 +86,20 @@ struct StatusBar: View {
         // the whole gap under the cards — symmetric, which centres the hints in
         // the strip between the last card and the window's bottom edge.
         .padding(.horizontal, 12).padding(.vertical, 8)
+        // Review swaps the hints in place: the footer keeps its height, so
+        // the hidden workspace — and every terminal in it — keeps its size.
+        .opacity(reviewing ? 0 : 1)
+        .allowsHitTesting(!reviewing)
+        .overlay(alignment: .leading) {
+            if reviewing {
+                HStack(spacing: 10) {
+                    ForEach(reviewStatusBarHints, id: \.0) { key, label in
+                        KbdBadge(key: key, label: label, tk: tk)
+                    }
+                }
+                .padding(.horizontal, 12)
+            }
+        }
     }
 
     private var filterRow: some View {
