@@ -137,4 +137,65 @@ final class RustTests: XCTestCase {
         let graph = await buildGraph(fake, renames: ["src/pay.rs": "src/billing.rs"])
         XCTAssertEqual(describe(graph), ["src/report.rs → src/billing.rs kept [charge]"])
     }
+
+    /// A local `mod config;` shadows the workspace crate `config` in code paths
+    /// (local items win over the extern prelude); without it the crate is used.
+    func testLocalModuleShadowsAWorkspaceCrateOfTheSameNameInCodePaths() async {
+        let crates: [String: String] = [
+            "crates/config/Cargo.toml": "[package]\nname = \"config\"\n",
+            "crates/config/src/lib.rs": "pub fn load() {}\n",
+            "crates/app/Cargo.toml": "[package]\nname = \"app\"\n",
+            "crates/app/src/config.rs": "pub fn load() {}\n",
+        ]
+        let shadowed = await buildGraph(FakeProvider(head: crates.merging([
+            "crates/app/src/main.rs": "mod config;\nfn main() { config::load(); }\n"]) { $1 }))
+        XCTAssertEqual(describe(shadowed), [])
+        let external = await buildGraph(FakeProvider(head: crates.merging([
+            "crates/app/src/main.rs": "fn main() { config::load(); }\n"]) { $1 }))
+        XCTAssertEqual(describe(external), ["crates/app/src/main.rs → crates/config/src/lib.rs added [load]"])
+    }
+
+    func testCrateRootChangeFindsUnchangedFilesThatUseCratePaths() async {
+        let fake = FakeProvider(
+            common: ["Cargo.toml": "[package]\nname = \"app\"\n",
+                     "src/net/mod.rs": "pub mod client;\n",
+                     "src/net/client.rs": "use crate::Config;\n"],
+            base: ["src/lib.rs": "pub mod net;\npub struct Config;\n"],
+            head: ["src/lib.rs": "pub mod net;\npub struct Config;\npub fn more() {}\n"])
+        let graph = await buildGraph(fake)
+        XCTAssertEqual(describe(graph), ["src/net/client.rs → src/lib.rs kept [Config]"])
+    }
+
+    func testModuleFileChangeFindsUnchangedChildrenThatUseSuperPaths() async {
+        let fake = FakeProvider(
+            common: ["Cargo.toml": "[package]\nname = \"app\"\n",
+                     "src/lib.rs": "pub mod net;\npub mod billing;\n",
+                     "src/net/client.rs": "use super::Conn;\n",
+                     "src/billing/tax.rs": "use super::Invoice;\n"],
+            base: ["src/net/mod.rs": "pub mod client;\npub struct Conn;\n",
+                   "src/billing.rs": "pub mod tax;\npub struct Invoice;\n"],
+            head: ["src/net/mod.rs": "pub mod client;\npub struct Conn;\npub fn more() {}\n",
+                   "src/billing.rs": "pub mod tax;\npub struct Invoice;\npub fn more() {}\n"])
+        let graph = await buildGraph(fake)
+        XCTAssertEqual(describe(graph), [
+            "src/billing/tax.rs → src/billing.rs kept [Invoice]",
+            "src/net/client.rs → src/net/mod.rs kept [Conn]",
+        ])
+    }
+
+    /// `crate::` only reaches this crate's root from files inside the crate:
+    /// a file of another crate that says `crate::` is not even read.
+    func testCratePathsOfAnotherCrateAreNotCandidatesForThisCratesRoot() async {
+        let fake = FakeProvider(
+            common: ["crates/alpha/Cargo.toml": "[package]\nname = \"alpha\"\n",
+                     "crates/alpha/src/net.rs": "use crate::Config;\n",
+                     "crates/beta/Cargo.toml": "[package]\nname = \"beta\"\n",
+                     "crates/beta/src/lib.rs": "pub mod util;\n",
+                     "crates/beta/src/util.rs": "use crate::Config;\n"],
+            base: ["crates/alpha/src/lib.rs": "pub mod net;\npub struct Config;\n"],
+            head: ["crates/alpha/src/lib.rs": "pub mod net;\npub struct Config;\npub fn more() {}\n"])
+        let graph = await buildGraph(fake)
+        XCTAssertEqual(describe(graph), ["crates/alpha/src/net.rs → crates/alpha/src/lib.rs kept [Config]"])
+        XCTAssertFalse(fake.readPaths(.head).contains("crates/beta/src/util.rs"))
+    }
 }

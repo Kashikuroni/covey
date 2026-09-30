@@ -42,4 +42,21 @@ protocol ReferenceResolver: AnyObject {
     func resolve(_ source: ParsedSource, from path: String) async throws -> [Resolution?]
     /// Words that a file referencing `path` would contain (for `filesMentioning`).
     func keywords(for path: String) async throws -> [String]
+    /// Words that reach `path` only from files inside a directory (Rust's
+    /// `crate::` and `super::`). The builder calls this after
+    /// `keywords(for:)` for the same path, so a resolver may rely on what
+    /// that call loaded. Defaults to none.
+    func scopedKeywords(for path: String) -> [ScopedKeyword]
+}
+
+extension ReferenceResolver {
+    func scopedKeywords(for path: String) -> [ScopedKeyword] { [] }
+}
+
+/// A word that refers to a file only from inside `within`: a hit for `word`
+/// elsewhere in the repository cannot reach the file.
+struct ScopedKeyword: Hashable {
+    var word: String
+    /// A repository directory; `""` is the root (the whole repository).
+    var within: String
 }

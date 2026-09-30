@@ -103,19 +103,33 @@ final class BuildSession {
     /// Unchanged files that may use a changed one: found by keyword, parsed at head.
     private func incoming() async throws {
         var words = Set<String>()
+        var scoped = Set<ScopedKeyword>()
         var languageIDs = Set<String>()
         for change in changes {
             if let path = change.headPath, let language = store.language(of: path) {
                 languageIDs.insert(language.id)
-                words.formUnion(try await head.resolver(for: language).keywords(for: path))
+                let resolver = head.resolver(for: language)
+                words.formUnion(try await resolver.keywords(for: path))
+                scoped.formUnion(resolver.scopedKeywords(for: path))
             }
             if let path = change.basePath, change.headPath != path, let language = store.language(of: path) {
                 languageIDs.insert(language.id)
-                words.formUnion(try await base.resolver(for: language).keywords(for: path))
+                let resolver = base.resolver(for: language)
+                words.formUnion(try await resolver.keywords(for: path))
+                scoped.formUnion(resolver.scopedKeywords(for: path))
             }
         }
-        guard !words.isEmpty else { return }
-        let candidates = Set(try await provider.filesMentioning(words.sorted())).filter { path in
+        var mentioning = Set<String>()
+        if !words.isEmpty {
+            mentioning.formUnion(try await provider.filesMentioning(words.sorted()))
+        }
+        // A scoped word counts only where it can reach a changed file: inside `within`.
+        for word in Set(scoped.map(\.word)).sorted() {
+            let scopes = scoped.filter { $0.word == word }.map(\.within)
+            let hits = try await provider.filesMentioning([word])
+            mentioning.formUnion(hits.filter { hit in scopes.contains { Paths.contains($0, hit) } })
+        }
+        let candidates = mentioning.filter { path in
             !changedHead.contains(path) && head.contains(path)
                 && store.language(of: path).map { languageIDs.contains($0.id) } == true
         }.sorted()

@@ -96,6 +96,36 @@ final class RustResolver: ReferenceResolver {
         return [String(name.dropLast(3))]
     }
 
+    /// `crate::` inside the crate of a root, and `super::` inside the module
+    /// folder of a file that has one: neither names the file or its module,
+    /// so `keywords(for:)` cannot find their users. Needs the workspace, which
+    /// `keywords(for:)` loads first.
+    func scopedKeywords(for path: String) -> [ScopedKeyword] {
+        guard path.hasSuffix(".rs") else { return [] }
+        var found: [ScopedKeyword] = []
+        for crate in crates ?? [] where crate.roots.contains(path) {
+            found.append(ScopedKeyword(word: "crate", within: crate.dir))
+        }
+        let folder = moduleFolder(of: path)
+        if folder == Paths.dirname(path) || hasFile(under: folder) {
+            found.append(ScopedKeyword(word: "super", within: folder))
+        }
+        var seen = Set<ScopedKeyword>()
+        return found.filter { seen.insert($0).inserted }
+    }
+
+    /// True when some file of the side lies inside `folder`.
+    private func hasFile(under folder: String) -> Bool {
+        let prefix = folder + "/"
+        var low = 0
+        var high = side.sortedFiles.count
+        while low < high {
+            let mid = (low + high) / 2
+            if side.sortedFiles[mid] < prefix { low = mid + 1 } else { high = mid }
+        }
+        return low < side.sortedFiles.count && side.sortedFiles[low].hasPrefix(prefix)
+    }
+
     // MARK: - resolution
 
     /// Walks the path from where its first segment points, while the next
@@ -131,6 +161,14 @@ final class RustResolver: ReferenceResolver {
             location = child
             depth = 1
         } else if let lib = libraries[first] {
+            // A child module shadows the crate of the same name (local items
+            // win over the extern prelude); code paths do not start with
+            // child modules, so such a path resolves to nothing.
+            if !ref.isUse, let context,
+               let here = try await walk(from: context.root, context.module + ref.scope),
+               try await step(here, first) != nil {
+                return nil
+            }
             location = RustLocation(file: lib, inline: [])
         } else {
             return nil

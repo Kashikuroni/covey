@@ -121,4 +121,44 @@ final class BuilderTests: XCTestCase {
         XCTAssertEqual(builder.cache.count, 3, "Pay, Cart at base, Cart at head — the old Cart is gone")
         XCTAssertEqual(describe(graph), ["Cart.swift → Pay.swift added [PayClient]"])
     }
+
+    /// A scoped keyword finds files only inside its directory: `marker` is
+    /// mentioned in `pkg/` and `other/`, and only the `pkg/` file is read.
+    func testScopedKeywordHitsOutsideTheirDirectoryAreDropped() async throws {
+        let fake = FakeProvider(
+            common: ["pkg/inside.stub": "marker", "other/outside.stub": "marker", "pkg/quiet.stub": "nothing"],
+            base: ["pkg/core.stub": "one"], head: ["pkg/core.stub": "two"])
+        let session = BuildSession(changes: fake.changes(), provider: fake, limits: .standard,
+                                   cache: ParseCache(), languages: [ScopedStubLanguage()])
+        let graph = try await session.run()
+        XCTAssertEqual(describe(graph), ["pkg/inside.stub → pkg/core.stub kept"])
+        XCTAssertFalse(fake.readPaths(.head).contains("other/outside.stub"))
+        XCTAssertFalse(fake.readPaths(.head).contains("pkg/quiet.stub"))
+    }
+}
+
+/// `.stub` files: every one references `pkg/core.stub`, which is found only
+/// by the word `marker` inside `pkg`.
+private struct ScopedStubLanguage: SourceLanguage {
+    let id = "stub"
+
+    func owns(_ path: String) -> Bool { path.hasSuffix(".stub") }
+
+    func parse(_ text: String) -> ParsedSource {
+        ParsedSource(referenceLines: [1], wordLines: [:], syntax: 0)
+    }
+
+    func makeResolver(_ side: SideIndex) -> any ReferenceResolver { ScopedStubResolver() }
+}
+
+private final class ScopedStubResolver: ReferenceResolver {
+    func resolve(_ source: ParsedSource, from path: String) async throws -> [Resolution?] {
+        [Resolution(target: "pkg/core.stub", names: [])]
+    }
+
+    func keywords(for path: String) async throws -> [String] { [] }
+
+    func scopedKeywords(for path: String) -> [ScopedKeyword] {
+        [ScopedKeyword(word: "marker", within: "pkg")]
+    }
 }
