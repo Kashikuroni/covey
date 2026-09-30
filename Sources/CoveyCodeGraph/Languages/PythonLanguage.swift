@@ -141,7 +141,15 @@ final class PythonResolver: ReferenceResolver {
     /// Unowned: the side owns its resolvers (`SideIndex.resolver(for:)`), so a
     /// strong reference back would keep the side and its store alive for good.
     private unowned let side: SideIndex
-    private var roots: [String]?
+    private var discovered: [SearchRoot]?
+
+    /// A folder that absolute imports resolve from, and the project it belongs to.
+    private struct SearchRoot {
+        var dir: String
+        /// The folder of the `pyproject.toml` / `setup.py` that declares the
+        /// root; `""` for the repository's own roots (the root and `src/`).
+        var owner: String
+    }
 
     init(side: SideIndex) {
         self.side = side
@@ -150,28 +158,35 @@ final class PythonResolver: ReferenceResolver {
     /// The repository root, `src/`, every folder with `pyproject.toml` or
     /// `setup.py`, and its `src/`.
     func searchRoots() -> [String] {
-        if let roots { return roots }
-        var found = ["", "src"]
+        discoveredRoots().map(\.dir)
+    }
+
+    private func discoveredRoots() -> [SearchRoot] {
+        if let discovered { return discovered }
+        var found = [SearchRoot(dir: "", owner: ""), SearchRoot(dir: "src", owner: "")]
         for file in side.sortedFiles where ["pyproject.toml", "setup.py"].contains(Paths.basename(file)) {
             let dir = Paths.dirname(file)
-            for root in [dir, Paths.join(dir, "src")] where !found.contains(root) { found.append(root) }
+            for root in [dir, Paths.join(dir, "src")] where !found.contains(where: { $0.dir == root }) {
+                found.append(SearchRoot(dir: root, owner: dir))
+            }
         }
-        roots = found
+        discovered = found
         return found
     }
 
     func resolve(_ source: ParsedSource, from path: String) async throws -> [Resolution?] {
         guard let syntax = source.syntax as? PythonSyntax else { return [] }
+        let roots = orderedRoots(for: path)
         return syntax.imports.map { item in
             guard let name = item.name else {
-                return find(item.module, level: 0, from: path)
+                return find(item.module, level: 0, from: path, roots: roots)
                     .map { Resolution(target: $0, names: [], depth: item.module.count) }
             }
             // `from a.b import c`: the submodule a/b/c when there is one, else `c` is a name in a.b.
-            if name != "*", let submodule = find(item.module + [name], level: item.level, from: path) {
+            if name != "*", let submodule = find(item.module + [name], level: item.level, from: path, roots: roots) {
                 return Resolution(target: submodule, names: [], depth: item.module.count + 1)
             }
-            return find(item.module, level: item.level, from: path)
+            return find(item.module, level: item.level, from: path, roots: roots)
                 .map { Resolution(target: $0, names: [name], depth: item.module.count) }
         }
     }
@@ -196,7 +211,7 @@ final class PythonResolver: ReferenceResolver {
         return [ScopedKeyword(word: "from", within: Paths.dirname(path))]
     }
 
-    private func find(_ module: [String], level: Int, from path: String) -> String? {
+    private func find(_ module: [String], level: Int, from path: String, roots: [String]) -> String? {
         if level > 0 {
             var dir = Paths.dirname(path)
             for _ in 1..<level {
@@ -208,17 +223,32 @@ final class PythonResolver: ReferenceResolver {
             }
             return moduleFile(module, under: dir)
         }
-        for root in roots(for: path) {
+        for root in roots {
             if let file = moduleFile(module, under: root) { return file }
         }
         return nil
     }
 
-    /// Roots that hold `path` first, deepest first: a file resolves in its own project.
-    private func roots(for path: String) -> [String] {
-        let all = searchRoots()
-        let own = all.filter { Paths.contains($0, path) }.sorted { $0.count > $1.count }
-        return own + all.filter { !Paths.contains($0, path) }
+    /// The roots to try for absolute imports in `path`, in order: a file
+    /// resolves in its own project. The own roots are those of the projects
+    /// whose folder holds `path` (the repository's own roots included),
+    /// deepest project first, then the deeper root (`proj/src` before `proj`).
+    /// A file inside a sub-project tries nothing else, so a sibling project
+    /// never answers for it; a file outside every sub-project falls back to
+    /// the other roots, in discovery order.
+    private func orderedRoots(for path: String) -> [String] {
+        let all = discoveredRoots()
+        let own = all.filter { Paths.contains($0.owner, path) }.sorted {
+            (Self.depth($0.owner), Self.depth($0.dir)) > (Self.depth($1.owner), Self.depth($1.dir))
+        }
+        let inSubProject = own.contains { !$0.owner.isEmpty }
+        let rest = inSubProject ? [] : all.filter { !Paths.contains($0.owner, path) }
+        return (own + rest).map(\.dir)
+    }
+
+    /// Number of folders in a repository path; `""` is 0.
+    private static func depth(_ dir: String) -> Int {
+        dir.isEmpty ? 0 : dir.split(separator: "/").count
     }
 
     /// `a.b` → `a/b.py`, `a/b.pyi` or `a/b/__init__.py` under `dir`.

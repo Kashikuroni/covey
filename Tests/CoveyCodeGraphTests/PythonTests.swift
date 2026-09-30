@@ -100,4 +100,68 @@ final class PythonTests: XCTestCase {
         ])
         XCTAssertFalse(fake.readPaths(.head).contains("app/other/mod.py"))
     }
+
+    /// A test file sits in its project but outside the project's `src/`: it
+    /// still resolves in that project, never in a sibling project.
+    func testFileOutsideItsProjectsSrcStillResolvesInItsOwnProject() async {
+        let fake = FakeProvider(head: [
+            "services/api/pyproject.toml": "[project]\nname = \"api\"\n",
+            "services/api/app/__init__.py": "",
+            "services/api/app/models.py": "class User: ...\n",
+            "services/worker/setup.py": "from setuptools import setup\n",
+            "services/worker/src/app/__init__.py": "",
+            "services/worker/src/app/models.py": "class Job: ...\n",
+            "services/worker/tests/test_jobs.py": "from app.models import Job\n",
+        ])
+        let graph = await buildGraph(fake)
+        XCTAssertEqual(describe(graph), [
+            "services/worker/tests/test_jobs.py → services/worker/src/app/models.py added [Job]",
+        ])
+    }
+
+    /// Within one project the deeper root wins: `proj/src` before `proj`, also
+    /// for a file of the project that is not under `src/`.
+    func testDeeperSearchRootOfTheOwnProjectWins() async {
+        let fake = FakeProvider(head: [
+            "proj/pyproject.toml": "[project]\nname = \"proj\"\n",
+            "proj/utils.py": "def top(): ...\n",
+            "proj/src/utils.py": "def deep(): ...\n",
+            "proj/src/pkg/__init__.py": "",
+            "proj/src/pkg/run.py": "import utils\n",
+            "proj/tests/test_utils.py": "import utils\n",
+        ])
+        let graph = await buildGraph(fake)
+        XCTAssertEqual(describe(graph), [
+            "proj/src/pkg/run.py → proj/src/utils.py added",
+            "proj/tests/test_utils.py → proj/src/utils.py added",
+        ])
+    }
+
+    /// A file that belongs to no sub-project tries the repository root first,
+    /// then every project's roots.
+    func testFileOutsideEveryProjectFallsBackToAllRoots() async {
+        let fake = FakeProvider(head: [
+            "services/api/pyproject.toml": "[project]\nname = \"api\"\n",
+            "services/api/app/__init__.py": "",
+            "services/api/app/models.py": "class User: ...\n",
+            "tools/check.py": "import app.models\n",
+            "models.py": "class Local: ...\n",
+            "tools/local.py": "import models\n",
+        ])
+        let graph = await buildGraph(fake)
+        XCTAssertEqual(describe(graph), [
+            "tools/check.py → services/api/app/models.py added",
+            "tools/local.py → models.py added",
+        ])
+    }
+
+    func testRelativeImportClimbingAboveTheRepositoryRootHasNoLink() async {
+        let fake = FakeProvider(head: [
+            "__init__.py": "",
+            "x.py": "def f(): ...\n",
+            "a.py": "from .. import x\nfrom ..x import f\n",
+        ])
+        let graph = await buildGraph(fake)
+        XCTAssertEqual(describe(graph), [])
+    }
 }
