@@ -10,11 +10,15 @@ DERIVED := .build/xcode
 APP     := $(DERIVED)/Build/Products/Release/Covey.app
 ICONSET := App/Assets.xcassets/AppIcon.appiconset
 SIGN    := CODE_SIGN_IDENTITY=- AD_HOC_CODE_SIGNING_ALLOWED=YES
+# XcodeGen bakes the file list into the project: adding, removing or renaming
+# a source file bumps its directory's mtime, which must regenerate it too.
+SRC_DIRS := $(shell find Sources/covey Sources/coveyd App/Assets.xcassets -type d)
 
 .PHONY: app install icons
 
-Covey.xcodeproj/project.pbxproj: project.yml
+Covey.xcodeproj/project.pbxproj: project.yml $(SRC_DIRS)
 	xcodegen generate
+	touch $@
 
 # Stamp: any slice regenerated after icon.png means the whole set is fresh.
 $(ICONSET)/icon_512@2x.png: icon.png
