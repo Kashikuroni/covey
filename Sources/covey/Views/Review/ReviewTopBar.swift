@@ -1,16 +1,22 @@
 import SwiftUI
 import CoveyGit
 
-struct ReviewTopBar: View {
+/// `leading` names the worktree (the main window puts its picker there).
+struct ReviewTopBar<Leading: View>: View {
     @Bindable var model: ReviewModel
     let tk: Tokens
+    let leading: Leading
+
+    init(model: ReviewModel, tk: Tokens, @ViewBuilder leading: () -> Leading) {
+        self.model = model
+        self.tk = tk
+        self.leading = leading()
+    }
 
     var body: some View {
         HStack(spacing: 12) {
             HStack(spacing: 8) {
-                Text(projectDefaultName(model.projectRoot))
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(tk.t1)
+                leading
                 Text(model.branchLabel).font(ReviewFont.mono(11)).foregroundStyle(tk.t3)
             }
             .lineLimit(1)

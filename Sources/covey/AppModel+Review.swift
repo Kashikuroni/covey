@@ -103,6 +103,20 @@ extension AppModel {
         review?.isVisible = windowMode == .review && !mainWindowOccluded
     }
 
+    /// Worktrees the Review top bar offers: those of the visible agent
+    /// sessions, in sidebar order, each resolved off the main thread.
+    func reviewWorktreeChoices() async -> [ReviewWorktreeChoice] {
+        let candidates = orderedSessions().flatMap(\.sessions)
+            .filter { !isShellAgent($0.agent) }
+            .map { ReviewWorktreeCandidate(session: $0.name, dir: $0.dir, agent: $0.agent,
+                                           projectRoot: sessionRoot($0)) }
+        var toplevels: [String: String] = [:]
+        for dir in Set(candidates.map(\.dir)) {
+            toplevels[dir] = await resolveReviewWorktree(dir)
+        }
+        return ReviewWorktrees.choices(candidates, toplevels: toplevels)
+    }
+
     /// Entering Review looks for the agent's changes at once.
     private func show(_ review: ReviewModel) async {
         windowMode = .review

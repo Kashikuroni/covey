@@ -210,6 +210,44 @@ final class AppModelReviewTests: XCTestCase {
         daemon.registry.kill(name: "agent")
     }
 
+    @MainActor
+    func testWorktreeChoicesAreTheAgentSessionsWorktrees() async throws {
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        _ = try daemon.registry.create(dir: "/tmp", agent: "zsh", argv: ["/bin/cat"], name: "a-shell")
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"], name: "b-agent")
+        _ = try daemon.registry.create(dir: "/usr", agent: "codex", argv: ["/bin/cat"], name: "other")
+        _ = try daemon.registry.create(dir: "/bin", agent: "claude", argv: ["/bin/cat"], name: "plain")
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        _ = ReviewFixture(model)
+
+        let choices = await model.reviewWorktreeChoices()
+        XCTAssertEqual(Set(choices.map(\.worktree)), ["/tmp", "/usr"], "/bin is outside git")
+        XCTAssertEqual(choices.first { $0.worktree == "/tmp" }?.session, "b-agent",
+                       "the shell never becomes the send target")
+        for name in ["a-shell", "b-agent", "other", "plain"] { daemon.registry.kill(name: name) }
+    }
+
+    /// A session sits in a subdirectory of its worktree: the toplevel git
+    /// reports for that exact directory is what the picker offers.
+    @MainActor
+    func testWorktreeChoicesAreResolvedFromTheSessionsOwnDirectory() async throws {
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        _ = try daemon.registry.create(dir: "/usr/bin", agent: "claude", argv: ["/bin/cat"], name: "deep")
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        _ = ReviewFixture(model)
+        // Answers only for the session's own directory, never for its toplevel.
+        model.resolveReviewWorktree = { dir in ["/usr/bin": "/usr"][dir] }
+
+        let choices = await model.reviewWorktreeChoices()
+        XCTAssertEqual(choices.map(\.worktree), ["/usr"])
+        XCTAssertEqual(choices.map(\.session), ["deep"])
+        daemon.registry.kill(name: "deep")
+    }
+
     /// ⌥⌘R pressed again (for another session) before git answered the first
     /// press: only the newest entry lands.
     @MainActor
