@@ -9,7 +9,7 @@ public actor LinkGraphBuilder {
 
     /// Every supported language; files of any other language are nodes
     /// without links.
-    static let languages: [any SourceLanguage] = [RustLanguage(), SwiftLanguage()]
+    static let languages: [any SourceLanguage] = [RustLanguage(), PythonLanguage(), SwiftLanguage()]
 
     public init(limits: GraphLimits = .standard) {
         self.limits = limits
