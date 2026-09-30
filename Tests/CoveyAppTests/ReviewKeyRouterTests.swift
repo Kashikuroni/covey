@@ -37,9 +37,9 @@ final class ReviewKeyRouterTests: XCTestCase {
         XCTAssertEqual(route("", escape: true, context: modal), .escape)
     }
 
-    func testCommandWClosesTheWindow() {
-        XCTAssertEqual(route("w", command: true), .closeWindow)
-        XCTAssertEqual(route("w", command: true, context: ReviewKeyContext(textInputFocused: true)), .closeWindow)
+    func testCommandWLeavesReview() {
+        XCTAssertEqual(route("w", command: true), .closeReview)
+        XCTAssertEqual(route("w", command: true, context: ReviewKeyContext(textInputFocused: true)), .closeReview)
         XCTAssertNil(route("j", command: true))
         XCTAssertNil(route("j", control: true))
     }
@@ -53,14 +53,15 @@ final class ReviewKeyRouterTests: XCTestCase {
         for (key, action) in table {
             XCTAssertEqual(route(key), action, key)
         }
-        XCTAssertEqual(route("ц", command: true), .closeWindow)
+        XCTAssertEqual(route("ц", command: true), .closeReview)
         XCTAssertNil(route("о", context: ReviewKeyContext(textInputFocused: true)))
         XCTAssertNil(route("ц"))
     }
 
     func testHelpListsEveryShortcutOnce() {
-        XCTAssertEqual(ReviewKeyRouter.help.count, 15)
-        XCTAssertEqual(Set(ReviewKeyRouter.help.map(\.label)).count, 15)
+        XCTAssertEqual(ReviewKeyRouter.help.count, 16)
+        XCTAssertEqual(Set(ReviewKeyRouter.help.map(\.label)).count, 16)
+        XCTAssertTrue(ReviewKeyRouter.help.contains { $0.label == "Back to sessions" && $0.keys == "⌘W" })
     }
 
     func testPerformReachesTheModel() async {

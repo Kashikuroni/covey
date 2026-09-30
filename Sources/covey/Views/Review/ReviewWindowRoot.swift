@@ -189,7 +189,7 @@ struct ReviewWindowView: View {
             let context = ReviewKeyContext(textInputFocused: event.window?.firstResponder is NSText,
                                            modalOpen: model.sendDraft != nil || model.keysOverlayOpen)
             guard let action = ReviewKeyRouter.route(key, context: context) else { return event }
-            if action == .closeWindow {
+            if action == .closeReview {
                 event.window?.performClose(nil)
                 return nil
             }

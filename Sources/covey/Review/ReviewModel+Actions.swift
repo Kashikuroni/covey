@@ -33,7 +33,7 @@ extension ReviewModel {
         case .focusCard: focusCard()
         case .showKeys: keysOverlayOpen = true
         case .escape: await escape()
-        case .closeWindow: break   // the window closes itself
+        case .closeReview: break   // the main window leaves Review itself
         }
     }
 }

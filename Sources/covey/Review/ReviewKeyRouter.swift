@@ -1,10 +1,10 @@
 import Foundation
 
-enum ReviewKeyAction: Equatable {
+enum ReviewKeyAction: Hashable {
     case nextFile, previousFile, nextHunk, previousHunk, nextIssue, previousIssue
     case nextUnreviewed, toggleReviewed, toggleFullFile, comment
     case fit, zoomReset, zoomIn, zoomOut
-    case focusTree, focusDiff, focusCard, showKeys, escape, closeWindow
+    case focusTree, focusDiff, focusCard, showKeys, escape, closeReview
 }
 
 struct ReviewKeyEvent: Equatable {
@@ -30,7 +30,7 @@ enum ReviewKeyRouter {
         let key = event.characters.first.map { String(latinize($0)) } ?? ""
         if event.command {
             let plain = !event.control && !event.option
-            return plain && key.lowercased() == "w" ? .closeWindow : nil
+            return plain && key.lowercased() == "w" ? .closeReview : nil
         }
         if event.isEscape { return .escape }
         if event.control || event.option || context.textInputFocused || context.modalOpen { return nil }
@@ -73,5 +73,6 @@ enum ReviewKeyRouter {
         ("Center current card", "3"),
         ("This help", "?"),
         ("Close / back", "Esc"),
+        ("Back to sessions", "⌘W"),
     ]
 }
