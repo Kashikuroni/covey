@@ -40,6 +40,34 @@ final class CoveyTerminalView: TerminalView {
 
     private(set) var isFileDropTarget = false
     private var registeredForFileDrops = false
+
+    /// Review covers the workspace: the pane is hidden (AppKit draws no
+    /// hidden view), the diagnostic sampler stops, the keyboard leaves it and
+    /// its pointer monitors let every event through to Review. Output keeps
+    /// flowing into the emulator, and the frame — so the grid the session was
+    /// told about — never changes.
+    var isParked = false {
+        didSet {
+            guard isParked != oldValue else { return }
+            isHidden = isParked
+            if isParked {
+                stopStateSampler()
+                if window?.firstResponder === self { window?.makeFirstResponder(nil) }
+            } else if window != nil {
+                startStateSampler()
+            }
+            // Manual check: a Review visit shows up as a park/unpark pair.
+            PaneLayoutLog.note(isParked ? "park" : "unpark", [("name", logName)])
+        }
+    }
+
+    var isStateSamplerRunning: Bool { stateTimer != nil }
+
+    /// A pointer event at `point` (view coordinates) is this pane's to handle.
+    func claimsPointer(at point: NSPoint) -> Bool {
+        !isParked && bounds.contains(point)
+    }
+
     private lazy var fileDropBorderView: NSView = {
         let view = FileDropBorderView(frame: bounds)
         view.autoresizingMask = [.width, .height]
@@ -124,13 +152,13 @@ final class CoveyTerminalView: TerminalView {
             removeWheelMonitor()
             stopStateSampler()
         } else if wheelMonitor == nil {
-            startStateSampler()
+            if !isParked { startStateSampler() }
             installMouseMonitor()
             wheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
                 guard let self, event.window === self.window,
                       event.deltaY != 0 || event.scrollingDeltaY != 0 else { return event }
                 let point = self.convert(event.locationInWindow, from: nil)
-                guard self.bounds.contains(point) else { return event }
+                guard self.claimsPointer(at: point) else { return event }
                 self.routeWheel(deltaY: event.deltaY,
                                 scrollingDeltaY: event.scrollingDeltaY,
                                 precise: event.hasPreciseScrollingDeltas,
@@ -165,7 +193,7 @@ final class CoveyTerminalView: TerminalView {
             if event.type == .mouseMoved {
                 guard !self.allowMouseReporting else { return event }
                 let point = self.convert(event.locationInWindow, from: nil)
-                return self.bounds.contains(point) ? nil : event
+                return self.claimsPointer(at: point) ? nil : event
             }
             if event.type == .leftMouseUp, self.swallowNextMouseUp {
                 self.swallowNextMouseUp = false
@@ -173,7 +201,7 @@ final class CoveyTerminalView: TerminalView {
             }
             guard event.type == .leftMouseDown else { return event }
             let point = self.convert(event.locationInWindow, from: nil)
-            guard self.bounds.contains(point) else { return event }
+            guard self.claimsPointer(at: point) else { return event }
             guard self.window?.firstResponder !== self else { return event }
             self.window?.makeFirstResponder(self)
             self.onFocusRequest?()

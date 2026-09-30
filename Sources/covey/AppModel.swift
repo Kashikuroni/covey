@@ -753,12 +753,17 @@ public final class AppModel {
         terminalPaneOwnership.isCurrent(lease)
     }
 
+    /// Resize requests sent to the daemon — each one is a SIGWINCH for the
+    /// agent if the size moved. Tests pin that a mode switch sends none.
+    @ObservationIgnored private(set) var resizesSent = 0
+
     func resize(
         cols: UInt16,
         rows: UInt16,
         lease: TerminalViewLease
     ) async {
         guard isTerminalViewLeaseCurrent(lease) else { return }
+        resizesSent += 1
         try? await client.resize(
             name: lease.session,
             cols: cols,

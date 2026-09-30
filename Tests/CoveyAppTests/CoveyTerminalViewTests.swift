@@ -402,4 +402,50 @@ final class CoveyTerminalViewTests: XCTestCase {
 
         XCTAssertEqual(probe.sent, [0x0d])
     }
+
+    @MainActor
+    private func hosted(_ view: CoveyTerminalView) -> NSWindow {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = view
+        return window
+    }
+
+    @MainActor
+    func testParkingHidesThePaneAndStopsTheSampler() {
+        let (view, _) = makeView()
+        let window = hosted(view)
+        XCTAssertTrue(view.isStateSamplerRunning, "precondition: a pane in a window samples")
+
+        view.isParked = true
+        XCTAssertTrue(view.isHidden)
+        XCTAssertFalse(view.isStateSamplerRunning)
+
+        view.isParked = false
+        XCTAssertFalse(view.isHidden)
+        XCTAssertTrue(view.isStateSamplerRunning)
+        withExtendedLifetime(window) {}
+    }
+
+    @MainActor
+    func testAPaneMountedParkedNeverStartsTheSampler() {
+        let (view, _) = makeView()
+        view.isParked = true
+        let window = hosted(view)
+        XCTAssertFalse(view.isStateSamplerRunning)
+        withExtendedLifetime(window) {}
+    }
+
+    @MainActor
+    func testAParkedPaneLetsThePointerAndTheKeyboardGo() {
+        let (view, _) = makeView()
+        let window = hosted(view)
+        let inside = NSPoint(x: 10, y: 10)
+        XCTAssertTrue(view.claimsPointer(at: inside))
+        XCTAssertTrue(window.makeFirstResponder(view))
+
+        view.isParked = true
+        XCTAssertFalse(view.claimsPointer(at: inside), "clicks and wheel belong to Review")
+        XCTAssertFalse(window.firstResponder === view, "keys must not reach a hidden agent")
+    }
 }

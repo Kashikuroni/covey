@@ -40,6 +40,8 @@ func linkURL(from link: String) -> URL? {
 struct TerminalRepresentable: NSViewRepresentable {
     let model: AppModel
     let name: String
+    /// Review covers the workspace (`CoveyTerminalView.isParked`).
+    var parked = false
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -52,6 +54,9 @@ struct TerminalRepresentable: NSViewRepresentable {
     func makeNSView(context: Context) -> TerminalView {
         let view = CoveyTerminalView(frame: .zero)
         view.logName = name
+        // Before the view reaches a window: a pane mounted behind Review
+        // never starts its sampler or takes the keyboard.
+        view.isParked = parked
         // The pane is a rounded card, but this view starts below `paneHeader`
         // — only its bottom two corners coincide with the card's, the top two
         // are interior geometry. SwiftTerm paints its own background and
@@ -131,7 +136,7 @@ struct TerminalRepresentable: NSViewRepresentable {
         model.paneViewMounted(name)
         // A freshly mounted pane that already owns the pane focus grabs the
         // keyboard (companion created via the terminal split command).
-        if model.focusedPane == name, model.focus == .terminal {
+        if model.focusedPane == name, model.focus == .terminal, !parked {
             DispatchQueue.main.async { [weak view] in
                 guard let view else { return }
                 view.window?.makeFirstResponder(view)
@@ -142,6 +147,16 @@ struct TerminalRepresentable: NSViewRepresentable {
 
     func updateNSView(_ view: TerminalView, context: Context) {
         applyTheme(to: view)
+        if let pane = view as? CoveyTerminalView, pane.isParked != parked {
+            pane.isParked = parked
+            // Back from Review: the pane that owned the keyboard takes it again.
+            if !parked, model.focusedPane == name, model.focus == .terminal {
+                DispatchQueue.main.async { [weak pane] in
+                    guard let pane, !pane.isParked else { return }
+                    pane.window?.makeFirstResponder(pane)
+                }
+            }
+        }
         // The session list may have been empty when makeNSView first ran
         // (claude-ness unknown → mouse reporting left on). Re-evaluate now that
         // the sessions are loaded so claude panes reliably suppress the mouse.
