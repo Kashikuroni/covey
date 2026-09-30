@@ -29,6 +29,8 @@ protocol SourceLanguage: Sendable {
     func owns(_ path: String) -> Bool
     /// Lexes and parses; pure, so the result can be cached by content.
     func parse(_ text: String) -> ParsedSource
+    /// The side keeps the resolver, so the resolver must hold `side`
+    /// `unowned`, never strongly (a cycle would leak the side and its store).
     func makeResolver(_ side: SideIndex) -> any ReferenceResolver
 }
 

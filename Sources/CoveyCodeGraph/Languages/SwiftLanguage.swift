@@ -83,7 +83,9 @@ struct SwiftLanguage: SourceLanguage {
 }
 
 final class SwiftResolver: ReferenceResolver {
-    private let side: SideIndex
+    /// Unowned: the side owns its resolvers (`SideIndex.resolver(for:)`), so a
+    /// strong reference back would keep the side and its store alive for good.
+    private unowned let side: SideIndex
     private var index: [String: String]?
 
     init(side: SideIndex) {
