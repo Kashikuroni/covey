@@ -274,11 +274,16 @@ public final class AppModel {
 
     /// Route a view command to the focused pane's terminal (fallback: selected).
     private func sendTerminalCommand(_ cmd: TerminalCommand) {
-        // Review hides the terminals; none may take the keyboard behind it
-        // (sheet dismissal, the palette and the limits overlay all ask).
-        if cmd == .focus, windowMode == .review { return }
         let target = focusedPane ?? selected
-        if let target { terminalCommands[target]?(cmd) }
+        if let target { deliverTerminalCommand(cmd, to: target) }
+    }
+
+    /// The one way a command reaches a terminal view. Review hides the
+    /// terminals; none may take the keyboard behind it (sheet dismissal, the
+    /// palette, the limits overlay and `focusPane` all ask).
+    private func deliverTerminalCommand(_ cmd: TerminalCommand, to name: String) {
+        if cmd == .focus, windowMode == .review { return }
+        terminalCommands[name]?(cmd)
     }
 
     var client: IPCClient
@@ -525,7 +530,7 @@ public final class AppModel {
             lastFocusedAgent = name
             setFocus(.terminal)
         }
-        terminalCommands[name]?(.focus)
+        deliverTerminalCommand(.focus, to: name)
     }
 
     public func create(dir: String, agent: String) async {

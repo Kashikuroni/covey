@@ -266,6 +266,34 @@ final class AppModelReviewTests: XCTestCase {
         XCTAssertEqual(commands, [])
         daemon.registry.kill(name: "agent")
     }
+
+    /// `focusPane` (a split leaf's session exits, a shell finishes spawning)
+    /// keeps its bookkeeping while Review is open so the pane is refocused on
+    /// return, but never makes the hidden terminal the first responder.
+    @MainActor
+    func testFocusingAPaneWhileReviewIsOpenKeepsTheKeyboardOffTheHiddenTerminal() async throws {
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        _ = try daemon.registry.create(dir: "/tmp", agent: "claude", argv: ["/bin/cat"], name: "agent")
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        await model.select("agent")
+        _ = ReviewFixture(model)
+        var commands: [AppModel.TerminalCommand] = []
+        model.setTerminalCommandHandler(for: "agent") { commands.append($0) }
+
+        model.focusPane("agent")
+        XCTAssertEqual(commands, [.focus], "precondition: the sessions hand the keyboard to the pane")
+
+        await model.toggleReview()
+        commands = []
+        model.setFocus(.sessions)
+        model.focusPane("agent")
+        XCTAssertEqual(commands, [], "no hidden terminal takes the keyboard")
+        XCTAssertEqual(model.focusedPane, "agent", "the pane is still remembered for the way back")
+        XCTAssertEqual(model.focus, .terminal)
+        daemon.registry.kill(name: "agent")
+    }
 }
 
 /// Wires an `AppModel` for Review without real git: `/tmp` and `/usr` are
