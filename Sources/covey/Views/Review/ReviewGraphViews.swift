@@ -195,11 +195,18 @@ struct ReviewGraphStatus: View {
     }
 }
 
-/// An unchanged file one link away from the selected one: muted, dashed.
+/// An unchanged file one link away from the selected one: muted, dashed,
+/// with up to five usage lines. A user's lines are in the neighbour; a used
+/// file's lines are in the selected file, where it is used.
 struct ReviewNeighbourCard: View {
+    static let shownSites = 5
+
     let path: String
+    let sites: [UsageSite]
     let faded: Bool
     let tk: Tokens
+    let openSite: (UsageSite) -> Void
+    let openFile: () -> Void
 
     var body: some View {
         let dir = (path as NSString).deletingLastPathComponent
@@ -216,7 +223,39 @@ struct ReviewNeighbourCard: View {
             .padding(.horizontal, 12)
             .frame(height: 30)
             Rectangle().fill(tk.bd2).frame(height: 1)
+            VStack(alignment: .leading, spacing: 1) {
+                ForEach(sites.prefix(Self.shownSites), id: \.self) { site in
+                    Button { openSite(site) } label: {
+                        HStack(spacing: 8) {
+                            Text("\(site.line)")
+                                .foregroundStyle(tk.t4)
+                                .frame(width: 34, alignment: .trailing)
+                            Text(site.text).foregroundStyle(tk.t2)
+                            Spacer(minLength: 0)
+                        }
+                        .font(ReviewFont.mono(10.5))
+                        .lineLimit(1)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("\(site.path):\(site.line)")
+                }
+                if sites.count > Self.shownSites {
+                    Text("\(sites.count - Self.shownSites) more")
+                        .font(.system(size: 11))
+                        .foregroundStyle(tk.t3)
+                        .padding(.leading, 42)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
             Spacer(minLength: 0)
+            HStack {
+                Spacer()
+                ReviewButton(title: "Open file", tk: tk, action: openFile)
+            }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 8)
         }
         .background(tk.surface)
         .overlay(RoundedRectangle(cornerRadius: Tokens.rSm)

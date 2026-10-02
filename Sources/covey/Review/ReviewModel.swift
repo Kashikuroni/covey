@@ -89,6 +89,9 @@ final class ReviewModel {
     var fullFile = false
     var currentStop = 0
     var scrollRequest: ScrollRequest?
+    /// A neighbour's text shown read-only in place of the diff (+FileView).
+    var fileView: ReviewFileView?
+    @ObservationIgnored var fileViewToken = 0
     @ObservationIgnored var forceLoad: Set<String> = []
     /// Bumped by every `loadDiff`; only the newest request may publish its
     /// result, so an older fetch of the same file cannot land last.
@@ -198,6 +201,7 @@ final class ReviewModel {
         if loaded.recovered { toast("Saved review data was unreadable — started fresh") }
         state = nil
         selectedPath = nil
+        closeFileView()
         diff = .idle
         diffOpen = false
         composer = nil
@@ -347,6 +351,7 @@ final class ReviewModel {
     // MARK: - Diff
 
     func select(_ path: String?) async {
+        if fileView != nil { closeFileView() }
         if selectedPath != path {
             currentStop = 0
             neighboursExpanded = false
@@ -546,7 +551,7 @@ final class ReviewModel {
     // MARK: - Escape
 
     /// Closes the topmost thing: overlay/sheet → composer → comparison
-    /// popover → full-file mode → diff panel.
+    /// popover → read-only file → full-file mode → diff panel.
     func escape() async {
         if keysOverlayOpen {
             keysOverlayOpen = false
@@ -557,6 +562,8 @@ final class ReviewModel {
             composer = nil
         } else if comparisonPopoverOpen {
             comparisonPopoverOpen = false
+        } else if fileView != nil {
+            closeFileView()
         } else if fullFile {
             await toggleFullFile()
         } else if diffOpen {

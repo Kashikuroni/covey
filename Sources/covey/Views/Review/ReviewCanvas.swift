@@ -119,7 +119,13 @@ struct ReviewCanvas: View {
                     }
             }
         case .user, .used:
-            ReviewNeighbourCard(path: card.path, faded: visibility.dims(card.path), tk: tk)
+            ReviewNeighbourCard(path: card.path, sites: model.neighbourSites(card),
+                                faded: visibility.dims(card.path), tk: tk,
+                                openSite: { site in
+                                    guard let key = model.neighbourKey(card) else { return }
+                                    Task { await model.openUsage(site, of: key) }
+                                },
+                                openFile: { Task { await model.openNeighbour(card) } })
         }
     }
 

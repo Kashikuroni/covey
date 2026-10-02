@@ -66,10 +66,14 @@ struct ReviewModeView: View {
                 HStack(spacing: 0) {
                     if model.sidebarVisible { ReviewSidebar(model: model, tk: tk) }
                     ReviewCanvas(model: model, tk: tk)
-                    if model.diffOpen, model.selectedPath != nil {
+                    if let fileView = model.fileView {
+                        resizeHandle(total: geo.size.width)
+                        ReviewFileTextPanel(model: model, view: fileView, tk: tk)
+                            .frame(width: max(320, geo.size.width * model.diffFraction))
+                    } else if model.diffOpen, model.selectedPath != nil {
                         resizeHandle(total: geo.size.width)
                         ReviewDiffPanel(model: model, tk: tk)
-                            .frame(width: max(380, geo.size.width * model.diffFraction))
+                            .frame(width: max(320, geo.size.width * model.diffFraction))
                     }
                 }
             }
