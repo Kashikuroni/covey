@@ -1,6 +1,7 @@
 import Foundation
 import CoveyGit
 import CoveyKit
+import CoveyCodeGraph
 @testable import covey
 
 struct FakeSendError: Error, CustomStringConvertible {
@@ -114,6 +115,57 @@ final class FakeReviewGit: ReviewGitReading, @unchecked Sendable {
     }
 }
 
+/// Scripted link graphs: every build answers `graph` as it is when the
+/// call arrives; calls are recorded with the fingerprint they were for.
+final class FakeReviewGraphs: ReviewGraphBuilding, @unchecked Sendable {
+    struct Call {
+        let fingerprint: String
+        let at: ContinuousClock.Instant
+    }
+
+    private let lock = NSLock()
+    private var _graph: LinkGraph
+    private var _calls: [Call] = []
+    private var gate: CallGate?
+    private var _texts: [String: String] = [:]
+
+    init(_ graph: LinkGraph = .empty) { _graph = graph }
+
+    var graph: LinkGraph {
+        get { lock.withLock { _graph } }
+        set { lock.withLock { _graph = newValue } }
+    }
+
+    /// Head texts for the read-only file view, by path.
+    var texts: [String: String] {
+        get { lock.withLock { _texts } }
+        set { lock.withLock { _texts = newValue } }
+    }
+
+    var calls: [Call] { lock.withLock { _calls } }
+
+    /// The next build parks until the gate is released.
+    func holdNextBuild() -> CallGate {
+        let gate = CallGate()
+        lock.withLock { self.gate = gate }
+        return gate
+    }
+
+    func build(worktree: String, comparison: GitComparison, state: ComparisonState) async -> LinkGraph {
+        let (answer, gate): (LinkGraph, CallGate?) = lock.withLock {
+            _calls.append(Call(fingerprint: state.fingerprint, at: .now))
+            defer { self.gate = nil }
+            return (_graph, self.gate)
+        }
+        if let gate { try? await gate.hold() }
+        return answer
+    }
+
+    func headText(worktree: String, comparison: GitComparison, path: String) async -> String? {
+        lock.withLock { _texts[path] }
+    }
+}
+
 /// Parks one fake git call until the test releases it, so a test can
 /// interleave two operations deterministically: wait for the call to arrive,
 /// do something else, then release it (optionally with an error).
@@ -186,11 +238,12 @@ func oneHunk(_ lines: [(DiffLine.Kind, Int?, Int?, String)]) -> FileDiff {
 @MainActor
 func makeReviewModel(git: FakeReviewGit, directory: FakeDirectory? = nil,
                      store: ReviewStore? = nil,
+                     graphs: FakeReviewGraphs = FakeReviewGraphs(),
                      worktree: String = NSTemporaryDirectory()) -> (ReviewModel, ReviewStore) {
     let store = store ?? ReviewStore(
         root: "\(NSTemporaryDirectory())covey-reviews-\(UInt32.random(in: 0..<UInt32.max))", debounce: 0)
     let model = ReviewModel(worktree: worktree, projectRoot: "/proj", originSession: "origin",
-                            git: git, store: store, directory: directory)
+                            git: git, store: store, directory: directory, graphs: graphs)
     model.enterDelay = .zero
     model.toastDuration = .seconds(60)
     return (model, store)

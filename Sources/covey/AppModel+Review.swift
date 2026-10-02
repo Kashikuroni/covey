@@ -77,6 +77,8 @@ extension AppModel {
             return
         }
         review?.flush()
+        // The replaced review stops polling and drops a build in flight.
+        review?.isVisible = false
         let created = reviewModelFactory?(opening) ?? ReviewModel(
             worktree: opening.worktree, projectRoot: opening.projectRoot,
             originSession: opening.originSession,

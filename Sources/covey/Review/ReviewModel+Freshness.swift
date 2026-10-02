@@ -66,6 +66,7 @@ extension ReviewModel {
             guard generation == loadGeneration else { return }
             apply(fresh)
             fitCanvasIfNeeded()
+            requestGraph()
             await invalidateReviewed(old: old, new: fresh)
             guard generation == loadGeneration else { return }
             if let path = selectedPath {

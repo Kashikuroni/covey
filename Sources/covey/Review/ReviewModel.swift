@@ -3,6 +3,7 @@ import Observation
 import CoreGraphics
 import CoveyGit
 import CoveyKit
+import CoveyCodeGraph
 
 enum ReviewPhase: Equatable {
     case loading
@@ -119,17 +120,42 @@ final class ReviewModel {
     var sending = false
     @ObservationIgnored var issueCursor: Int?
 
+    // Graph (behavior in +Graph)
+    /// The comparison's links; nil until the first build lands.
+    var linkGraph: LinkGraph?
+    var linkSummary = LinkSummary()
+    /// A build is running or waiting its turn: "Updating links…".
+    var graphUpdating = false
+    var hoveredPath: String?
+    /// "+N more" was pressed on the selected card.
+    var neighboursExpanded = false
+    @ObservationIgnored let graphs: any ReviewGraphBuilding
+    @ObservationIgnored var graphGeneration = 0
+    @ObservationIgnored var graphTask: Task<Void, Never>?
+    /// Fingerprint the shown graph was built for, and the one being built.
+    @ObservationIgnored var graphShownFor: String?
+    @ObservationIgnored var graphPendingFor: String?
+    @ObservationIgnored var graphStartedAt: ContinuousClock.Instant?
+    /// Builds start at most this often.
+    @ObservationIgnored var graphInterval: Duration = .seconds(1)
+    @ObservationIgnored var layoutCache: (input: GraphLayoutInput, layout: GraphLayout)?
+
     // Freshness (behavior in +Freshness)
-    @ObservationIgnored var isVisible = true
+    /// Review is on screen: it polls git and builds links only then.
+    @ObservationIgnored var isVisible = true {
+        didSet { if isVisible != oldValue { graphVisibilityChanged() } }
+    }
     @ObservationIgnored var failureStreak = 0
     @ObservationIgnored var reloading = false
 
     init(worktree: String, projectRoot: String, originSession: String?,
-         git: ReviewGitReading, store: ReviewStore, directory: ReviewSessionDirectory?) {
+         git: ReviewGitReading, store: ReviewStore, directory: ReviewSessionDirectory?,
+         graphs: (any ReviewGraphBuilding)? = nil) {
         self.worktree = worktree
         self.projectRoot = projectRoot
         self.originSession = originSession
         self.git = git
+        self.graphs = graphs ?? ReviewGraphService()
         self.store = store
         self.directory = directory
         self.record = ReviewRecord(worktree: worktree, comparison: GitComparison(base: ""))
@@ -179,6 +205,11 @@ final class ReviewModel {
         currentStop = 0
         forceLoad = []
         canvasFitted = false
+        dropGraphWork()
+        setLinkGraph(nil)
+        graphShownFor = nil
+        hoveredPath = nil
+        neighboursExpanded = false
         do {
             let fresh = try await git.changes(worktree: worktree, comparison: comparison)
             guard generation == loadGeneration else { return }
@@ -197,6 +228,7 @@ final class ReviewModel {
             store.setLastComparison(comparison, worktree: worktree)
             persist()
             if canvasViewport.width > 0 { fitCanvas() }
+            requestGraph()
         } catch {
             guard generation == loadGeneration else { return }
             phase = .needsComparison(error: Self.describeLoad(error))
@@ -288,18 +320,39 @@ final class ReviewModel {
         if collapsedDirs.contains(dir) { collapsedDirs.remove(dir) } else { collapsedDirs.insert(dir) }
     }
 
-    /// What `GraphLayout` places: the changed files, top to bottom by folder.
+    /// What `GraphLayout` places: the changed files by every link, and the
+    /// selected file's neighbours while its row shows.
     var graphLayoutInput: GraphLayoutInput {
-        GraphLayoutInput(files: files.map(\.path), links: nil)
+        let links = graphLinks
+        var input = GraphLayoutInput(files: files.map(\.path), links: links, selected: selectedPath)
+        if let selected = selectedPath, let links, showsNeighbourRow {
+            let changed = Set(input.files)
+            input.users = links.filter { $0.to == selected && !changed.contains($0.from) }.map(\.from)
+            input.used = links.filter { $0.from == selected && !changed.contains($0.to) }.map(\.to)
+            input.expanded = neighboursExpanded
+        }
+        return input
     }
 
-    var graphLayout: GraphLayout { GraphLayout.make(graphLayoutInput) }
+    /// Recomputed only when its input changes: hovering re-renders the
+    /// canvas but never re-lays it out.
+    var graphLayout: GraphLayout {
+        let input = graphLayoutInput
+        if let cache = layoutCache, cache.input == input { return cache.layout }
+        let layout = GraphLayout.make(input)
+        layoutCache = (input, layout)
+        return layout
+    }
 
     // MARK: - Diff
 
     func select(_ path: String?) async {
         if selectedPath != path {
             currentStop = 0
+            neighboursExpanded = false
+            // A neighbour card under the pointer leaves with the old row and
+            // never reports the pointer leaving it.
+            if let hovered = hoveredPath, file(hovered) == nil { hoveredPath = nil }
             if composer?.anchor.path != path { composer = nil }
         }
         selectedPath = path
@@ -307,6 +360,9 @@ final class ReviewModel {
             diff = .idle
             return
         }
+        // The graph follows the tree and J/K: the selected card, with its
+        // neighbour row now laid out, comes to the middle.
+        focusCard()
         diffOpen = true
         if review(for: path).state == .unread {
             record.files[path, default: FileReview()].state = .reviewing

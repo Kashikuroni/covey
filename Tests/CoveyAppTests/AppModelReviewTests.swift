@@ -541,6 +541,7 @@ final class AppModelReviewTests: XCTestCase {
 @MainActor
 final class ReviewFixture {
     let git = FakeReviewGit()
+    let graphs = FakeReviewGraphs()
     private(set) var built: [ReviewModel] = []
     private(set) var stores: [String: ReviewStore] = [:]
 
@@ -555,7 +556,7 @@ final class ReviewFixture {
             stores[opening.worktree] = store
             let review = ReviewModel(worktree: opening.worktree, projectRoot: opening.projectRoot,
                                      originSession: opening.originSession, git: git, store: store,
-                                     directory: nil)
+                                     directory: nil, graphs: graphs)
             built.append(review)
             return review
         }
