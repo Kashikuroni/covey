@@ -18,15 +18,24 @@ public enum GitRunner {
     public static func execute(in dir: String, _ args: [String], readOnly: Bool,
                                timeout: TimeInterval = defaultTimeout,
                                outputLimit: Int = defaultOutputLimit) throws -> GitOutput {
+        let result = try executeRaw(in: dir, args, readOnly: readOnly, timeout: timeout,
+                                    outputLimit: outputLimit)
+        return GitOutput(stdout: String(decoding: result.stdout, as: UTF8.self),
+                         stderr: String(decoding: result.stderr, as: UTF8.self),
+                         status: result.status)
+    }
+
+    /// `execute` with stdout as raw bytes: a blob need not be UTF-8, and
+    /// `-z` output is split on NUL before decoding.
+    static func executeRaw(in dir: String, _ args: [String], readOnly: Bool,
+                           timeout: TimeInterval = defaultTimeout,
+                           outputLimit: Int = defaultOutputLimit) throws -> ProcessResult {
         let command = "git \(args.joined(separator: " "))"
         do {
-            let result = try ProcessRunner.run(
+            return try ProcessRunner.run(
                 executable: "/usr/bin/env", arguments: ["git", "-C", dir] + args,
                 environment: environment(readOnly: readOnly),
                 timeout: timeout, outputLimit: outputLimit)
-            return GitOutput(stdout: String(decoding: result.stdout, as: UTF8.self),
-                             stderr: String(decoding: result.stderr, as: UTF8.self),
-                             status: result.status)
         } catch ProcessFailure.timedOut {
             throw GitError(kind: .timedOut,
                            description: "\(command) timed out after \(Int(timeout.rounded(.up)))s")
