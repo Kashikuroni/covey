@@ -1,11 +1,5 @@
 import Foundation
 import CoreGraphics
-import CoveyGit
-
-struct CanvasCardFrame: Equatable {
-    let path: String
-    let rect: CGRect
-}
 
 /// Screen space kept free when fitting: the title block sits top-left and
 /// the toolbar bottom-left.
@@ -16,30 +10,6 @@ struct CanvasInsets: Equatable {
     var right: CGFloat
 
     static let canvas = CanvasInsets(top: 150, left: 40, bottom: 90, right: 40)
-}
-
-enum CanvasLayout {
-    static let cardSize = CGSize(width: 260, height: 104)
-    static let columnGap: CGFloat = 60
-    static let rowGap: CGFloat = 24
-
-    /// One column per parent directory (sorted; the repo root first), cards
-    /// within a column by path. World coordinates.
-    static func frames(for files: [ChangedFile]) -> [CanvasCardFrame] {
-        let groups = Dictionary(grouping: files) { ($0.path as NSString).deletingLastPathComponent }
-        return groups.keys.sorted().enumerated().flatMap { column, dir in
-            groups[dir]!.sorted { $0.path < $1.path }.enumerated().map { row, file in
-                CanvasCardFrame(path: file.path, rect: CGRect(
-                    x: CGFloat(column) * (cardSize.width + columnGap),
-                    y: CGFloat(row) * (cardSize.height + rowGap),
-                    width: cardSize.width, height: cardSize.height))
-            }
-        }
-    }
-
-    static func bounds(_ frames: [CanvasCardFrame]) -> CGRect? {
-        frames.map(\.rect).reduce(nil) { acc, rect in acc?.union(rect) ?? rect }
-    }
 }
 
 /// World → screen: `screen = world * zoom + pan`.

@@ -288,7 +288,12 @@ final class ReviewModel {
         if collapsedDirs.contains(dir) { collapsedDirs.remove(dir) } else { collapsedDirs.insert(dir) }
     }
 
-    var cardFrames: [CanvasCardFrame] { CanvasLayout.frames(for: files) }
+    /// What `GraphLayout` places: the changed files, top to bottom by folder.
+    var graphLayoutInput: GraphLayoutInput {
+        GraphLayoutInput(files: files.map(\.path), links: nil)
+    }
+
+    var graphLayout: GraphLayout { GraphLayout.make(graphLayoutInput) }
 
     // MARK: - Diff
 
@@ -466,7 +471,7 @@ final class ReviewModel {
     /// Fitting nothing only resets the transform; the canvas counts as fitted
     /// once a fit had at least one file to frame.
     func fitCanvas() {
-        canvas = CanvasTransform.fit(CanvasLayout.bounds(cardFrames), in: canvasViewport)
+        canvas = CanvasTransform.fit(graphLayout.bounds, in: canvasViewport)
         canvasFitted = !files.isEmpty
     }
 
@@ -478,8 +483,8 @@ final class ReviewModel {
     func resetZoom() { zoomCanvas(by: 1 / canvas.zoom) }
 
     func focusCard() {
-        guard let path = selectedPath, let frame = cardFrames.first(where: { $0.path == path }) else { return }
-        canvas = canvas.centered(on: frame.rect, in: canvasViewport)
+        guard let path = selectedPath, let rect = graphLayout.rects[path] else { return }
+        canvas = canvas.centered(on: rect, in: canvasViewport)
     }
 
     // MARK: - Escape

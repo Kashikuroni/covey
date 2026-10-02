@@ -64,18 +64,25 @@ struct ReviewCanvas: View {
     }
 
     private var world: some View {
-        let frames = model.cardFrames
-        let bounds = CanvasLayout.bounds(frames) ?? .zero
+        let layout = model.graphLayout
+        let bounds = layout.bounds ?? .zero
         return ZStack(alignment: .topLeading) {
-            ForEach(frames, id: \.path) { frame in
-                if let file = model.file(frame.path) {
+            ForEach(Array(layout.captions.enumerated()), id: \.offset) { _, caption in
+                Text(caption.text)
+                    .font(ReviewFont.caption(11))
+                    .foregroundStyle(tk.t4)
+                    .lineLimit(1)
+                    .offset(x: caption.origin.x, y: caption.origin.y)
+            }
+            ForEach(layout.cards.filter { $0.kind == .changed }, id: \.path) { card in
+                if let file = model.file(card.path) {
                     ReviewFileCard(file: file, review: model.review(for: file.path),
                                    openIssues: model.openIssueCount(file.path),
                                    comments: model.commentCount(file.path),
                                    selected: model.selectedPath == file.path,
                                    dimmed: !model.matchesFilter(file), tk: tk)
-                        .frame(width: frame.rect.width, height: frame.rect.height)
-                        .offset(x: frame.rect.minX, y: frame.rect.minY)
+                        .frame(width: card.rect.width, height: card.rect.height)
+                        .offset(x: card.rect.minX, y: card.rect.minY)
                         .onTapGesture {
                             resignReviewTextFocus()
                             Task { await model.select(file.path) }

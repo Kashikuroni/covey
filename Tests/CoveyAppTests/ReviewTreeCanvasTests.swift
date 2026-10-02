@@ -59,18 +59,6 @@ final class ReviewTreeCanvasTests: XCTestCase {
         XCTAssertEqual([ReviewGlyph.unread, .reviewing, .reviewed, .issues].map(\.symbol), ["○", "◐", "✓", "!"])
     }
 
-    func testFramesPutOneColumnPerDirectory() {
-        let frames = CanvasLayout.frames(for: ["a/2.swift", "b/1.swift", "root.txt", "a/1.swift"].map { file($0) })
-        let byPath = Dictionary(uniqueKeysWithValues: frames.map { ($0.path, $0.rect) })
-        let step = CanvasLayout.cardSize.width + CanvasLayout.columnGap
-        XCTAssertEqual(byPath["root.txt"]?.minX, 0)
-        XCTAssertEqual(byPath["a/1.swift"]?.minX, step)
-        XCTAssertEqual(byPath["a/2.swift"]?.minY, CanvasLayout.cardSize.height + CanvasLayout.rowGap)
-        XCTAssertEqual(byPath["b/1.swift"]?.minX, 2 * step)
-        XCTAssertEqual(CanvasLayout.bounds(frames)?.minX, 0)
-        XCTAssertNil(CanvasLayout.bounds([]))
-    }
-
     func testFitCentersHorizontallyAndClampsZoom() {
         let fit = CanvasTransform.fit(CGRect(x: 0, y: 0, width: 1000, height: 500),
                                       in: CGSize(width: 600, height: 700))
