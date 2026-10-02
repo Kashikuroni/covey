@@ -16,6 +16,7 @@ final class ReviewKeyRouterTests: XCTestCase {
             ("e", .toggleFullFile), ("c", .comment), ("f", .fit), ("0", .zoomReset),
             ("=", .zoomIn), ("+", .zoomIn), ("-", .zoomOut), ("1", .focusTree), ("2", .focusDiff),
             ("3", .focusCard), ("?", .showKeys), ("J", .nextFile), ("R", .toggleReviewed),
+            ("l", .toggleLinks), ("L", .toggleLinks),
         ]
         for (key, action) in table {
             XCTAssertEqual(route(key), action, key)
@@ -48,7 +49,7 @@ final class ReviewKeyRouterTests: XCTestCase {
         let table: [(String, ReviewKeyAction)] = [
             ("о", .nextFile), ("л", .previousFile), ("к", .toggleReviewed), ("у", .toggleFullFile),
             ("с", .comment), ("г", .nextUnreviewed), ("а", .fit), ("ш", .nextIssue),
-            ("Ш", .previousIssue), ("ъ", .nextHunk), ("х", .previousHunk),
+            ("Ш", .previousIssue), ("ъ", .nextHunk), ("х", .previousHunk), ("д", .toggleLinks),
         ]
         for (key, action) in table {
             XCTAssertEqual(route(key), action, key)
@@ -59,8 +60,9 @@ final class ReviewKeyRouterTests: XCTestCase {
     }
 
     func testHelpListsEveryShortcutOnce() {
-        XCTAssertEqual(ReviewKeyRouter.help.count, 16)
-        XCTAssertEqual(Set(ReviewKeyRouter.help.map(\.label)).count, 16)
+        XCTAssertEqual(ReviewKeyRouter.help.count, 17)
+        XCTAssertEqual(Set(ReviewKeyRouter.help.map(\.label)).count, 17)
+        XCTAssertTrue(ReviewKeyRouter.help.contains { $0.label == "Show links" && $0.keys == "L" })
         XCTAssertTrue(ReviewKeyRouter.help.contains { $0.label == "Back to sessions" && $0.keys == "⌘W" })
     }
 

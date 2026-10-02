@@ -32,6 +32,7 @@ extension ReviewModel {
         case .focusDiff: reopenDiff()
         case .focusCard: focusCard()
         case .showKeys: keysOverlayOpen = true
+        case .toggleLinks: linkSettings.toggleShowLinks()
         case .escape: await escape()
         case .closeReview: break   // the main window leaves Review itself
         }

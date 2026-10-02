@@ -96,6 +96,10 @@ struct SettingsSheet: View {
                 checkboxRow(.codexUsage, label: "Codex usage limits",
                             value: $draft.values.codexUsageEnabled)
             }
+            section("Review") {
+                checkboxRow(.linksOnFocus, label: "Links on focus",
+                            value: $draft.values.linksOnFocus)
+            }
             actionRow
         }
         .padding(20)

@@ -19,17 +19,17 @@ final class SettingsStateTests: XCTestCase {
         var draft = SettingsDraft(values: values())
         let down: [SettingsRow] = [
             .vimMode, .providerKey, .showSessions, .showHeader, .showFooter,
-            .usagePlacement, .claudeUsage, .codexUsage,
+            .usagePlacement, .claudeUsage, .codexUsage, .linksOnFocus,
         ]
         for expected in down {
             XCTAssertNil(draft.handle(.moveDown))
             XCTAssertEqual(draft.selectedRow, expected)
         }
         XCTAssertNil(draft.handle(.moveDown))
-        XCTAssertEqual(draft.selectedRow, .codexUsage)
+        XCTAssertEqual(draft.selectedRow, .linksOnFocus)
 
         let up: [SettingsRow] = [
-            .claudeUsage, .usagePlacement, .showFooter,
+            .codexUsage, .claudeUsage, .usagePlacement, .showFooter,
             .showHeader, .showSessions, .providerKey, .vimMode, .theme,
         ]
         for expected in up {
@@ -49,6 +49,7 @@ final class SettingsStateTests: XCTestCase {
             (.showFooter, \.showFooter),
             (.claudeUsage, \.claudeUsageEnabled),
             (.codexUsage, \.codexUsageEnabled),
+            (.linksOnFocus, \.linksOnFocus),
         ]
         for (row, path) in rows {
             draft.selectedRow = row
@@ -91,7 +92,7 @@ final class SettingsStateTests: XCTestCase {
     func testRowsContainCredentialsButNoActiveProvider() {
         XCTAssertEqual(SettingsRow.allCases, [
             .theme, .vimMode, .providerKey, .showSessions, .showHeader, .showFooter,
-            .usagePlacement, .claudeUsage, .codexUsage,
+            .usagePlacement, .claudeUsage, .codexUsage, .linksOnFocus,
         ])
     }
 

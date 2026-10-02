@@ -106,6 +106,8 @@ final class ReviewModel {
     var diffFraction: CGFloat = 0.55
 
     // Canvas
+    /// «Показать связи» / «Связи при фокусе»; `AppModel` hands in its own.
+    var linkSettings = ReviewLinkSettings()
     var canvas = CanvasTransform()
     var canvasViewport: CGSize = .zero
     @ObservationIgnored var canvasFitted = false

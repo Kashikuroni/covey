@@ -146,6 +146,8 @@ public final class AppModel {
     }
     /// Builds the review for an opening (test seam; nil = the production model).
     @ObservationIgnored var reviewModelFactory: ((ReviewOpening) -> ReviewModel)?
+    /// The Review graph's link settings (persisted), shared with the live review.
+    let reviewLinks = ReviewLinkSettings()
     public private(set) var connected = false
     public private(set) var themeRaw: String = "dark"
     public private(set) var splitPct: Int = 38
@@ -325,6 +327,7 @@ public final class AppModel {
             readMarkers: { [weak self] in self?.persisted.usageNotified ?? [:] },
             writeMarkers: { [weak self] in self?.persisted.usageNotified = $0 })
         issueBrowser.toast = { [weak self] msg in self?.showToast(msg) }
+        reviewLinks.changed = { [weak self] in self?.persist() }
         issueBrowser.fetchBranches = { [weak self] dir in
             await self?.gitInfo(dir).branches ?? []
         }
@@ -344,6 +347,8 @@ public final class AppModel {
         showHeader = persisted.showHeader ?? true
         sbWidth = persisted.sbWidth ?? 360
         vimMode = persisted.vimMode ?? true
+        reviewLinks.showLinks = persisted.showLinks ?? false
+        reviewLinks.linksOnFocus = persisted.linksOnFocus ?? true
         projectNames = persisted.projectNames
         projects = persisted.projects ?? []
         do {
@@ -932,7 +937,8 @@ public final class AppModel {
                        showHeader: showHeader, showFooter: showFooter,
                        usagePlacement: usagePlacement,
                        claudeUsageEnabled: claudeUsageEnabled,
-                       codexUsageEnabled: codexUsageEnabled)
+                       codexUsageEnabled: codexUsageEnabled,
+                       linksOnFocus: reviewLinks.linksOnFocus)
     }
 
     func openSettings() {
@@ -1268,6 +1274,7 @@ public final class AppModel {
         showHeader = values.showHeader
         showFooter = values.showFooter
         usagePlacement = values.usagePlacement
+        reviewLinks.linksOnFocus = values.linksOnFocus
         if values.claudeUsageEnabled != old.claudeUsageEnabled { setClaudeUsageEnabled(values.claudeUsageEnabled) }
         if values.codexUsageEnabled != old.codexUsageEnabled { setCodexUsageEnabled(values.codexUsageEnabled) }
         persist()
@@ -1827,6 +1834,8 @@ public final class AppModel {
         persisted.showHeader = showHeader
         persisted.sbWidth = sbWidth
         persisted.vimMode = vimMode
+        persisted.showLinks = reviewLinks.showLinks
+        persisted.linksOnFocus = reviewLinks.linksOnFocus
         persisted.projectNames = projectNames
         persisted.projects = projects
         snapshotWorkspaceViews()

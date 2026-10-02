@@ -47,6 +47,8 @@ final class ReviewModeKeysTests: XCTestCase {
         XCTAssertEqual(decide("r") { $0.isRepeat = true }, .swallow)
         XCTAssertEqual(decide("e") { $0.isRepeat = true }, .swallow)
         XCTAssertEqual(decide("?") { $0.isRepeat = true }, .swallow)
+        XCTAssertEqual(decide("l") { $0.isRepeat = true }, .swallow, "a held L must not flicker the links")
+        XCTAssertEqual(decide("l"), .perform(.toggleLinks))
         XCTAssertEqual(decide("j") { $0.isRepeat = true }, .perform(.nextFile))
     }
 

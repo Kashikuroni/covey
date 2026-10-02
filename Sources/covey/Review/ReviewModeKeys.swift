@@ -38,8 +38,8 @@ enum ReviewModeKeyDecision: Equatable {
 /// The Review half of the main window's key monitor (formerly the Review
 /// window's own monitor), pure so it can be tested.
 enum ReviewModeKeys {
-    /// Held keys that would flip-flop a toggle. Plan E adds its links key here.
-    static let noRepeat: Set<ReviewKeyAction> = [.toggleReviewed, .toggleFullFile, .showKeys]
+    /// Held keys that would flip-flop a toggle.
+    static let noRepeat: Set<ReviewKeyAction> = [.toggleReviewed, .toggleFullFile, .showKeys, .toggleLinks]
 
     static func decide(_ input: ReviewModeKeyInput) -> ReviewModeKeyDecision {
         let blocked = input.paletteOpen || input.sheetOpen

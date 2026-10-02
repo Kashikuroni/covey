@@ -81,6 +81,7 @@ extension AppModel {
             worktree: opening.worktree, projectRoot: opening.projectRoot,
             originSession: opening.originSession,
             git: ReviewGitService(), store: .shared, directory: self)
+        created.linkSettings = reviewLinks
         review = created
         windowMode = .review
         syncReviewVisibility()

@@ -5,6 +5,7 @@ enum ReviewKeyAction: Hashable {
     case nextUnreviewed, toggleReviewed, toggleFullFile, comment
     case fit, zoomReset, zoomIn, zoomOut
     case focusTree, focusDiff, focusCard, showKeys, escape, closeReview
+    case toggleLinks
 }
 
 struct ReviewKeyEvent: Equatable {
@@ -52,6 +53,7 @@ enum ReviewKeyRouter {
         case "1": return .focusTree
         case "2": return .focusDiff
         case "3": return .focusCard
+        case "l": return .toggleLinks
         case "?": return .showKeys
         default: return nil
         }
@@ -71,6 +73,7 @@ enum ReviewKeyRouter {
         ("Show file tree", "1"),
         ("Show diff", "2"),
         ("Center current card", "3"),
+        ("Show links", "L"),
         ("This help", "?"),
         ("Close / back", "Esc"),
         ("Back to sessions", "⌘W"),

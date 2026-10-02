@@ -104,6 +104,23 @@ final class PersistedStateTests: XCTestCase {
         XCTAssertNil(s.recents.first?.providerId)
     }
 
+    func testLinkSettingsRoundTripAndAnOlderPayloadDecodesWithoutThem() throws {
+        var st = PersistedState()
+        st.showLinks = true
+        st.linksOnFocus = false
+        let back = try JSONDecoder().decode(PersistedState.self, from: JSONEncoder().encode(st))
+        XCTAssertEqual(back.showLinks, true)
+        XCTAssertEqual(back.linksOnFocus, false)
+
+        let json = #"{"recents":[],"order":[],"projectOrder":[],"projectNames":{},"drafts":{},"sessions":{},"theme":"light"}"#
+        let old = try JSONDecoder().decode(PersistedState.self, from: Data(json.utf8))
+        XCTAssertNil(old.showLinks)
+        XCTAssertNil(old.linksOnFocus)
+        XCTAssertEqual(old.theme, "light")
+        let fresh = String(decoding: try JSONEncoder().encode(PersistedState()), as: UTF8.self)
+        XCTAssertFalse(fresh.contains("showLinks"), "nil is omitted")
+    }
+
     func testPushRecentDedupesNewestFirst() {
         var r: [RecentSession] = []
         pushRecent(&r, RecentSession(name: "a", dir: "/w", agent: "sh"))
