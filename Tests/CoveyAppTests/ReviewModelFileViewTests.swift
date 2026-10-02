@@ -93,4 +93,31 @@ final class ReviewModelFileViewTests: XCTestCase {
         XCTAssertEqual(ReviewModel.fileLines(""), [""])
         XCTAssertEqual(ReviewModel.fileLines("x\ry"), ["x\ry"], "a lone CR is not a line break for the graph")
     }
+
+    func testTheCaptionSaysNotInThisChangeOnlyForAFileOutsideTheChange() {
+        XCTAssertEqual(ReviewModel.fileViewCaption(inChange: false, usageLines: 0), "Not in this change")
+        XCTAssertEqual(ReviewModel.fileViewCaption(inChange: false, usageLines: 1),
+                       "Not in this change · 1 usage line")
+        XCTAssertEqual(ReviewModel.fileViewCaption(inChange: false, usageLines: 2),
+                       "Not in this change · 2 usage lines")
+        XCTAssertEqual(ReviewModel.fileViewCaption(inChange: true, usageLines: 1), "1 usage line",
+                       "a file in the change is not called not in this change")
+        XCTAssertEqual(ReviewModel.fileViewCaption(inChange: true, usageLines: 0), "",
+                       "a file in the change with no usage lines says nothing")
+    }
+
+    func testAUsageLineOnTheSelectedFileDropsTheNotInThisChangePrefix() async throws {
+        let (model, _) = await started()
+        let used = try card(model, "lib/z.swift")
+        let site = try XCTUnwrap(model.neighbourSites(used).first)
+        XCTAssertEqual(site.path, model.selectedPath,
+                       "the used file's usage lines sit in the selected changed file itself")
+        await model.openUsage(site, of: try XCTUnwrap(model.neighbourKey(used)))
+        let view = try XCTUnwrap(model.fileView)
+        let caption = ReviewModel.fileViewCaption(inChange: model.file(view.path) != nil,
+                                                  usageLines: view.highlighted.count)
+        XCTAssertFalse(caption.contains("Not in this change"),
+                       "a.swift is in the change: the caption may not call it not in this change")
+        XCTAssertEqual(caption, "1 usage line")
+    }
 }

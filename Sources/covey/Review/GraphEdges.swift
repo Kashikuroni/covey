@@ -37,7 +37,8 @@ struct EdgeRoute: Equatable {
         let end = CGPoint(x: right ? to.minX : to.maxX, y: to.midY)
         let reach = abs(end.x - start.x)
         let bend = max(minBend, reach / 2) * (right ? 1 : -1)
-        let lift = min(80, reach / 5)
+        // At most one gutter: a deeper arch would reach for the line above.
+        let lift = min(GraphLayout.lineGap, reach / 5)
         return EdgeRoute(start: start, control1: CGPoint(x: start.x + bend, y: start.y - lift),
                          control2: CGPoint(x: end.x - bend, y: end.y - lift), end: end)
     }

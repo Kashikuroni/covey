@@ -36,10 +36,13 @@ struct ReviewFileTextPanel: View {
                     .buttonStyle(.borderless)
                     .help("Close (Esc)")
             }
-            Text(view.highlighted.isEmpty ? "Not in this change"
-                 : "Not in this change · \(view.highlighted.count) usage line\(view.highlighted.count == 1 ? "" : "s")")
-                .font(.system(size: 12))
-                .foregroundStyle(tk.t3)
+            let caption = ReviewModel.fileViewCaption(inChange: model.file(view.path) != nil,
+                                                      usageLines: view.highlighted.count)
+            if !caption.isEmpty {
+                Text(caption)
+                    .font(.system(size: 12))
+                    .foregroundStyle(tk.t3)
+            }
         }
         .padding(.horizontal, 20)
         .padding(.top, 16)

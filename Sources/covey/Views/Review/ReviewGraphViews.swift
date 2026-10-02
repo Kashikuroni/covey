@@ -114,6 +114,7 @@ struct ReviewGraphLabels: View {
                             .font(.system(size: 13, weight: .bold))
                             .foregroundStyle(tk.err)
                             .opacity(visibility.dims(link) ? 0.4 : 1)
+                            .allowsHitTesting(false)
                             .position(mid)
                     }
                     if visibility.isFocused(link), !link.names.isEmpty {

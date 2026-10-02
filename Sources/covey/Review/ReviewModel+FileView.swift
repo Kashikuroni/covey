@@ -80,4 +80,15 @@ extension ReviewModel {
         if lines.count > 1, lines.last == "" { lines.removeLast() }
         return lines
     }
+
+    /// The read-only panel's caption: "Not in this change" only for a file
+    /// outside the change, plus how many usage lines are marked in it.
+    static func fileViewCaption(inChange: Bool, usageLines: Int) -> String {
+        var caption = inChange ? "" : "Not in this change"
+        if usageLines > 0 {
+            let count = "\(usageLines) usage line\(usageLines == 1 ? "" : "s")"
+            caption = caption.isEmpty ? count : caption + " · " + count
+        }
+        return caption
+    }
 }

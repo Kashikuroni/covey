@@ -35,6 +35,18 @@ final class GraphEdgesTests: XCTestCase {
         XCTAssertGreaterThan(left.arrowHead()[1].x, 260, "the head points left")
     }
 
+    func testALongSameLineArchLiftsAtMostOneGutter() {
+        // reach 1000: the old cap (80) raised the crown over the line's top
+        // edge, toward the line above.
+        let long = EdgeRoute.between(rect(0, 0), rect(1260, 0))
+        XCTAssertEqual(long.control1.y, 52 - GraphLayout.lineGap, accuracy: 0.001,
+                       "the arch lifts at most the gap between two lines")
+        XCTAssertEqual(long.control2.y, 52 - GraphLayout.lineGap, accuracy: 0.001)
+        XCTAssertGreaterThanOrEqual(long.point(at: 0.5).y, 0,
+                                    "the crown stays inside the line's own band")
+        XCTAssertLessThan(long.point(at: 0.5).y, 52, "…and still arches over the side edges")
+    }
+
     func testATargetAboveIsReachedAroundTheSide() {
         let up = EdgeRoute.between(rect(0, 320), rect(0, 0))
         XCTAssertEqual(up.start, CGPoint(x: 260, y: 372))
