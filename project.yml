@@ -44,6 +44,8 @@ targets:
         product: CoveyKit
       - package: covey
         product: CoveyGit
+      - package: covey
+        product: CoveyCodeGraph
       - package: SwiftTerm
         product: SwiftTerm
       - target: coveyd

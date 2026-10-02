@@ -58,6 +58,7 @@ let package = Package(
             dependencies: [
                 "CoveyKit",
                 "CoveyGit",
+                "CoveyCodeGraph",
                 .product(name: "SwiftTerm", package: "SwiftTerm")
             ],
             swiftSettings: [.swiftLanguageMode(.v5)]
@@ -69,7 +70,7 @@ let package = Package(
         ),
         .testTarget(
             name: "CoveyAppTests",
-            dependencies: ["covey", "CoveydCore", "CoveyGit"],
+            dependencies: ["covey", "CoveydCore", "CoveyGit", "CoveyCodeGraph"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
