@@ -79,6 +79,10 @@ final class ScriptResolver: ReferenceResolver {
     func keywords(for path: String) async throws -> [String] {
         let stem = Self.stem(of: path)
         var words = [stem == "index" ? Paths.basename(Paths.dirname(path)) : stem]
+        // An explicit `./dir/index` specifier names the file, not the folder:
+        // `index` also finds importers that say neither the folder nor
+        // `from`/`require` inside it; resolution drops the over-selection.
+        if stem == "index" { words.append("index") }
         for package in try await workspacePackages() where entry(of: package) == path {
             words.append(package.name)
         }

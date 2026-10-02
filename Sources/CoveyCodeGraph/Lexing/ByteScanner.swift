@@ -134,7 +134,11 @@ struct ByteScanner {
         let start = i
         while let b = peek() {
             if b == .backslash {
-                blank(2)
+                if peek(1) == .carriageReturn && peek(2) == .newline {
+                    blank(3)   // `\` escapes the whole CRLF line end
+                } else {
+                    blank(2)
+                }
             } else if b == quote {
                 let value = String(decoding: src[start..<i], as: UTF8.self)
                 blank()

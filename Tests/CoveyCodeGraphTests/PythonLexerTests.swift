@@ -32,6 +32,16 @@ final class PythonLexerTests: XCTestCase {
         XCTAssertEqual(lineOf("i", in: lexed), 3)
     }
 
+    /// The CRLF twin: a backslash escapes the whole `\r\n` line end, so the
+    /// string continues and its content stays blanked.
+    func testBackslashCRLFContinuesAString() {
+        let source = "s = 'a\\\r\nimport h'\nimport i"
+        let lexed = PythonLexer.lex(source)
+        assertSameShape(source, lexed)
+        XCTAssertEqual(survivingWords(lexed), ["s", "import", "i"])
+        XCTAssertEqual(lineOf("i", in: lexed), 3)
+    }
+
     func testUnterminatedStringEndsAtTheLine() {
         let lexed = PythonLexer.lex("s = 'open\nimport j")
         XCTAssertEqual(survivingWords(lexed), ["s", "import", "j"])

@@ -164,4 +164,23 @@ final class PythonTests: XCTestCase {
         let graph = await buildGraph(fake)
         XCTAssertEqual(describe(graph), [])
     }
+
+    /// In a CRLF file a backslash before the line end continues the string:
+    /// `s = 'a\<CRLF>import os'` is one string, and its `import os` is text.
+    func testCRLFStringContinuationDoesNotLeakAnImport() async {
+        let fake = FakeProvider(common: ["os.py": "def sep(): ...\n"],
+                                base: ["pkg/uses.py": "s = 'a\\\r\nimport os'\n"],
+                                head: ["pkg/uses.py": "s = 'a\\\r\nimport os'\n# edited\n"])
+        let graph = await buildGraph(fake)
+        XCTAssertEqual(describe(graph), [])
+    }
+
+    /// A UTF-8 BOM is no part of the first token: `import` on the first line
+    /// of a BOM'd file is still an import.
+    func testBOMBeforeTheFirstImportIsIgnored() async {
+        let fake = FakeProvider(common: ["os.py": "def sep(): ...\n"],
+                                head: ["bom/entry.py": "\u{FEFF}import os\n"])
+        let graph = await buildGraph(fake)
+        XCTAssertEqual(describe(graph), ["bom/entry.py → os.py added"])
+    }
 }

@@ -181,4 +181,28 @@ final class ScriptTests: XCTestCase {
         let graph = await buildGraph(fake)
         XCTAssertEqual(describe(graph), ["src/main.ts → src/lib/index.ts added [a]"])
     }
+
+    /// An explicit `./api/index` names the file, not the folder: a changed
+    /// `index.*` finds such importers. (The folder-name keyword already
+    /// reaches them — `'./api/index'` contains the word `api` — so this pins
+    /// the plain path; the `index` keyword pins the one below.)
+    func testExplicitIndexImportFromOutsideTheFolderIsAnIncomingLink() async {
+        let fake = FakeProvider(
+            common: ["src/page.ts": "import { x } from './api/index'\n"],
+            base: ["src/api/index.ts": "export const x = 1\n"],
+            head: ["src/api/index.ts": "export const x = 2\n"])
+        let graph = await buildGraph(fake)
+        XCTAssertEqual(describe(graph), ["src/page.ts → src/api/index.ts kept [x]"])
+    }
+
+    /// An explicit `'../index'` names the file while saying neither the
+    /// folder nor `from`/`require`: only the plain keyword `index` finds it.
+    func testExplicitIndexSpecifierWithoutFromOrRequireIsFound() async {
+        let fake = FakeProvider(
+            common: ["src/api/sub/deep.ts": "import '../index'\n"],
+            base: ["src/api/index.ts": "export const x = 1\n"],
+            head: ["src/api/index.ts": "export const x = 2\n"])
+        let graph = await buildGraph(fake)
+        XCTAssertEqual(describe(graph), ["src/api/sub/deep.ts → src/api/index.ts kept"])
+    }
 }

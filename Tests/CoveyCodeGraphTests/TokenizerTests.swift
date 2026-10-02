@@ -23,6 +23,13 @@ final class TokenizerTests: XCTestCase {
         XCTAssertEqual(lines, ["a": [1, 2], "b": [2]])
     }
 
+    /// A UTF-8 BOM belongs to no token: the first word stays recognizable.
+    func testBOMIsNotPartOfTheFirstToken() {
+        let lexed = PythonLexer.lex("\u{FEFF}import os\n")
+        XCTAssertEqual(survivingWords(lexed), ["import", "os"])
+        XCTAssertEqual(lineOf("os", in: lexed), 1)
+    }
+
     func testCRLFFilesNumberLinesLikeLF() {
         let source = "use a;\r\n// note\r\nuse b;\r\n"
         let lexed = RustLexer.lex(source)

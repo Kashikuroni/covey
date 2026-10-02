@@ -27,7 +27,11 @@ enum Tokenizer {
     /// string literals back as `.string` tokens where they stood. Lines are
     /// counted by `\n` only, so CRLF files number the same as LF files.
     static func tokens(_ lexed: LexedSource) -> [Token] {
-        let code = lexed.code
+        var code = lexed.code
+        // A UTF-8 BOM belongs to no token: it would glue onto the first word.
+        if code.starts(with: [0xEF, 0xBB, 0xBF]) {
+            for k in 0..<3 { code[k] = .space }
+        }
         var tokens: [Token] = []
         var line = 1
         var lineStart = 0

@@ -43,6 +43,16 @@ final class ScriptLexerTests: XCTestCase {
         XCTAssertEqual(lexed.strings.map(\.value), ["x"])
     }
 
+    /// A backslash escapes the whole `\r\n` line end inside a quoted string,
+    /// so the string continues and its content stays blanked.
+    func testBackslashCRLFContinuesAString() {
+        let source = "const s = 'a\\\r\nimport h';\nimport('./i')\n"
+        let lexed = ScriptLexer.lex(source)
+        assertSameShape(source, lexed)
+        XCTAssertEqual(survivingWords(lexed), ["const", "s", "import"])
+        XCTAssertEqual(lexed.strings.map(\.value), ["a\\\r\nimport h", "./i"])
+    }
+
     func testVeryLongMinifiedLineStaysCorrect() {
         let long = String(repeating: "f(/x/,a/b,'s');", count: 20_000)
             + String(repeating: "(/", count: 20_000)
