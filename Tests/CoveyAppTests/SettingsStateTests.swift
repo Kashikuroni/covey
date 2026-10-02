@@ -6,7 +6,8 @@ final class SettingsStateTests: XCTestCase {
         SettingsValues(theme: .dark, vimMode: true,
                        showSessions: true, showHeader: true, showFooter: false,
                        usagePlacement: .right,
-                       claudeUsageEnabled: true, codexUsageEnabled: false)
+                       claudeUsageEnabled: true, codexUsageEnabled: false,
+                       glmUsageEnabled: true)
     }
 
     func testDraftStartsAtThemeWithSuppliedValues() {
@@ -19,17 +20,17 @@ final class SettingsStateTests: XCTestCase {
         var draft = SettingsDraft(values: values())
         let down: [SettingsRow] = [
             .vimMode, .providerKey, .showSessions, .showHeader, .showFooter,
-            .usagePlacement, .claudeUsage, .codexUsage,
+            .usagePlacement, .claudeUsage, .codexUsage, .glmUsage,
         ]
         for expected in down {
             XCTAssertNil(draft.handle(.moveDown))
             XCTAssertEqual(draft.selectedRow, expected)
         }
         XCTAssertNil(draft.handle(.moveDown))
-        XCTAssertEqual(draft.selectedRow, .codexUsage)
+        XCTAssertEqual(draft.selectedRow, .glmUsage)
 
         let up: [SettingsRow] = [
-            .claudeUsage, .usagePlacement, .showFooter,
+            .codexUsage, .claudeUsage, .usagePlacement, .showFooter,
             .showHeader, .showSessions, .providerKey, .vimMode, .theme,
         ]
         for expected in up {
@@ -49,6 +50,7 @@ final class SettingsStateTests: XCTestCase {
             (.showFooter, \.showFooter),
             (.claudeUsage, \.claudeUsageEnabled),
             (.codexUsage, \.codexUsageEnabled),
+            (.glmUsage, \.glmUsageEnabled),
         ]
         for (row, path) in rows {
             draft.selectedRow = row
@@ -91,7 +93,7 @@ final class SettingsStateTests: XCTestCase {
     func testRowsContainCredentialsButNoActiveProvider() {
         XCTAssertEqual(SettingsRow.allCases, [
             .theme, .vimMode, .providerKey, .showSessions, .showHeader, .showFooter,
-            .usagePlacement, .claudeUsage, .codexUsage,
+            .usagePlacement, .claudeUsage, .codexUsage, .glmUsage,
         ])
     }
 

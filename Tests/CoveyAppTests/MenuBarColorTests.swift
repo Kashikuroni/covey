@@ -7,7 +7,8 @@ final class MenuBarColorTests: XCTestCase {
     func testPercentRunsKeepThresholdColorsAndNamesRemainNeutral() {
         for (value, color) in [(49.0, NSColor.systemGreen), (50, .systemOrange), (80, .systemRed)] {
             let text = menuBarLimitsAttributedTitle(
-                usage: Usage(fiveHour: UsageWindow(utilization: value)), codexUsage: nil)
+                usage: Usage(fiveHour: UsageWindow(utilization: value)), codexUsage: nil,
+                glmQuota: nil, glmEnabled: true)
             let percentRange = (text.string as NSString).range(of: "\(Int(value))%")
             XCTAssertEqual(text.attribute(.foregroundColor, at: percentRange.location,
                                           effectiveRange: nil) as? NSColor, color)
@@ -19,7 +20,8 @@ final class MenuBarColorTests: XCTestCase {
 
     func testStatusImageRetainsColorAndCompactSize() {
         let text = menuBarLimitsAttributedTitle(
-            usage: Usage(fiveHour: UsageWindow(utilization: 63)), codexUsage: nil)
+            usage: Usage(fiveHour: UsageWindow(utilization: 63)), codexUsage: nil,
+                glmQuota: nil, glmEnabled: true)
         let image = menuBarLimitsImage(text)
         XCTAssertFalse(image.isTemplate)
         XCTAssertGreaterThan(image.size.width, 80)

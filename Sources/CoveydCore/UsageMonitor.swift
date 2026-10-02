@@ -9,6 +9,7 @@ public final class UsageMonitor {
     private let path: String?
     private var persistenceError: Error?
     private let fetchAccount: () async -> Account
+    private let fetchGLM: () async -> GLMAccount
     private let usageInterval: TimeInterval
     private let resolveCodex: () -> String?
     private var running = false
@@ -19,10 +20,12 @@ public final class UsageMonitor {
 
     public init(path: String? = nil, legacyPath: String? = nil,
                 fetchAccount: @escaping () async -> Account = UsageService.fetchAccount,
+                fetchGLM: @escaping () async -> GLMAccount = GlmUsageService.fetchGLMAccount,
                 usageInterval: TimeInterval = 60,
                 resolveCodex: @escaping () -> String? = resolveCodexPath) {
         self.path = path
         self.fetchAccount = fetchAccount
+        self.fetchGLM = fetchGLM
         self.usageInterval = max(0.01, usageInterval)
         self.resolveCodex = resolveCodex
         var restored = UsageSnapshot()
@@ -84,6 +87,7 @@ public final class UsageMonitor {
         switch provider {
         case .claude: next.claudeUsageEnabled = enabled
         case .codex: next.codexUsageEnabled = enabled; if !enabled { next.codexState = .stopped }
+        case .glm: next.glmUsageEnabled = enabled
         }
         next.revision &+= 1
         try persist(next)
@@ -108,13 +112,29 @@ public final class UsageMonitor {
         let generation = generations[provider, default: 0]
         requests[provider, default: 0] &+= 1
         let request = requests[provider, default: 0]
-        let account = await fetchAccount()
-        guard !Task.isCancelled, isEnabled(provider), generations[provider, default: 0] == generation,
-              requests[provider] == request else { return }
-        mutate {
-            if let usage = account.usage { $0.usage = usage }
-            if let plan = account.plan { $0.plan = plan }
-            $0.usageError = account.usageError
+        func stillCurrent() -> Bool {
+            !Task.isCancelled && isEnabled(provider)
+                && generations[provider, default: 0] == generation
+                && requests[provider] == request
+        }
+        switch provider {
+        case .claude:
+            let account = await fetchAccount()
+            guard stillCurrent() else { return }
+            mutate {
+                if let usage = account.usage { $0.usage = usage }
+                if let plan = account.plan { $0.plan = plan }
+                $0.usageError = account.usageError
+            }
+        case .glm:
+            let account = await fetchGLM()
+            guard stillCurrent() else { return }
+            mutate {
+                if let quota = account.quota { $0.glmQuota = quota }
+                $0.glmUsageError = account.error
+            }
+        case .codex:
+            break
         }
     }
 
@@ -140,6 +160,7 @@ public final class UsageMonitor {
         switch provider {
         case .claude: return snapshot.claudeUsageEnabled
         case .codex: return snapshot.codexUsageEnabled
+        case .glm: return snapshot.glmUsageEnabled
         }
     }
 
@@ -170,7 +191,12 @@ public final class UsageMonitor {
     }
 
     private func mutate(_ change: (inout UsageSnapshot) -> Void) {
+        let before = snapshot
         change(&snapshot)
+        // A poll that lands the same data is a no-op: no revision bump, no
+        // disk rewrite, no broadcast. Without this, every provider's 60s
+        // tick would atomically rewrite usage.json forever.
+        guard snapshot != before else { return }
         snapshot.revision &+= 1
         do { try persist(snapshot) }
         catch { UsageLog.note("persistence", [("err", "\(error)")]) }

@@ -7,9 +7,10 @@ final class AppModelUsageTests: XCTestCase {
     @MainActor
     private func makeUsageModel(_ daemon: TestDaemon,
                                 fetch: @escaping () async -> Account,
+                                fetchGLM: @escaping () async -> GLMAccount = { GLMAccount() },
                                 interval: TimeInterval = 0.05) throws -> AppModel {
         let monitor = UsageMonitor(path: daemon.path + ".usage.json", legacyPath: daemon.path + ".legacy.json",
-                                   fetchAccount: fetch,
+                                   fetchAccount: fetch, fetchGLM: fetchGLM,
                                    usageInterval: interval, resolveCodex: { nil })
         daemon.attachUsageMonitor(monitor)
         monitor.start()
@@ -37,6 +38,124 @@ final class AppModelUsageTests: XCTestCase {
         let ok = await eventually { model.usageError == "429" }
         XCTAssertTrue(ok)
         XCTAssertNil(model.usage)
+    }
+
+    @MainActor
+    func testGLMQuotaPropagatesAndToggleRoundTrips() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let quota = GLMQuota(plan: "max", limits: GLMLimits(
+            fiveHours: GLMLimitWindow(total: 28000, used: 5695, remaining: 22304,
+                                      usedPercent: 20, remainingPercent: 80,
+                                      resetAt: 1_790_943_951_592)))
+        let model = try makeUsageModel(daemon, fetch: { Account() },
+                                       fetchGLM: { GLMAccount(quota: quota) })
+        await model.start()
+        let ok = await eventually { model.glmQuota?.plan == "max" }
+        XCTAssertTrue(ok)
+        XCTAssertNil(model.glmUsageError)
+        model.setGlmUsageEnabled(false)
+        let disabled = await eventually { !model.glmUsageEnabled && !model.usageSettingsPending }
+        XCTAssertTrue(disabled)
+        model.setGlmUsageEnabled(true)
+        let reenabled = await eventually { model.glmUsageEnabled && !model.usageSettingsPending }
+        XCTAssertTrue(reenabled)
+    }
+
+    @MainActor
+    func testGLMAPIKeyStatusValidityAndRefresh() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let quota = GLMQuota(plan: "max", limits: GLMLimits(
+            fiveHours: GLMLimitWindow(total: 28000, used: 5695, remaining: 22304,
+                                      usedPercent: 20, remainingPercent: 80,
+                                      resetAt: 1_790_943_951_592)))
+        var storedKey: String?
+        let client = IPCClient(path: daemon.path); try client.connect()
+        let monitor = UsageMonitor(path: daemon.path + ".usage.json", legacyPath: daemon.path + ".legacy.json",
+                                   fetchAccount: { Account() },
+                                   fetchGLM: { GLMAccount(quota: storedKey == nil ? nil : quota) },
+                                   usageInterval: 60, resolveCodex: { nil })
+        daemon.attachUsageMonitor(monitor)
+        let model = AppModel(
+            client: client,
+            makeClient: { let c = IPCClient(path: daemon.path); try c.connect(); return c },
+            store: StateStore(path: NSTemporaryDirectory() + "covey-glm-key-\(UUID().uuidString).json"),
+            readProviderKey: { $0 == glmKeychainAccount ? storedKey : nil },
+            writeProviderKey: { account, value in
+                guard account == glmKeychainAccount else { return false }
+                storedKey = value
+                return true
+            },
+            deleteProviderKey: { _ in false })
+        await model.start()
+        await model.refreshGLMAPIKeyStatus()
+        XCTAssertEqual(model.glmAPIKeyStatus, .missing)
+        XCTAssertFalse(model.glmAPIKeyValid, "no key → invalid")
+
+        let saved = await model.setGLMAPIKey("zai-secret")
+        XCTAssertTrue(saved)
+        XCTAssertEqual(model.glmAPIKeyStatus, .set)
+        // Saving the key nudges the daemon, so the quota arrives without
+        // waiting for the (here: 60s) poll interval.
+        let arrived = await eventually { model.glmQuota?.plan == "max" && model.glmAPIKeyValid }
+        XCTAssertTrue(arrived)
+    }
+
+    @MainActor
+    func testSavingGLMKeyWhilePollingDisabledReenablesIt() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let quota = GLMQuota(plan: "max", limits: GLMLimits(
+            fiveHours: GLMLimitWindow(total: 28000, used: 5695, remaining: 22304,
+                                      usedPercent: 20, remainingPercent: 80,
+                                      resetAt: 1_790_943_951_592)))
+        var storedKey: String?
+        let client = IPCClient(path: daemon.path); try client.connect()
+        let monitor = UsageMonitor(path: daemon.path + ".usage.json", legacyPath: daemon.path + ".legacy.json",
+                                   fetchAccount: { Account() },
+                                   fetchGLM: { GLMAccount(quota: storedKey == nil ? nil : quota) },
+                                   usageInterval: 0.05, resolveCodex: { nil })
+        try monitor.setEnabled(.glm, enabled: false)
+        daemon.attachUsageMonitor(monitor)
+        monitor.start()
+        let model = AppModel(
+            client: client,
+            makeClient: { let c = IPCClient(path: daemon.path); try c.connect(); return c },
+            store: StateStore(path: NSTemporaryDirectory() + "covey-glm-reenable-\(UUID().uuidString).json"),
+            readProviderKey: { $0 == glmKeychainAccount ? storedKey : nil },
+            writeProviderKey: { account, value in
+                guard account == glmKeychainAccount else { return false }
+                storedKey = value
+                return true
+            },
+            deleteProviderKey: { _ in false })
+        await model.start()
+        _ = await eventually { !model.glmUsageEnabled }
+        XCTAssertFalse(model.glmUsageEnabled)
+        // Saving a key must not dead-end: polling comes back on so the quota
+        // (and with it the "valid" state) can ever arrive.
+        let saved = await model.setGLMAPIKey("zai-secret")
+        XCTAssertTrue(saved)
+        let ok = await eventually { model.glmUsageEnabled && model.glmQuota?.plan == "max" && model.glmAPIKeyValid }
+        XCTAssertTrue(ok)
+    }
+
+    @MainActor
+    func testGLMKeySaveFailsWhenStoredValueDiffers() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let client = IPCClient(path: daemon.path); try client.connect()
+        let monitor = UsageMonitor(path: daemon.path + ".usage.json", legacyPath: daemon.path + ".legacy.json",
+                                   fetchAccount: { Account() }, resolveCodex: { nil })
+        daemon.attachUsageMonitor(monitor)
+        let model = AppModel(
+            client: client,
+            makeClient: { let c = IPCClient(path: daemon.path); try c.connect(); return c },
+            store: StateStore(path: NSTemporaryDirectory() + "covey-glm-verify-\(UUID().uuidString).json"),
+            readProviderKey: { _ in "old-key" },          // keychain kept the old value
+            writeProviderKey: { _, _ in true },            // …while the write claimed success
+            deleteProviderKey: { _ in false })
+        await model.start()
+        let saved = await model.setGLMAPIKey("new-key")
+        XCTAssertFalse(saved, "a write that did not land the exact key is a failure")
+        XCTAssertEqual(model.glmAPIKeyStatus, .checking, "a failed save leaves the status untouched")
     }
 
     @MainActor

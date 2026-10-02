@@ -56,4 +56,39 @@ final class UsageSnapshotStoreTests: XCTestCase {
         store.apply(snapshot)
         XCTAssertEqual(delivered.count, 3)
     }
+
+    func testGLMWindowsAlertLikeOtherProviders() {
+        var markers: [String: Int64] = [:]
+        var delivered: [LimitAlert] = []
+        let store = UsageStore(readMarkers: { markers }, writeMarkers: { markers = $0 })
+        store.alertSink = { delivered += $0 }
+        var snapshot = UsageSnapshot()
+        snapshot.revision = 1
+        snapshot.glmQuota = GLMQuota(plan: "max", limits: GLMLimits(
+            fiveHours: GLMLimitWindow(total: 28000, used: 25200, remaining: 2800,
+                                      usedPercent: 90, remainingPercent: 10,
+                                      resetAt: 1_790_943_951_592),
+            weekly: GLMLimitWindow(total: 140000, used: 21000, remaining: 119000,
+                                   usedPercent: 15, remainingPercent: 85,
+                                   resetAt: 1_791_529_507_983)))
+        store.apply(snapshot)
+        XCTAssertEqual(delivered.count, 1, "only the 5h window crosses the threshold")
+        XCTAssertEqual(markers, ["glm:5h": 1_790_943_951])
+        // Disabled polling must not alert.
+        delivered.removeAll()
+        markers.removeAll()
+        snapshot.revision = 2
+        snapshot.glmUsageEnabled = false
+        snapshot.glmQuota?.limits.fiveHours?.usedPercent = 95
+        store.apply(snapshot)
+        XCTAssertTrue(delivered.isEmpty)
+        // A fetch error must not alert from the stale cached quota either —
+        // the same guard Claude has.
+        var errored = UsageSnapshot()
+        errored.revision = 1
+        errored.glmQuota = snapshot.glmQuota
+        errored.glmUsageError = "net"
+        store.apply(errored)
+        XCTAssertTrue(delivered.isEmpty)
+    }
 }

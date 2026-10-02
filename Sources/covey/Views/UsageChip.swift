@@ -75,6 +75,56 @@ func codexChip(snapshot: CodexRateLimitsSnapshot?, plan: String?) -> AgentUsageC
                           windows: snapshot.windows)
 }
 
+/// GLM chip from the normalized quota: the two windows share the chip
+/// renderer, so each becomes a labeled `UsageWindow` — percent straight from
+/// `used_percent`, `reset_at` ms converted to Unix seconds.
+func glmChip(quota: GLMQuota?) -> AgentUsageChip? {
+    guard let quota else { return nil }
+    var windows: [LabeledWindow] = []
+    if let w = quota.limits.fiveHours {
+        windows.append(LabeledWindow(label: "5h", window: w.usageWindow))
+    }
+    if let w = quota.limits.weekly {
+        windows.append(LabeledWindow(label: "7d", window: w.usageWindow))
+    }
+    guard !windows.isEmpty else { return nil }
+    return AgentUsageChip(name: "GLM", plan: glmPlanLabel(quota.plan), windows: windows)
+}
+
+extension GLMLimitWindow {
+    /// Adapter into the shared renderer: percent used + Unix-seconds reset.
+    var usageWindow: UsageWindow {
+        UsageWindow(utilization: usedPercent,
+                    resetUnix: usageInteger(Double(resetAt) / 1000, as: Int64.self))
+    }
+}
+
+/// `level` → badge: "max" → "Max" (same capitalization rule as Codex plans).
+func glmPlanLabel(_ raw: String) -> String? {
+    guard !raw.isEmpty else { return nil }
+    return raw.prefix(1).uppercased() + raw.dropFirst()
+}
+
+/// The most-used GLM window; the compact header has one GLM slot.
+func glmHeaderWindow(_ quota: GLMQuota?) -> UsageWindow? {
+    glmChip(quota: quota)?.windows.max {
+        $0.window.utilization < $1.window.utilization
+    }?.window
+}
+
+/// Short fetch codes → panel text; unknown codes pass through. The no-key
+/// text names where to fix it — the menu-bar panel has no key editor.
+func glmErrorText(_ error: String?) -> String {
+    switch error {
+    case nil: return "No usage data"
+    case "no auth": return "API key not set — add it in the limits window"
+    case "net": return "Network error"
+    case "parse": return "Unexpected response"
+    case let code? where Int(code) != nil: return "HTTP \(code)"
+    default: return error ?? "No usage data"
+    }
+}
+
 
 /// The most-used Codex window across every rate-limit bucket. The compact
 /// header has one Codex slot, so it surfaces whichever limit is closest.
@@ -92,20 +142,27 @@ struct HeaderSegment: Equatable {
     let level: UsageLevel?
 }
 
-/// Claude and Codex segments for the compact header, in display order.
-/// The two slots are stable; a provider without data shows an em dash.
+/// Claude, Codex, and GLM segments for the compact header, in display order.
+/// The Claude/Codex slots are stable; a provider without data shows an em
+/// dash. GLM's slot appears only while its polling is enabled — a provider
+/// the user turned off should not occupy the header.
 func headerSegments(usage: Usage?, usageError: String?,
-                    codexUsage: CodexRateLimitsSnapshot?) -> [HeaderSegment] {
+                    codexUsage: CodexRateLimitsSnapshot?,
+                    glmQuota: GLMQuota? = nil, glmEnabled: Bool = true) -> [HeaderSegment] {
     func segment(_ label: String, _ window: UsageWindow?) -> HeaderSegment {
         guard let window, let pct = displayUsagePercent(window.utilization) else {
             return HeaderSegment(label: label, value: "—", level: nil)
         }
         return HeaderSegment(label: label, value: "\(pct)%", level: usageLevel(pct))
     }
-    return [
+    var segments = [
         segment("Claude", usage?.fiveHour),
         segment("Codex", codexHeaderWindow(codexUsage)),
     ]
+    if glmEnabled {
+        segments.append(segment("GLM", glmHeaderWindow(glmQuota)))
+    }
+    return segments
 }
 
 /// Stable provider row for the limits detail popover. A row exists even when
@@ -121,11 +178,14 @@ struct LimitsRowModel: Equatable, Identifiable {
 
 func limitsRows(usage: Usage?, plan: String?, error: String?,
                 codexUsage: CodexRateLimitsSnapshot?, codexPlan: String?,
-                claudeEnabled: Bool, codexEnabled: Bool, codexError: String? = nil) -> [LimitsRowModel] {
+                claudeEnabled: Bool, codexEnabled: Bool, codexError: String? = nil,
+                glmQuota: GLMQuota? = nil, glmEnabled: Bool = true, glmError: String? = nil) -> [LimitsRowModel] {
     let claude = claudeChip(usage: usage, plan: plan)
         ?? AgentUsageChip(name: "Claude", plan: distinctPlan(plan, name: "Claude"), windows: [])
     let codex = codexChip(snapshot: codexUsage, plan: codexPlan)
         ?? AgentUsageChip(name: "Codex", plan: distinctPlan(codexPlan, name: "Codex"), windows: [])
+    let glm = glmChip(quota: glmQuota)
+        ?? AgentUsageChip(name: "GLM", plan: glmPlanLabel(glmQuota?.plan ?? "") , windows: [])
 
     return [
         LimitsRowModel(provider: .claude, chip: claude, enabled: claudeEnabled,
@@ -134,6 +194,9 @@ func limitsRows(usage: Usage?, plan: String?, error: String?,
         LimitsRowModel(provider: .codex, chip: codex, enabled: codexEnabled,
                        stale: false,
                        emptyMessage: codex.windows.isEmpty ? (codexError ?? "No usage data") : nil),
+        LimitsRowModel(provider: .glm, chip: glm, enabled: glmEnabled,
+                       stale: glmError != nil && !glm.windows.isEmpty,
+                       emptyMessage: glm.windows.isEmpty ? glmErrorText(glmError) : nil),
     ]
 }
 
@@ -156,6 +219,8 @@ struct UsageChip: View {
     let usage: Usage?
     let usageError: String?
     let codexUsage: CodexRateLimitsSnapshot?
+    var glmQuota: GLMQuota? = nil
+    var glmEnabled: Bool = true
     let tk: Tokens
 
     var body: some View {
@@ -163,7 +228,8 @@ struct UsageChip: View {
         // even when the snapshot is Equatable-equal (no re-render otherwise).
         TimelineView(.everyMinute) { ctx in
             let segments = headerSegments(usage: usage, usageError: usageError,
-                                          codexUsage: codexUsage)
+                                          codexUsage: codexUsage,
+                                          glmQuota: glmQuota, glmEnabled: glmEnabled)
             HStack(spacing: 12) {
                 ForEach(Array(segments.enumerated()), id: \.offset) { index, seg in
                     if index > 0 { divider }
@@ -194,6 +260,7 @@ struct UsageChip: View {
     private func brandColor(_ label: String) -> Color {
         switch label {
         case "Codex": return tk.codexBrand
+        case "GLM": return tk.glmBrand
         default: return tk.claudeBrand
         }
     }

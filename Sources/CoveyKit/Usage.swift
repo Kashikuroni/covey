@@ -96,7 +96,7 @@ func validUsagePercentage(_ value: Double) -> Bool {
 
 /// Preserve the API's historical truncation of fractional times, but never trap
 /// on NaN, infinity, or integers beyond the destination's representable range.
-func usageInteger<T: FixedWidthInteger>(_ value: Double, as: T.Type) -> T? {
+public func usageInteger<T: FixedWidthInteger>(_ value: Double, as: T.Type) -> T? {
     guard value.isFinite else { return nil }
     return T(exactly: value.rounded(.towardZero))
 }

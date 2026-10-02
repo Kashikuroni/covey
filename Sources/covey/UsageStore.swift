@@ -59,6 +59,9 @@ final class UsageStore {
         if next.codexUsageEnabled, case .active = next.codexState, let usage = next.codexUsage {
             notify(agent: "Codex", windows: usage.windows.map { ($0.label, $0.window) })
         }
+        if next.glmUsageEnabled, next.glmUsageError == nil, let chip = glmChip(quota: next.glmQuota) {
+            notify(agent: "GLM", windows: chip.windows.map { ($0.label, $0.window) })
+        }
     }
 
     private func notify(agent: String, windows: [(key: String, window: UsageWindow?)]) {

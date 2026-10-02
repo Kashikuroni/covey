@@ -66,17 +66,70 @@ final class UsageMonitorTests: XCTestCase {
 
     func testPollingRunsWithoutSubscribersAndStops() async throws {
         var calls = 0
+        var glmCalls = 0
         let monitor = UsageMonitor(fetchAccount: {
             calls += 1
             return Account(plan: "Plan \(calls)")
+        }, fetchGLM: {
+            glmCalls += 1
+            return GLMAccount()
         }, usageInterval: 0.02, resolveCodex: { nil })
         monitor.start()
-        for _ in 0..<100 where calls < 2 { try await Task.sleep(nanoseconds: 5_000_000) }
+        for _ in 0..<100 where calls < 2 || glmCalls < 2 { try await Task.sleep(nanoseconds: 5_000_000) }
         XCTAssertGreaterThanOrEqual(calls, 2)
+        XCTAssertGreaterThanOrEqual(glmCalls, 2, "GLM gets its own poller like Claude")
         monitor.stop()
         let count = calls
+        let glmCount = glmCalls
         try await Task.sleep(nanoseconds: 60_000_000)
         XCTAssertEqual(calls, count)
+        XCTAssertEqual(glmCalls, glmCount)
+    }
+
+    func testIdenticalRefreshDoesNotRepublishOrBumpRevision() async throws {
+        let quota = GLMQuota(plan: "max", limits: GLMLimits(
+            fiveHours: GLMLimitWindow(total: 28000, used: 5695, remaining: 22304,
+                                      usedPercent: 20, remainingPercent: 80,
+                                      resetAt: 1_790_943_951_592)))
+        let monitor = UsageMonitor(fetchAccount: { Account() },
+                                   fetchGLM: { GLMAccount(quota: quota) },
+                                   resolveCodex: { nil })
+        await monitor.refresh(.glm)
+        let revision = monitor.snapshot.revision
+        var published = 0
+        monitor.onChange = { _ in published += 1 }
+        await monitor.refresh(.glm)
+        await monitor.refresh(.glm)
+        XCTAssertEqual(monitor.snapshot.revision, revision,
+                       "a byte-identical poll result is a no-op, not a rewrite")
+        XCTAssertEqual(published, 0)
+    }
+
+    func testGLMRefreshCachesOnErrorAndPersistsToggle() async throws {
+        let path = NSTemporaryDirectory() + UUID().uuidString + "/usage.json"
+        let quota = GLMQuota(plan: "max", limits: GLMLimits(
+            fiveHours: GLMLimitWindow(total: 28000, used: 5695, remaining: 22304,
+                                      usedPercent: 20, remainingPercent: 80,
+                                      resetAt: 1_790_943_951_592)))
+        var calls = 0
+        let monitor = UsageMonitor(path: path, legacyPath: path + ".legacy", fetchAccount: { Account() },
+                                   fetchGLM: {
+            calls += 1
+            return calls == 1 ? GLMAccount(quota: quota) : GLMAccount(error: "401")
+        }, resolveCodex: { nil })
+        await monitor.refresh(.glm)
+        XCTAssertEqual(monitor.snapshot.glmQuota, quota)
+        XCTAssertNil(monitor.snapshot.glmUsageError)
+        await monitor.refresh(.glm)
+        XCTAssertEqual(monitor.snapshot.glmQuota, quota, "error keeps the last good snapshot")
+        XCTAssertEqual(monitor.snapshot.glmUsageError, "401")
+        try monitor.setEnabled(.glm, enabled: false)
+        await monitor.refresh(.glm)
+        XCTAssertEqual(calls, 2, "disabled provider skips the fetch")
+        let restored = UsageMonitor(path: path, legacyPath: path + ".legacy", fetchGLM: { GLMAccount() },
+                                    resolveCodex: { nil })
+        XCTAssertFalse(restored.snapshot.glmUsageEnabled)
+        XCTAssertEqual(restored.snapshot.glmQuota, quota)
     }
 
     func testDisabledProvidersSkipFetchAndCodexUpdates() async throws {
@@ -179,7 +232,7 @@ final class UsageMonitorTests: XCTestCase {
         try Data(script.utf8).write(to: URL(fileURLWithPath: path))
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: path)
         var attempts = 0
-        let monitor = UsageMonitor(fetchAccount: { Account() },
+        let monitor = UsageMonitor(fetchAccount: { Account() }, fetchGLM: { GLMAccount() },
                                    usageInterval: 0.02, resolveCodex: { attempts += 1; return path })
         defer { monitor.stop() }
         monitor.ingestRateLimits(CodexRateLimitsSnapshot(primary: LabeledWindow(label: "7d", window: UsageWindow(utilization: 100)), secondary: nil))
@@ -194,7 +247,7 @@ final class UsageMonitorTests: XCTestCase {
 
     func testFailedCodexSpawnRetriesOnNextPoll() async throws {
         var attempts = 0
-        let monitor = UsageMonitor(fetchAccount: { Account() }, usageInterval: 0.02, resolveCodex: {
+        let monitor = UsageMonitor(fetchAccount: { Account() }, fetchGLM: { GLMAccount() }, usageInterval: 0.02, resolveCodex: {
             attempts += 1
             return "/nonexistent/covey-test-codex"
         })

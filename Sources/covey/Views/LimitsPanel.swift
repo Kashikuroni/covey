@@ -5,26 +5,45 @@ struct LimitsPanel: View {
     let model: AppModel
 
     var body: some View {
-        LimitsOverlay(usage: model.usage, plan: model.plan, error: model.usageError,
-                      codexUsage: model.codexUsage, codexPlan: model.codexPlan,
-                      claudeUsageEnabled: model.claudeUsageEnabled,
-                      codexUsageEnabled: model.codexUsageEnabled,
-                      onSetClaudeUsageEnabled: model.setClaudeUsageEnabled,
-                      onSetCodexUsageEnabled: model.setCodexUsageEnabled,
-                      selectedProvider: model.limitsSelectedProvider,
-                      tk: Tokens(Theme(raw: model.themeRaw)),
-                      menuBarLimitsEnabled: model.menuBarLimitsEnabled,
-                      onSetMenuBarLimitsEnabled: model.setMenuBarLimitsEnabled,
-                      codexError: model.codexUsageError,
-                      connectionError: model.usageConnectionError,
-                      settingsPending: model.usageSettingsPending,
-                      settingsAvailable: model.usageSettingsAvailable)
+        LimitsOverlay(content: LimitsOverlayContent(
+            usage: model.usage, plan: model.plan, error: model.usageError,
+            codexUsage: model.codexUsage, codexPlan: model.codexPlan,
+            claudeUsageEnabled: model.claudeUsageEnabled,
+            codexUsageEnabled: model.codexUsageEnabled,
+            onSetClaudeUsageEnabled: model.setClaudeUsageEnabled,
+            onSetCodexUsageEnabled: model.setCodexUsageEnabled,
+            onSetGlmUsageEnabled: model.setGlmUsageEnabled,
+            glmQuota: model.glmQuota,
+            glmEnabled: model.glmUsageEnabled,
+            glmError: model.glmUsageError,
+            glmKeyStatus: model.glmAPIKeyStatus,
+            glmKeyValid: model.glmAPIKeyValid,
+            onSaveGLMKey: model.setGLMAPIKey,
+            selectedProvider: model.limitsSelectedProvider,
+            tk: Tokens(Theme(raw: model.themeRaw)),
+            menuBarLimitsEnabled: model.menuBarLimitsEnabled,
+            onSetMenuBarLimitsEnabled: model.setMenuBarLimitsEnabled,
+            codexError: model.codexUsageError,
+            connectionError: model.usageConnectionError,
+            settingsPending: model.usageSettingsPending,
+            settingsAvailable: model.usageSettingsAvailable),
+            onRefreshGLMKeyStatus: model.refreshGLMAPIKeyStatus)
     }
 }
 
-func menuBarLimitsTitle(usage: Usage?, codexUsage: CodexRateLimitsSnapshot?) -> String {
-    headerSegments(usage: usage, usageError: nil, codexUsage: codexUsage)
-        .prefix(2)
+/// Segments for the menu-bar title. Claude/Codex keep their stable placeholder
+/// slots; GLM joins only once it has data — menu-bar width is too scarce for
+/// a permanent em dash of a provider that may never be configured.
+func menuBarSegments(usage: Usage?, codexUsage: CodexRateLimitsSnapshot?,
+                     glmQuota: GLMQuota?, glmEnabled: Bool) -> [HeaderSegment] {
+    headerSegments(usage: usage, usageError: nil, codexUsage: codexUsage,
+                   glmQuota: glmQuota, glmEnabled: glmEnabled)
+        .filter { $0.level != nil || $0.label != "GLM" }
+}
+
+func menuBarLimitsTitle(usage: Usage?, codexUsage: CodexRateLimitsSnapshot?,
+                        glmQuota: GLMQuota? = nil, glmEnabled: Bool = true) -> String {
+    menuBarSegments(usage: usage, codexUsage: codexUsage, glmQuota: glmQuota, glmEnabled: glmEnabled)
         .map { "\($0.label == "Codex" ? "GPT" : $0.label) \($0.value)" }
         .joined(separator: " · ")
 }
@@ -40,7 +59,10 @@ struct MenuBarLimitsPanel: View {
                                  codexUsage: model.codexUsage, codexPlan: model.codexPlan,
                                  claudeEnabled: model.claudeUsageEnabled,
                                  codexEnabled: model.codexUsageEnabled,
-                                 codexError: model.codexUsageError),
+                                 codexError: model.codexUsageError,
+                                 glmQuota: model.glmQuota,
+                                 glmEnabled: model.glmUsageEnabled,
+                                 glmError: model.glmUsageError),
                 connectionError: model.usageConnectionError,
                 settingsAvailable: model.usageSettingsAvailable,
                 settingsPending: model.usageSettingsPending,
@@ -49,6 +71,7 @@ struct MenuBarLimitsPanel: View {
                     switch provider {
                     case .claude: model.setClaudeUsageEnabled(enabled)
                     case .codex: model.setCodexUsageEnabled(enabled)
+                    case .glm: model.setGlmUsageEnabled(enabled)
                     }
                 },
                 setMenuBarEnabled: model.setMenuBarLimitsEnabled)

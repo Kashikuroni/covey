@@ -8,13 +8,15 @@ func nativeUsageColor(_ level: UsageLevel) -> NSColor {
     }
 }
 
-func menuBarLimitsAttributedTitle(usage: Usage?, codexUsage: CodexRateLimitsSnapshot?) -> NSAttributedString {
+func menuBarLimitsAttributedTitle(usage: Usage?, codexUsage: CodexRateLimitsSnapshot?,
+                                  glmQuota: GLMQuota?, glmEnabled: Bool) -> NSAttributedString {
     let title = NSMutableAttributedString()
     let font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
     func append(_ text: String, color: NSColor) {
         title.append(NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: color]))
     }
-    for (index, segment) in headerSegments(usage: usage, usageError: nil, codexUsage: codexUsage).prefix(2).enumerated() {
+    for (index, segment) in menuBarSegments(usage: usage, codexUsage: codexUsage,
+                                            glmQuota: glmQuota, glmEnabled: glmEnabled).enumerated() {
         if index > 0 { append(" · ", color: .secondaryLabelColor) }
         append("\(segment.label == "Codex" ? "GPT" : segment.label) ", color: .labelColor)
         append(segment.value, color: segment.level.map(nativeUsageColor) ?? .secondaryLabelColor)
@@ -38,12 +40,16 @@ func menuBarLimitsImage(_ title: NSAttributedString) -> NSImage {
 struct MenuBarLimitsLabel: View {
     let usage: Usage?
     let codexUsage: CodexRateLimitsSnapshot?
+    var glmQuota: GLMQuota? = nil
+    var glmEnabled: Bool = true
 
     var body: some View {
-        Image(nsImage: menuBarLimitsImage(menuBarLimitsAttributedTitle(usage: usage, codexUsage: codexUsage)))
+        Image(nsImage: menuBarLimitsImage(menuBarLimitsAttributedTitle(usage: usage, codexUsage: codexUsage,
+                                                                      glmQuota: glmQuota, glmEnabled: glmEnabled)))
             .renderingMode(.original)
             .fixedSize()
             .accessibilityLabel("Covey AI Usage Limits")
-            .accessibilityValue(menuBarLimitsTitle(usage: usage, codexUsage: codexUsage))
+            .accessibilityValue(menuBarLimitsTitle(usage: usage, codexUsage: codexUsage,
+                                                   glmQuota: glmQuota, glmEnabled: glmEnabled))
     }
 }

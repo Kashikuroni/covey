@@ -2,17 +2,14 @@ import XCTest
 @testable import CoveyKit
 
 final class RetiredUsageCompatibilityTests: XCTestCase {
-    func testOldSnapshotIgnoresRetiredProviderFields() throws {
+    func testOldSnapshotIgnoresRetiredGLMCacheKey() throws {
         var original = UsageSnapshot()
         original.usage = Usage(fiveHour: UsageWindow(utilization: 42))
         var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
-        json["glmUsageEnabled"] = true
         json["glmUsage"] = ["fiveHour": ["utilization": 100]]
-        json["glmUsageError"] = "offline"
         let decoded = try JSONDecoder().decode(UsageSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
         XCTAssertEqual(decoded, original)
-        XCTAssertEqual(UsageProvider.allCases, [.claude, .codex])
-        XCTAssertFalse(String(decoding: try JSONEncoder().encode(decoded), as: UTF8.self).contains("glm"))
+        XCTAssertNil(decoded.glmQuota, "retired glmUsage cache must not leak into glmQuota")
     }
 
     func testOldUIStateIgnoresRetiredProviderCache() throws {

@@ -142,10 +142,11 @@ public final class AppModel {
     /// snapshot around for the dimmed popover row.
     public var claudeUsageEnabled: Bool { usageStore.snapshot.claudeUsageEnabled }
     public var codexUsageEnabled: Bool { usageStore.snapshot.codexUsageEnabled }
+    public var glmUsageEnabled: Bool { usageStore.snapshot.glmUsageEnabled }
     /// Which provider the limits detail popover highlights — j/k moves it, h/l
     /// disables/enables it. Resets to `.claude` every time the popover opens;
     /// not persisted, this is transient keyboard-navigation state.
-    public enum LimitsProvider: Equatable, CaseIterable { case claude, codex }
+    public enum LimitsProvider: Equatable, CaseIterable { case claude, codex, glm }
     public private(set) var limitsSelectedProvider: LimitsProvider = .claude
     // Codex limits are consumed only in-module (TopBar) + @testable tests, so
     // these stay internal — their types (CodexRateLimitsSnapshot/State) are too.
@@ -154,6 +155,53 @@ public final class AppModel {
     var codexState: CodexServerState { usageStore.snapshot.codexState }
     var codexUsageError: String? {
         codexState == .unauthed ? "Codex is signed out. Sign in to Codex to resume limit updates." : nil
+    }
+    var glmQuota: GLMQuota? { usageStore.snapshot.glmQuota }
+    var glmUsageError: String? { usageStore.snapshot.glmUsageError }
+    /// GLM's z.ai API key presence. Unlike Claude/Codex, GLM has no local
+    /// login to read — the key is entered in the limits window.
+    private(set) var glmAPIKeyStatus: ProviderKeyStatus = .checking
+    /// Key present AND the last fetch came back without errors — the limits
+    /// window's "api key — valid" state.
+    var glmAPIKeyValid: Bool {
+        glmAPIKeyStatus == .set && glmQuota != nil && glmUsageError == nil
+    }
+
+    /// Loads GLM key presence without blocking the main actor.
+    func refreshGLMAPIKeyStatus() async {
+        glmAPIKeyStatus = .checking
+        let reader = readProviderKey
+        let present = await Task.detached(priority: .userInitiated) {
+            reader(glmKeychainAccount) != nil
+        }.value
+        guard !Task.isCancelled else { return }
+        glmAPIKeyStatus = present ? .set : .missing
+    }
+
+    /// Stores the z.ai API key, verifies the exact value landed in the
+    /// Keychain, and nudges the daemon so quota data arrives without waiting
+    /// for the poll tick. Saving while polling is off re-enables it —
+    /// otherwise the just-saved key could never turn the row valid.
+    /// Returns false when the write could not be verified.
+    func setGLMAPIKey(_ key: String) async -> Bool {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let write = writeProviderKey
+        let reader = readProviderKey
+        let verified = await Task.detached(priority: .userInitiated) {
+            guard write(glmKeychainAccount, trimmed) else { return false }
+            return reader(glmKeychainAccount) == trimmed
+        }.value
+        guard verified else { return false }
+        glmAPIKeyStatus = .set
+        if glmUsageEnabled {
+            await refreshUsage(.glm)
+        } else {
+            // The daemon fetches on its own right after enabling (and the
+            // enable is serialized on the daemon side, unlike a bare refresh).
+            setGlmUsageEnabled(true)
+        }
+        return true
     }
     public private(set) var order: [String] = []
     public private(set) var projectOrder: [String] = []
@@ -899,7 +947,8 @@ public final class AppModel {
                        showHeader: showHeader, showFooter: showFooter,
                        usagePlacement: usagePlacement,
                        claudeUsageEnabled: claudeUsageEnabled,
-                       codexUsageEnabled: codexUsageEnabled)
+                       codexUsageEnabled: codexUsageEnabled,
+                       glmUsageEnabled: glmUsageEnabled)
     }
 
     func openSettings() {
@@ -1233,6 +1282,7 @@ public final class AppModel {
         usagePlacement = values.usagePlacement
         if values.claudeUsageEnabled != old.claudeUsageEnabled { setClaudeUsageEnabled(values.claudeUsageEnabled) }
         if values.codexUsageEnabled != old.codexUsageEnabled { setCodexUsageEnabled(values.codexUsageEnabled) }
+        if values.glmUsageEnabled != old.glmUsageEnabled { setGlmUsageEnabled(values.glmUsageEnabled) }
         persist()
         offerThemeRestartAfterModalDismiss = themeChanged
         modal = nil
@@ -1252,6 +1302,7 @@ public final class AppModel {
 
     public func setClaudeUsageEnabled(_ on: Bool) { setUsageEnabled(.claude, on) }
     public func setCodexUsageEnabled(_ on: Bool) { setUsageEnabled(.codex, on) }
+    public func setGlmUsageEnabled(_ on: Bool) { setUsageEnabled(.glm, on) }
 
     public func setMenuBarLimitsEnabled(_ on: Bool) {
         menuBarLimitsEnabled = on
@@ -1438,11 +1489,13 @@ public final class AppModel {
             switch limitsSelectedProvider {
             case .claude: setClaudeUsageEnabled(true)
             case .codex: setCodexUsageEnabled(true)
+            case .glm: setGlmUsageEnabled(true)
             }
         case .limitsDisableSelected:
             switch limitsSelectedProvider {
             case .claude: setClaudeUsageEnabled(false)
             case .codex: setCodexUsageEnabled(false)
+            case .glm: setGlmUsageEnabled(false)
             }
         case .splitFocusToggle:
             guard let shell = activeShell else { return }

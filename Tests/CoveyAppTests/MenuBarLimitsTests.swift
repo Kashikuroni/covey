@@ -20,6 +20,23 @@ final class MenuBarLimitsTests: XCTestCase {
                        "Claude — · GPT —")
     }
 
+    func testTitleAppendsGLMOnlyWhenItHasData() {
+        let quota = GLMQuota(plan: "max", limits: GLMLimits(
+            fiveHours: GLMLimitWindow(total: 28000, used: 21000, remaining: 7000,
+                                      usedPercent: 75, remainingPercent: 25,
+                                      resetAt: 1_790_943_951_592)))
+        XCTAssertEqual(menuBarLimitsTitle(usage: nil, codexUsage: nil,
+                                          glmQuota: quota, glmEnabled: true),
+                       "Claude — · GPT — · GLM 75%")
+        // Enabled but empty (or disabled) keeps the two-slot title.
+        XCTAssertEqual(menuBarLimitsTitle(usage: nil, codexUsage: nil,
+                                          glmQuota: nil, glmEnabled: true),
+                       "Claude — · GPT —")
+        XCTAssertEqual(menuBarLimitsTitle(usage: nil, codexUsage: nil,
+                                          glmQuota: quota, glmEnabled: false),
+                       "Claude — · GPT —")
+    }
+
     @MainActor
     func testMenuBarPreferenceDefaultsOffAndSurvivesRestart() async throws {
         let daemon = try TestDaemon()

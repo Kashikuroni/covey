@@ -42,17 +42,17 @@ final class UsageChipBuilderTests: XCTestCase {
                                plan: "Pro"))
     }
 
-    func testLimitsRowsAlwaysContainClaudeAndCodexInOrder() {
+    func testLimitsRowsAlwaysContainAllProvidersInOrder() {
         let rows = limitsRows(
             usage: nil, plan: nil, error: nil,
             codexUsage: nil, codexPlan: nil,
             claudeEnabled: true, codexEnabled: true
         )
 
-        XCTAssertEqual(rows.map(\.provider), [.claude, .codex])
-        XCTAssertEqual(rows.map(\.chip.name), ["Claude", "Codex"])
+        XCTAssertEqual(rows.map(\.provider), [.claude, .codex, .glm])
+        XCTAssertEqual(rows.map(\.chip.name), ["Claude", "Codex", "GLM"])
         XCTAssertEqual(rows.map(\.emptyMessage), [
-            "No usage data", "No usage data",
+            "No usage data", "No usage data", "No usage data",
         ])
     }
 
@@ -60,13 +60,14 @@ final class UsageChipBuilderTests: XCTestCase {
         let rows = limitsRows(
             usage: nil, plan: nil, error: "Claude offline",
             codexUsage: nil, codexPlan: nil,
-            claudeEnabled: true, codexEnabled: false
+            claudeEnabled: true, codexEnabled: false,
+            glmQuota: nil, glmEnabled: false, glmError: "401"
         )
 
         XCTAssertEqual(rows.map(\.emptyMessage), [
-            "Claude offline", "No usage data",
+            "Claude offline", "No usage data", "HTTP 401",
         ])
-        XCTAssertEqual(rows.map(\.enabled), [true, false])
+        XCTAssertEqual(rows.map(\.enabled), [true, false, false])
     }
 
     func testLimitsRowsKeepUsageAndMarkLaterErrorAsStale() {
@@ -81,5 +82,86 @@ final class UsageChipBuilderTests: XCTestCase {
         XCTAssertEqual(rows[0].chip.windows.map(\.label), ["5h"])
         XCTAssertTrue(rows[0].stale)
         XCTAssertNil(rows[0].emptyMessage)
+    }
+
+    // MARK: - GLM
+
+    private var sampleQuota: GLMQuota {
+        GLMQuota(plan: "max", limits: GLMLimits(
+            fiveHours: GLMLimitWindow(total: 28000, used: 5695, remaining: 22304,
+                                      usedPercent: 20, remainingPercent: 80,
+                                      resetAt: 1_790_943_951_592),
+            weekly: GLMLimitWindow(total: 140000, used: 5695, remaining: 134304,
+                                   usedPercent: 4, remainingPercent: 96,
+                                   resetAt: 1_791_529_507_983)))
+    }
+
+    func testGLMChipFromQuota() {
+        let chip = glmChip(quota: sampleQuota)
+        XCTAssertEqual(chip?.name, "GLM")
+        XCTAssertEqual(chip?.plan, "Max")
+        XCTAssertEqual(chip?.windows.map(\.label), ["5h", "7d"])
+        XCTAssertEqual(chip?.windows.map(\.window.utilization), [20, 4])
+        XCTAssertEqual(chip?.windows.map(\.window.resetUnix),
+                       [1_790_943_951, 1_791_529_507], "reset_at ms becomes Unix seconds")
+    }
+
+    func testGLMChipNilWhenNoQuotaOrNoWindows() {
+        XCTAssertNil(glmChip(quota: nil))
+        XCTAssertNil(glmChip(quota: GLMQuota(plan: "max", limits: GLMLimits())))
+    }
+
+    func testGLMHeaderWindowIsTheMostUsed() {
+        XCTAssertEqual(glmHeaderWindow(sampleQuota)?.utilization, 20)
+        XCTAssertEqual(glmHeaderWindow(nil), nil)
+    }
+
+    func testHeaderSegmentsIncludeGLMOnlyWhenEnabled() {
+        let segments = headerSegments(usage: nil, usageError: nil, codexUsage: nil,
+                                      glmQuota: sampleQuota, glmEnabled: true)
+        XCTAssertEqual(segments.map(\.label), ["Claude", "Codex", "GLM"])
+        XCTAssertEqual(segments.map(\.value), ["—", "—", "20%"])
+        XCTAssertEqual(segments.map(\.level), [nil, nil, .ok])
+
+        let disabled = headerSegments(usage: nil, usageError: nil, codexUsage: nil,
+                                      glmQuota: sampleQuota, glmEnabled: false)
+        XCTAssertEqual(disabled.map(\.label), ["Claude", "Codex"], "a disabled provider frees its slot")
+    }
+
+    func testGLMErrorTextMapsShortCodes() {
+        XCTAssertEqual(glmErrorText(nil), "No usage data")
+        XCTAssertEqual(glmErrorText("no auth"), "API key not set — add it in the limits window")
+        XCTAssertEqual(glmErrorText("net"), "Network error")
+        XCTAssertEqual(glmErrorText("parse"), "Unexpected response")
+        XCTAssertEqual(glmErrorText("401"), "HTTP 401")
+        XCTAssertEqual(glmErrorText("weird"), "weird")
+    }
+
+    func testGLMKeyRowLabelFollowsSpec() {
+        func label(_ status: ProviderKeyStatus, _ valid: Bool) -> (text: String, action: String) {
+            glmKeyRowLabel(status: status, valid: valid)
+        }
+        // Key present + limits arriving → valid | edit.
+        XCTAssertEqual(label(.set, true).text, "api key — valid")
+        XCTAssertEqual(label(.set, true).action, "edit")
+        // Key present but fetch failing → invalid | edit (update the key).
+        XCTAssertEqual(label(.set, false).text, "api key — invalid")
+        XCTAssertEqual(label(.set, false).action, "edit")
+        // No key at all → invalid | add.
+        XCTAssertEqual(label(.missing, false).text, "api key — invalid")
+        XCTAssertEqual(label(.missing, false).action, "add")
+        XCTAssertEqual(label(.checking, false).text, "api key — checking…")
+    }
+
+    func testLimitsRowsGLMStaleKeepsWindows() {
+        let rows = limitsRows(
+            usage: nil, plan: nil, error: nil,
+            codexUsage: nil, codexPlan: nil,
+            claudeEnabled: true, codexEnabled: true,
+            glmQuota: sampleQuota, glmEnabled: true, glmError: "net"
+        )
+        XCTAssertEqual(rows[2].chip.windows.count, 2)
+        XCTAssertTrue(rows[2].stale)
+        XCTAssertNil(rows[2].emptyMessage)
     }
 }

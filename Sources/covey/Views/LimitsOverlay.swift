@@ -10,13 +10,42 @@ func topOverlayAlignment(_ placement: UsagePlacement) -> Alignment {
     }
 }
 
-/// Command palette detail popover: full Claude/Codex breakdown (plan + every
-/// window + reset countdown + a threshold-colored progress bar), glass-styled
-/// like `HelpOverlay`. Layout follows the "AI Limits Panel"
-/// design mockup; colors come from `Tokens` instead of the mockup's own
-/// palette, and the per-provider switch is the native `Toggle` tinted with
-/// `tk.accent` rather than the mockup's hand-drawn pill.
+/// The GLM key row's caption: state word plus the action beside it
+/// ("edit" once a key exists, "add" when it does not).
+func glmKeyRowLabel(status: ProviderKeyStatus, valid: Bool) -> (text: String, action: String) {
+    switch status {
+    case .checking: return ("api key — checking…", "edit")
+    case .set: return ("api key — \(valid ? "valid" : "invalid")", "edit")
+    case .missing: return ("api key — invalid", "add")
+    }
+}
+
+/// Command palette detail popover: full Claude/Codex/GLM breakdown in a glass
+/// card. The card itself lives in `LimitsOverlayContent`; this wrapper owns
+/// only the surface styling, so new content fields never need threading
+/// through two declarations.
 struct LimitsOverlay: View {
+    let content: LimitsOverlayContent
+    var onRefreshGLMKeyStatus: () async -> Void = {}
+
+    private let cardWidth: CGFloat = 320
+
+    var body: some View {
+        content
+            .task { await onRefreshGLMKeyStatus() }
+            .frame(width: cardWidth)
+            // Tinted with our own surface color so whatever sits behind the
+            // popover (terminal text, in particular) doesn't bleed through
+            // enough to fight the card's own text for legibility.
+            .glassEffect(.regular.tint(content.tk.surface.opacity(0.6)), in: .rect(cornerRadius: 16))
+            .shadow(radius: 12)
+    }
+}
+
+/// The overlay's card without the glass container — the same split as
+/// `NativeLimitsContent` vs `MenuBarLimitsSurface`, so tests can render the
+/// actual rows (glass does not paint offscreen).
+struct LimitsOverlayContent: View {
     let usage: Usage?
     let plan: String?
     let error: String?
@@ -26,6 +55,13 @@ struct LimitsOverlay: View {
     let codexUsageEnabled: Bool
     let onSetClaudeUsageEnabled: (Bool) -> Void
     let onSetCodexUsageEnabled: (Bool) -> Void
+    var onSetGlmUsageEnabled: (Bool) -> Void = { _ in }
+    var glmQuota: GLMQuota? = nil
+    var glmEnabled: Bool = true
+    var glmError: String? = nil
+    var glmKeyStatus: ProviderKeyStatus = .checking
+    var glmKeyValid: Bool = false
+    var onSaveGLMKey: (String) async -> Bool = { _ in false }
     let selectedProvider: AppModel.LimitsProvider
     let tk: Tokens
     var menuBarLimitsEnabled = false
@@ -35,17 +71,22 @@ struct LimitsOverlay: View {
     var settingsPending = false
     var settingsAvailable = true
 
-    private let cardWidth: CGFloat = 320
+    @State private var showingGLMKeyField = false
+    @State private var glmKeyDraft = ""
+    @State private var glmKeySaving = false
 
     private var rows: [LimitsRowModel] {
         limitsRows(usage: usage, plan: plan, error: error,
                    codexUsage: codexUsage, codexPlan: codexPlan,
                    claudeEnabled: claudeUsageEnabled,
                    codexEnabled: codexUsageEnabled,
-                   codexError: codexError)
+                   codexError: codexError,
+                   glmQuota: glmQuota, glmEnabled: glmEnabled, glmError: glmError)
     }
 
     var body: some View {
+        // Ticks every minute so reset countdowns advance even when the
+        // snapshot itself is Equatable-equal.
         TimelineView(.everyMinute) { ctx in
             VStack(alignment: .leading, spacing: 0) {
                 cardHeader(now: ctx.date)
@@ -58,6 +99,7 @@ struct LimitsOverlay: View {
                 }
                 ForEach(rows) { row in
                     providerSection(row: row, now: ctx.date)
+                    if row.provider == .glm { glmKeyRow }
                 }
                 Toggle("Show in macOS menu bar", isOn: Binding(
                     get: { menuBarLimitsEnabled }, set: onSetMenuBarLimitsEnabled))
@@ -69,12 +111,52 @@ struct LimitsOverlay: View {
                     .padding(18)
                     .overlay(alignment: .top) { Rectangle().fill(tk.bd2).frame(height: 1) }
             }
-            .frame(width: cardWidth)
-            // Tinted with our own surface color so whatever sits behind the
-            // popover (terminal text, in particular) doesn't bleed through
-            // enough to fight the card's own text for legibility.
-            .glassEffect(.regular.tint(tk.surface.opacity(0.6)), in: .rect(cornerRadius: 16))
-            .shadow(radius: 12)
+        }
+    }
+
+    /// The one provider-specific control in the panel: GLM has no local login,
+    /// so its API key is managed right here — status plus an inline editor.
+    private var glmKeyRow: some View {
+        let label = glmKeyRowLabel(status: glmKeyStatus, valid: glmKeyValid)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text(label.text)
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundStyle(glmKeyStatus == .checking ? tk.t3
+                                     : (glmKeyValid ? tk.ok : tk.err))
+                Spacer()
+                Button(label.action) {
+                    glmKeyDraft = ""
+                    showingGLMKeyField.toggle()
+                }
+                .font(.system(size: 13, design: .monospaced))
+                .buttonStyle(.link)
+                .disabled(glmKeySaving)
+            }
+            if showingGLMKeyField {
+                HStack(spacing: 8) {
+                    SecureField("z.ai API key", text: $glmKeyDraft)
+                        .font(.system(size: 13, design: .monospaced))
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(saveGLMKey)
+                    Button("Save", action: saveGLMKey)
+                        .disabled(glmKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || glmKeySaving)
+                    Button("Cancel") { showingGLMKeyField = false }
+                }
+            }
+        }
+        .padding(.horizontal, 18).padding(.bottom, 16)
+    }
+
+    private func saveGLMKey() {
+        glmKeySaving = true
+        let key = glmKeyDraft
+        Task {
+            if await onSaveGLMKey(key) {
+                showingGLMKeyField = false
+                glmKeyDraft = ""
+            }
+            glmKeySaving = false
         }
     }
 
@@ -138,6 +220,7 @@ struct LimitsOverlay: View {
         switch provider {
         case .claude: return selectedProvider == .claude
         case .codex: return selectedProvider == .codex
+        case .glm: return selectedProvider == .glm
         }
     }
 
@@ -145,6 +228,7 @@ struct LimitsOverlay: View {
         switch provider {
         case .claude: return onSetClaudeUsageEnabled
         case .codex: return onSetCodexUsageEnabled
+        case .glm: return onSetGlmUsageEnabled
         }
     }
 

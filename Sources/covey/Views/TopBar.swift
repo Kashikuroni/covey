@@ -32,6 +32,8 @@ struct TopBar: View {
         UsageChip(usage: model.claudeUsageEnabled ? model.usage : nil,
                   usageError: model.claudeUsageEnabled ? model.usageError : nil,
                   codexUsage: model.codexUsageEnabled ? model.codexUsage : nil,
+                  glmQuota: model.glmUsageEnabled ? model.glmQuota : nil,
+                  glmEnabled: model.glmUsageEnabled,
                   tk: tk)
             .font(.system(size: topBarFontSize, design: topBarFontDesign))
             .frame(maxWidth: .infinity, alignment: topBarAlignment(model.usagePlacement))

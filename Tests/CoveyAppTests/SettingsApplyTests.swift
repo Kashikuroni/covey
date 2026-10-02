@@ -318,7 +318,7 @@ final class SettingsApplyTests: XCTestCase {
                        SettingsValues(theme: .dark, vimMode: true,
                                       showSessions: true, showHeader: true, showFooter: true,
                                       usagePlacement: .right,
-                                      claudeUsageEnabled: true, codexUsageEnabled: true))
+                                      claudeUsageEnabled: true, codexUsageEnabled: true, glmUsageEnabled: true))
     }
 
     @MainActor
@@ -336,7 +336,7 @@ final class SettingsApplyTests: XCTestCase {
             theme: .light, vimMode: false,
             showSessions: false, showHeader: false, showFooter: false,
             usagePlacement: .left,
-            claudeUsageEnabled: false, codexUsageEnabled: false))
+            claudeUsageEnabled: false, codexUsageEnabled: false, glmUsageEnabled: true))
         store.flush()
 
         XCTAssertEqual(model.themeRaw, "light")
@@ -380,7 +380,7 @@ final class SettingsApplyTests: XCTestCase {
                        SettingsValues(theme: .dark, vimMode: true,
                                       showSessions: true, showHeader: true, showFooter: true,
                                       usagePlacement: .right,
-                                      claudeUsageEnabled: true, codexUsageEnabled: true))
+                                      claudeUsageEnabled: true, codexUsageEnabled: true, glmUsageEnabled: true))
     }
 
     @MainActor

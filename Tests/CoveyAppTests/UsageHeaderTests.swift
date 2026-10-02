@@ -88,6 +88,7 @@ final class UsageHeaderTests: XCTestCase {
         XCTAssertEqual(segs, [
             HeaderSegment(label: "Claude", value: "65%", level: .warn),
             HeaderSegment(label: "Codex", value: "18%", level: .ok),
+            HeaderSegment(label: "GLM", value: "—", level: nil),
         ])
     }
 
@@ -96,6 +97,7 @@ final class UsageHeaderTests: XCTestCase {
         XCTAssertEqual(segs, [
             HeaderSegment(label: "Claude", value: "—", level: nil),
             HeaderSegment(label: "Codex", value: "—", level: nil),
+            HeaderSegment(label: "GLM", value: "—", level: nil),
         ])
     }
 
@@ -106,6 +108,7 @@ final class UsageHeaderTests: XCTestCase {
         XCTAssertEqual(segs, [
             HeaderSegment(label: "Claude", value: "5%", level: .ok),
             HeaderSegment(label: "Codex", value: "—", level: nil),
+            HeaderSegment(label: "GLM", value: "—", level: nil),
         ])
     }
 
