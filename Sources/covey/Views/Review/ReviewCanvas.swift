@@ -24,11 +24,15 @@ struct ReviewCanvas: View {
                 }
                 VStack(alignment: .leading, spacing: 10) {
                     Spacer()
-                    legend
+                    ReviewGraphLegend(tk: tk)
                     CanvasToolbar(model: model, tk: tk)
                 }
                 .padding(.leading, 24)
                 .padding(.bottom, 20)
+                ReviewGraphStatus(model: model, tk: tk)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.top, 22)
+                    .padding(.trailing, 24)
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
             .clipped()
@@ -63,8 +67,12 @@ struct ReviewCanvas: View {
         .background(tk.bg)
     }
 
+    /// Captions, arrows, cards, then the arrows' labels, in world
+    /// coordinates; a new layout glides into place.
     private var world: some View {
         let layout = model.graphLayout
+        let rects = layout.rects
+        let visibility = model.linkVisibility
         let bounds = layout.bounds ?? .zero
         return ZStack(alignment: .topLeading) {
             ForEach(Array(layout.captions.enumerated()), id: \.offset) { _, caption in
@@ -74,23 +82,45 @@ struct ReviewCanvas: View {
                     .lineLimit(1)
                     .offset(x: caption.origin.x, y: caption.origin.y)
             }
-            ForEach(layout.cards.filter { $0.kind == .changed }, id: \.path) { card in
-                if let file = model.file(card.path) {
-                    ReviewFileCard(file: file, review: model.review(for: file.path),
-                                   openIssues: model.openIssueCount(file.path),
-                                   comments: model.commentCount(file.path),
-                                   selected: model.selectedPath == file.path,
-                                   dimmed: !model.matchesFilter(file), tk: tk)
-                        .frame(width: card.rect.width, height: card.rect.height)
-                        .offset(x: card.rect.minX, y: card.rect.minY)
-                        .onTapGesture {
-                            resignReviewTextFocus()
-                            Task { await model.select(file.path) }
-                        }
-                }
+            ReviewGraphEdges(visibility: visibility, rects: rects, changed: Set(model.files.map(\.path)), tk: tk)
+            ForEach(layout.cards, id: \.path) { card in
+                cardView(card, visibility: visibility)
+                    .frame(width: card.rect.width, height: card.rect.height)
+                    .offset(x: card.rect.minX, y: card.rect.minY)
+                    .onHover { inside in model.hover(card.path, inside: inside) }
             }
+            if let selected = model.selectedPath, layout.hiddenNeighbours > 0, let rect = rects[selected] {
+                ReviewButton(title: "+\(layout.hiddenNeighbours) more", tk: tk) { model.expandNeighbours() }
+                    .position(x: rect.midX, y: rect.maxY + 22)
+            }
+            ReviewGraphLabels(visibility: visibility, rects: rects, tk: tk)
         }
         .frame(width: bounds.maxX + 1, height: bounds.maxY + 1, alignment: .topLeading)
+        .animation(.easeInOut(duration: 0.25), value: layout)
+    }
+
+    @ViewBuilder
+    private func cardView(_ card: GraphCard, visibility: LinkVisibility) -> some View {
+        switch card.kind {
+        case .changed:
+            if let file = model.file(card.path) {
+                ReviewFileCard(file: file, review: model.review(for: file.path),
+                               openIssues: model.openIssueCount(file.path),
+                               comments: model.commentCount(file.path),
+                               selected: model.selectedPath == file.path,
+                               dimmed: !model.matchesFilter(file),
+                               faded: visibility.dims(file.path),
+                               counters: model.graphLinks == nil ? nil
+                                   : "← \(model.linkSummary.incoming[file.path] ?? 0) · \(model.linkSummary.outgoing[file.path] ?? 0) →",
+                               stillUsedBy: model.linkSummary.brokenUsers[file.path] ?? 0, tk: tk)
+                    .onTapGesture {
+                        resignReviewTextFocus()
+                        Task { await model.select(file.path) }
+                    }
+            }
+        case .user, .used:
+            ReviewNeighbourCard(path: card.path, faded: visibility.dims(card.path), tk: tk)
+        }
     }
 
     private var title: some View {
@@ -113,16 +143,6 @@ struct ReviewCanvas: View {
         .padding(.top, 24)
         .allowsHitTesting(false)
     }
-
-    private var legend: some View {
-        HStack(spacing: 14) {
-            ForEach(FileStatus.allCases, id: \.self) { status in
-                Text("■ \(status.label)").foregroundStyle(status.color(tk))
-            }
-        }
-        .font(ReviewFont.caption(10))
-        .allowsHitTesting(false)
-    }
 }
 
 struct ReviewFileCard: View {
@@ -131,7 +151,14 @@ struct ReviewFileCard: View {
     let openIssues: Int
     let comments: Int
     let selected: Bool
+    /// Filtered out in the tree.
     let dimmed: Bool
+    /// Outside the focused file's links.
+    var faded = false
+    /// "← 3 · 5 →" (incoming · outgoing); nil while links are unknown.
+    var counters: String?
+    /// Files whose links to this deleted or renamed-away file are broken.
+    var stillUsedBy = 0
     let tk: Tokens
 
     var body: some View {
@@ -158,7 +185,16 @@ struct ReviewFileCard: View {
                     .font(ReviewFont.mono(11)).foregroundStyle(tk.diffAdd)
                 Text(file.removed.map { "−\($0)" } ?? "")
                     .font(ReviewFont.mono(11)).foregroundStyle(tk.diffDel)
-                ratioBar
+                if let old = file.oldPath {
+                    Text("from \(old)")
+                        .font(ReviewFont.mono(10.5))
+                        .foregroundStyle(tk.t3)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    ratioBar
+                }
             }
             .padding(.horizontal, 12)
             .frame(height: 36)
@@ -169,17 +205,35 @@ struct ReviewFileCard: View {
                 if comments > 0 {
                     Text("\(comments) comment\(comments == 1 ? "" : "s")").foregroundStyle(tk.t3)
                 }
+                Spacer(minLength: 4)
+                if let counters {
+                    Text(counters).font(ReviewFont.mono(10.5)).foregroundStyle(tk.t3)
+                        .help("Links in · out")
+                }
             }
             .font(.system(size: 11))
+            .lineLimit(1)
             .padding(.horizontal, 12)
             .frame(height: 31)
         }
         .background(tk.card)
         .overlay(RoundedRectangle(cornerRadius: Tokens.rSm)
-            .stroke(selected ? tk.accent : tk.bd3, lineWidth: selected ? 2 : 1))
+            .stroke(selected ? tk.accent : tk.bd3,
+                    style: StrokeStyle(lineWidth: selected ? 2 : 1, dash: file.status == .deleted ? [5, 4] : [])))
         .clipShape(RoundedRectangle(cornerRadius: Tokens.rSm))
         .shadow(color: tk.shadowColor, radius: selected ? 10 : 3, y: 2)
-        .opacity(dimmed ? 0.35 : 1)
+        .overlay(alignment: .topTrailing) {
+            if stillUsedBy > 0 {
+                Text("⚠ Still used by \(stillUsedBy)")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(tk.bg)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(tk.err, in: RoundedRectangle(cornerRadius: Tokens.rSm))
+                    .offset(x: -8, y: -10)
+            }
+        }
+        .opacity(dimmed ? 0.35 : faded ? 0.4 : 1)
     }
 
     private var ratioBar: some View {
@@ -246,6 +300,10 @@ struct CanvasToolbar: View {
             divider
             label("Focus", hint: "3") { model.focusCard() }
             divider
+            label("Show links", hint: "L", on: model.linkSettings.showLinks) {
+                model.linkSettings.toggleShowLinks()
+            }
+            divider
             icon("questionmark", help: "Keyboard") { model.keysOverlayOpen = true }
         }
         .frame(height: 32)
@@ -265,10 +323,11 @@ struct CanvasToolbar: View {
         .help(help)
     }
 
-    private func label(_ title: String, hint: String, action: @escaping () -> Void) -> some View {
+    private func label(_ title: String, hint: String, on: Bool = false,
+                       action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 5) {
-                Text(title).font(.system(size: 12)).foregroundStyle(tk.t1)
+                Text(title).font(.system(size: 12)).foregroundStyle(on ? tk.accent : tk.t1)
                 Text(hint).font(ReviewFont.mono(10)).foregroundStyle(tk.t3)
             }
             .padding(.horizontal, 10)
