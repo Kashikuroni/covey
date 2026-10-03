@@ -45,6 +45,7 @@ extension ReviewModel {
             }
             failureStreak += 1
             banner = Self.describeLoad(error)
+            EventLog.note("error", banner ?? "")
         }
     }
 
@@ -88,6 +89,7 @@ extension ReviewModel {
             guard generation == loadGeneration else { return }
             failureStreak += 1
             banner = Self.describeLoad(error)
+            EventLog.note("error", banner ?? "")
         }
     }
 

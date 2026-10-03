@@ -774,7 +774,10 @@ public final class AppModel {
     }
 
     /// Sheets fire-and-forget outcomes (issue created after Esc-hide, …).
-    public func showToast(_ message: String) { toast = message }
+    public func showToast(_ message: String) {
+        EventLog.note("toast", message)
+        toast = message
+    }
 
     public func reconnect() async {
         do {

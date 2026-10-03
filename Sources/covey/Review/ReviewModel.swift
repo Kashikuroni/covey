@@ -264,6 +264,7 @@ final class ReviewModel {
     func flush() { store.flush() }
 
     func toast(_ text: String) {
+        EventLog.note("toast", text)
         let toast = ReviewToast(text: text)
         toasts.append(toast)
         let duration = toastDuration
