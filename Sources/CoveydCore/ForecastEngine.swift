@@ -77,3 +77,55 @@ public enum ForecastEngine {
         return f
     }
 }
+
+/// Источник оценки текущего темпа сжигания кредитов (спека §4.2).
+public enum RateSource: String, Equatable, Sendable { case instant, recent, windowAverage }
+
+/// Темп расхода квоты аккаунта: кредиты/ч и лежащие в их основе токены/ч.
+public struct AccountRate: Equatable, Sendable {
+    public var creditsPerHour: Double
+    public var tokensPerHour: Double
+    public var source: RateSource
+    public init(creditsPerHour: Double, tokensPerHour: Double, source: RateSource) {
+        self.creditsPerHour = creditsPerHour; self.tokensPerHour = tokensPerHour; self.source = source
+    }
+}
+
+extension ForecastEngine {
+    /// Бленд трёх оценок §4.2: instant → recent → windowAverage.
+    /// instant — Σ темпов активных сессий × свежий фактор текущего режима;
+    /// recent — медиана дельт `fiveUsed` минутной серии за последние 15 мин;
+    /// windowAverage — usedSoFar за время от начала окна. Первая применимая
+    /// оценка выигрывает; без данных — нулевая ставка с source: .windowAverage.
+    /// Внутренний: сигнатура оперирует внутренним CalibrationFactors (как
+    /// isFresh/calibrate); потребитель задачи 8 живёт в этом же модуле.
+    static func creditRate(samples: [QuotaSample],
+                           sessionRates: [(key: String, tokensPerHour: Double, active: Bool, windowTotal: Double, sidechainShare: Double)],
+                           factors: CalibrationFactors, now: Date,
+                           windowStart: Date, usedSoFar: Double) -> AccountRate {
+        let tokensPerHour = sessionRates.filter(\.active).reduce(0.0) { $0 + $1.tokensPerHour }
+        let peak = PeakSchedule.isPeak(at: now)
+        if tokensPerHour > 0, isFresh(factors, peak: peak, now: now),
+           let factor = factors.factor(peak) {
+            return AccountRate(creditsPerHour: tokensPerHour * factor,
+                               tokensPerHour: tokensPerHour, source: .instant)
+        }
+        let byTime = samples.sorted { $0.t < $1.t }
+        let cutoff = now.addingTimeInterval(-15 * 60)
+        let deltas: [Double] = zip(byTime, byTime.dropFirst()).compactMap { a, b in
+            guard a.t >= Int64(cutoff.timeIntervalSince1970 * 1000), b.t > a.t else { return nil }
+            let d = b.fiveUsed - a.fiveUsed
+            return d >= 0 ? d / (Double(b.t - a.t) / 3_600_000) : nil
+        }
+        if !deltas.isEmpty {
+            let median = deltas.sorted()[deltas.count / 2]
+            return AccountRate(creditsPerHour: median, tokensPerHour: tokensPerHour, source: .recent)
+        }
+        let elapsed = now.timeIntervalSince(windowStart)
+        if elapsed > 0, usedSoFar >= 0 {
+            return AccountRate(creditsPerHour: usedSoFar / (elapsed / 3600),
+                               tokensPerHour: tokensPerHour, source: .windowAverage)
+        }
+        return AccountRate(creditsPerHour: 0, tokensPerHour: tokensPerHour, source: .windowAverage)
+    }
+}
