@@ -76,7 +76,7 @@ struct NativeLimitsContent: View {
             .font(.system(size: 12))
             .foregroundStyle(.primary)
             .padding(12)
-            .sheet(isPresented: $forecastPanelShown) { ForecastWindowView() }
+            .sheet(isPresented: $forecastPanelShown) { ForecastWindowView(forecast: glmForecast) }
         }
     }
 
@@ -167,17 +167,5 @@ struct NativeLimitsContent: View {
             .accessibilityLabel("\(labeled.label) usage")
             .accessibilityValue(percent.map { "\($0) percent used" } ?? "Unavailable")
         }
-    }
-}
-
-/// Заглушка панели прогноза: наполнение и презентацию довозит Task 13,
-/// кнопка «Прогноз…» уже ведёт сюда.
-struct ForecastWindowView: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Прогноз").font(.system(size: 12, weight: .semibold))
-        }
-        .padding(12)
-        .frame(width: 280)
     }
 }
