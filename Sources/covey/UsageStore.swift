@@ -11,14 +11,17 @@ final class UsageStore {
     private let onPersist: () -> Void
     private let readMarkers: () -> [String: Int64]
     private let writeMarkers: ([String: Int64]) -> Void
+    private let glmForecastConfig: GLMForecastConfigSection
     var alertSink: (([LimitAlert]) -> Void)?
 
     init(onPersist: @escaping () -> Void = {},
          readMarkers: @escaping () -> [String: Int64] = { [:] },
-         writeMarkers: @escaping ([String: Int64]) -> Void = { _ in }) {
+         writeMarkers: @escaping ([String: Int64]) -> Void = { _ in },
+         glmForecastConfig: GLMForecastConfigSection = GLMForecastConfigSection()) {
         self.onPersist = onPersist
         self.readMarkers = readMarkers
         self.writeMarkers = writeMarkers
+        self.glmForecastConfig = glmForecastConfig
     }
 
     func beginSubscription() {
@@ -61,6 +64,14 @@ final class UsageStore {
         }
         if next.glmUsageEnabled, next.glmUsageError == nil, let chip = glmChip(quota: next.glmQuota) {
             notify(agent: "GLM", windows: chip.windows.map { ($0.label, $0.window) })
+        }
+        if next.glmUsageEnabled, next.glmUsageError == nil,
+           next.glmForecast?.fiveHours != nil || next.glmForecast?.weekly != nil {
+            let (alerts, marks) = predictiveAlerts(forecast: next.glmForecast,
+                                                   config: glmForecastConfig,
+                                                   notified: readMarkers(), now: Date())
+            if let alertSink { alertSink(alerts) } else { for a in alerts { Notifier.post(a) } }
+            if marks != readMarkers() { writeMarkers(marks); onPersist() }
         }
     }
 

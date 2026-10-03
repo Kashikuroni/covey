@@ -343,7 +343,8 @@ public final class AppModel {
         usageStore = UsageStore(
             onPersist: { [weak self] in self?.persist() },
             readMarkers: { [weak self] in self?.persisted.usageNotified ?? [:] },
-            writeMarkers: { [weak self] in self?.persisted.usageNotified = $0 })
+            writeMarkers: { [weak self] in self?.persisted.usageNotified = $0 },
+            glmForecastConfig: CoveyConfig.load().glmForecast ?? GLMForecastConfigSection())
         issueBrowser.toast = { [weak self] msg in self?.showToast(msg) }
         issueBrowser.fetchBranches = { [weak self] dir in
             await self?.gitInfo(dir).branches ?? []
