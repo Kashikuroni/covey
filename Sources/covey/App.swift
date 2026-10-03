@@ -137,7 +137,8 @@ struct CoveyApp: App {
             }
         } label: {
             MenuBarLimitsLabel(usage: model?.usage, codexUsage: model?.codexUsage,
-                               glmQuota: model?.glmQuota, glmEnabled: model?.glmUsageEnabled ?? true)
+                               glmQuota: model?.glmQuota, glmEnabled: model?.glmUsageEnabled ?? true,
+                               glmForecast: model?.glmForecast)
         }
         .menuBarExtraStyle(.window)
     }

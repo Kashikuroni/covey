@@ -157,6 +157,7 @@ public final class AppModel {
         codexState == .unauthed ? "Codex is signed out. Sign in to Codex to resume limit updates." : nil
     }
     var glmQuota: GLMQuota? { usageStore.snapshot.glmQuota }
+    var glmForecast: GLMForecast? { usageStore.snapshot.glmForecast }
     var glmUsageError: String? { usageStore.snapshot.glmUsageError }
     /// GLM's z.ai API key presence. Unlike Claude/Codex, GLM has no local
     /// login to read — the key is entered in the limits window.

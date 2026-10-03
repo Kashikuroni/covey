@@ -9,14 +9,16 @@ func nativeUsageColor(_ level: UsageLevel) -> NSColor {
 }
 
 func menuBarLimitsAttributedTitle(usage: Usage?, codexUsage: CodexRateLimitsSnapshot?,
-                                  glmQuota: GLMQuota?, glmEnabled: Bool) -> NSAttributedString {
+                                  glmQuota: GLMQuota?, glmEnabled: Bool,
+                                  forecast: GLMForecast? = nil) -> NSAttributedString {
     let title = NSMutableAttributedString()
     let font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
     func append(_ text: String, color: NSColor) {
         title.append(NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: color]))
     }
     for (index, segment) in menuBarSegments(usage: usage, codexUsage: codexUsage,
-                                            glmQuota: glmQuota, glmEnabled: glmEnabled).enumerated() {
+                                            glmQuota: glmQuota, glmEnabled: glmEnabled,
+                                            forecast: forecast).enumerated() {
         if index > 0 { append(" · ", color: .secondaryLabelColor) }
         append("\(segment.label == "Codex" ? "GPT" : segment.label) ", color: .labelColor)
         append(segment.value, color: segment.level.map(nativeUsageColor) ?? .secondaryLabelColor)
@@ -42,14 +44,17 @@ struct MenuBarLimitsLabel: View {
     let codexUsage: CodexRateLimitsSnapshot?
     var glmQuota: GLMQuota? = nil
     var glmEnabled: Bool = true
+    var glmForecast: GLMForecast? = nil
 
     var body: some View {
         Image(nsImage: menuBarLimitsImage(menuBarLimitsAttributedTitle(usage: usage, codexUsage: codexUsage,
-                                                                      glmQuota: glmQuota, glmEnabled: glmEnabled)))
+                                                                      glmQuota: glmQuota, glmEnabled: glmEnabled,
+                                                                      forecast: glmForecast)))
             .renderingMode(.original)
             .fixedSize()
             .accessibilityLabel("Covey AI Usage Limits")
             .accessibilityValue(menuBarLimitsTitle(usage: usage, codexUsage: codexUsage,
-                                                   glmQuota: glmQuota, glmEnabled: glmEnabled))
+                                                   glmQuota: glmQuota, glmEnabled: glmEnabled,
+                                                   forecast: glmForecast))
     }
 }
