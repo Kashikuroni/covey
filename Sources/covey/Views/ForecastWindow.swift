@@ -72,8 +72,8 @@ struct ForecastWindowView: View {
     var body: some View {
         TimelineView(.everyMinute) { context in
             ScrollView {
-                if let forecast {
-                    VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 14) {
+                    if let forecast {
                         regime(forecast, now: context.date)
                         chartSection("Окно 5ч", series: forecast.fiveHourSeries,
                                      window: forecast.fiveHours, hours: 5, now: context.date)
@@ -82,14 +82,18 @@ struct ForecastWindowView: View {
                         agents(forecast)
                         models(forecast)
                         calibration(forecast, now: context.date)
+                    } else {
+                        Text("Прогноз появится после первого опроса GLM")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                } else {
-                    Text("Прогноз появится после первого опроса GLM")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
+                // Меряем контент, не сам ScrollView: ScrollView «жадный» — его
+                // высота равна proposal, и измерение снаружи каждый проход
+                // съедало padding, схлопывая панель. Контент внутри получает
+                // nil-высоту и растёт по содержимому, как в LimitsPanel.
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
             }
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
         }
         .font(.system(size: 12))
         .foregroundStyle(.primary)
@@ -124,13 +128,12 @@ struct ForecastWindowView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            windowChart(title: title, series: series, window: window, hours: hours)
+            windowChart(title: title, series: series, window: window, hours: hours, now: now)
             if let window,
                let line = ForecastText.forecastLine(window, label: title, now: now) {
                 Text(line)
                     .font(.caption)
-                    .foregroundStyle(window.verdict == .overflow
-                                     ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
+                    .foregroundStyle(verdictColor(window.verdict))
             }
         }
     }
@@ -139,9 +142,10 @@ struct ForecastWindowView: View {
     /// на сбросе окна. Ось Y — кредиты, X — время.
     @ViewBuilder
     private func windowChart(title: String, series: [GLMSeriesPoint],
-                             window: GLMWindowForecast?, hours: Double) -> some View {
+                             window: GLMWindowForecast?, hours: Double,
+                             now: Date) -> some View {
         let points = ForecastWindow.trimmed(series, resetAt: window?.resetAt,
-                                            now: Date(), hours: hours)
+                                            now: now, hours: hours)
         if points.count >= 2 {
             Canvas { context, size in
                 let last = points[points.count - 1]
@@ -206,7 +210,7 @@ struct ForecastWindowView: View {
                 Grid(horizontalSpacing: 6, verticalSpacing: 4) {
                     GridRow {
                         Text("агент")
-                        Text("акт")
+                        Text("активность")
                         headerCell("ток/ч").gridColumnAlignment(.trailing)
                         headerCell("кред/ч").gridColumnAlignment(.trailing)
                         headerCell("доля").gridColumnAlignment(.trailing)
