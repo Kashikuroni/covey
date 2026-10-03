@@ -1,5 +1,19 @@
 import Foundation
 
+/// Опциональная секция `glmForecast` в config.json: настройки прогноза квоты
+/// GLM. Все поля опциональны — дефолты (true / 15 / 20) применяет потребитель,
+/// не декодер: отсутствие ключа и явный `null` неразличимы.
+public struct GLMForecastConfigSection: Codable, Equatable {
+    public var includeExternal: Bool?
+    public var marginPercent: Double?
+    public var imminentMinutes: Double?
+    public init(includeExternal: Bool? = nil, marginPercent: Double? = nil,
+                imminentMinutes: Double? = nil) {
+        self.includeExternal = includeExternal; self.marginPercent = marginPercent
+        self.imminentMinutes = imminentMinutes
+    }
+}
+
 /// User-editable app config (`~/.covey/config.json`), read-only at runtime.
 public struct CoveyConfig: Codable, Equatable {
     public var defaultAgent: String?
@@ -10,13 +24,17 @@ public struct CoveyConfig: Codable, Equatable {
     /// Provider id hoisted to the top of the picker (anthropic is always first
     /// regardless; this controls the second slot).
     public var defaultProvider: String?
+    /// Forecast settings for the GLM quota windows; nil (absent) = defaults.
+    public var glmForecast: GLMForecastConfigSection?
 
     public init(defaultAgent: String? = nil, agentPresets: [String]? = nil,
-                providers: [ProviderProfile]? = nil, defaultProvider: String? = nil) {
+                providers: [ProviderProfile]? = nil, defaultProvider: String? = nil,
+                glmForecast: GLMForecastConfigSection? = nil) {
         self.defaultAgent = defaultAgent
         self.agentPresets = agentPresets
         self.providers = providers
         self.defaultProvider = defaultProvider
+        self.glmForecast = glmForecast
     }
 
     public static func load(path: String = defaultPath) -> CoveyConfig {
