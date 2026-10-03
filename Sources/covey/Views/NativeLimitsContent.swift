@@ -1,5 +1,33 @@
 import SwiftUI
 
+/// Локальное «HH:mm» для ETA прогноза; один форматтер на процесс.
+enum ForecastText {
+    static let time: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .none
+        f.timeStyle = .short
+        return f
+    }()
+
+    /// Одна строка прогноза под окном GLM (спека §6.2). nil — строки нет.
+    static func forecastLine(_ w: GLMWindowForecast, label: String, now: Date) -> String? {
+        switch w.verdict {
+        case .idle: return nil
+        case .calibrating: return "калибровка…"
+        case .fits: return "влезаем, запас \(Int(max(0, w.headroomPercent).rounded()))%"
+        case .tight: return "впритык, запас \(Int(max(0, w.headroomPercent).rounded()))%"
+        case .overflow:
+            let deficit = Int(max(0, -w.headroomPercent).rounded())
+            let eta = w.exhaustionAt.map {
+                "кончится ~\(time.string(from: Date(timeIntervalSince1970: Double($0) / 1000)))"
+            } ?? "не успеваем"
+            return "⚠ \(eta), не хватит \(deficit)%"
+        case .underuse:
+            return "можно грузить сильнее: к сбросу останется \(Int(max(0, w.headroomPercent).rounded()))%"
+        }
+    }
+}
+
 /// The menu-bar window supplies its native background and appearance. Share
 /// the existing row data and settings, without layering another glass card.
 struct NativeLimitsContent: View {
@@ -8,10 +36,12 @@ struct NativeLimitsContent: View {
     let settingsAvailable: Bool
     let settingsPending: Bool
     let menuBarEnabled: Bool
+    var glmForecast: GLMForecast? = nil
     let setEnabled: (UsageProvider, Bool) -> Void
     let setMenuBarEnabled: (Bool) -> Void
 
     @Environment(\.colorSchemeContrast) private var contrast
+    @State private var forecastPanelShown = false
 
     var body: some View {
         TimelineView(.everyMinute) { context in
@@ -46,6 +76,7 @@ struct NativeLimitsContent: View {
             .font(.system(size: 12))
             .foregroundStyle(.primary)
             .padding(12)
+            .sheet(isPresented: $forecastPanelShown) { ForecastWindowView() }
         }
     }
 
@@ -66,7 +97,13 @@ struct NativeLimitsContent: View {
             }
 
             ForEach(Array(row.chip.windows.enumerated()), id: \.offset) { entry in
-                window(entry.element, enabled: row.enabled, now: now)
+                window(entry.element, enabled: row.enabled, now: now,
+                       forecast: row.provider == .glm ? windowForecast(entry.element.label) : nil)
+            }
+
+            if row.provider == .glm, glmForecast != nil {
+                Button("Прогноз…") { forecastPanelShown = true }
+                    .controlSize(.mini)
             }
 
             if row.stale {
@@ -82,7 +119,17 @@ struct NativeLimitsContent: View {
         .padding(.vertical, 9)
     }
 
-    private func window(_ labeled: LabeledWindow, enabled: Bool, now: Date) -> some View {
+    /// Прогноз окна GLM по метке чипа: «5h» → fiveHours, «7d» → weekly.
+    private func windowForecast(_ label: String) -> GLMWindowForecast? {
+        switch label {
+        case "5h": return glmForecast?.fiveHours
+        case "7d": return glmForecast?.weekly
+        default: return nil
+        }
+    }
+
+    private func window(_ labeled: LabeledWindow, enabled: Bool, now: Date,
+                        forecast: GLMWindowForecast? = nil) -> some View {
         let percent = displayUsagePercent(labeled.window.utilization)
         let color = percent.map { percent in
             let semantic = nativeUsageColor(usageLevel(percent))
@@ -101,6 +148,12 @@ struct NativeLimitsContent: View {
                     .fontWeight(.semibold).monospacedDigit()
                     .foregroundStyle(.primary)
             }
+            if let forecast, let line = ForecastText.forecastLine(forecast, label: labeled.label, now: now) {
+                Text(line)
+                    .font(.caption)
+                    .foregroundStyle(forecast.verdict == .overflow
+                                     ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
+            }
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
                     Capsule().fill(.primary.opacity(0.08))
@@ -114,5 +167,17 @@ struct NativeLimitsContent: View {
             .accessibilityLabel("\(labeled.label) usage")
             .accessibilityValue(percent.map { "\($0) percent used" } ?? "Unavailable")
         }
+    }
+}
+
+/// Заглушка панели прогноза: наполнение и презентацию довозит Task 13,
+/// кнопка «Прогноз…» уже ведёт сюда.
+struct ForecastWindowView: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Прогноз").font(.system(size: 12, weight: .semibold))
+        }
+        .padding(12)
+        .frame(width: 280)
     }
 }

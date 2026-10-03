@@ -92,6 +92,7 @@ struct MenuBarLimitsPanel: View {
                 settingsAvailable: model.usageSettingsAvailable,
                 settingsPending: model.usageSettingsPending,
                 menuBarEnabled: model.menuBarLimitsEnabled,
+                glmForecast: model.glmForecast,
                 setEnabled: { provider, enabled in
                     switch provider {
                     case .claude: model.setClaudeUsageEnabled(enabled)
