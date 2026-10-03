@@ -78,6 +78,31 @@ final class UsageMonitorForecastTests: XCTestCase {
         XCTAssertNotNil(monitor.snapshot.glmForecast?.fiveHours?.verdict)
     }
 
+    func testPersistedFactorsSurviveRestartAndFirstPoll() async throws {
+        // Спека §4.1: рестарт демона не сбрасывает калибровку. Факторы сеются
+        // из стора и публикуются в первом же прогнозе: транскрипта нет —
+        // калибровке не по чему пересчитать, сеянное не должно затираться
+        // пустым дефолтом.
+        var p = PersistedFactors()
+        p.peak = 0.06; p.offPeak = 0.05
+        p.peakAt = Int64(Date().addingTimeInterval(-3_600).timeIntervalSince1970 * 1000)
+        p.offPeakAt = p.peakAt
+        let store = QuotaSampleStore(path: nil)
+        store.setFactors(p)
+        let monitor = UsageMonitor(
+            path: nil, legacyPath: nil,
+            fetchAccount: { Account(usageError: "off") },
+            fetchGLM: { GLMAccount(quota: parseGLMQuota(self.glmJSON(used: 100, resetInHours: 5))!) },
+            usageInterval: 0.01, resolveCodex: { nil },
+            forecastStore: store)
+        await monitor.refresh(.glm)
+        await monitor.refresh(.glm)   // квота неизменна → дельт, меняющих факторы, нет
+        let f = monitor.snapshot.glmForecast
+        XCTAssertEqual(f?.factorPeak ?? 0, 0.06, accuracy: 1e-9)
+        XCTAssertEqual(f?.factorOffPeak ?? 0, 0.05, accuracy: 1e-9)
+        XCTAssertNotNil(f?.factorPeakAt, "возраст калибровки тоже переживает рестарт")
+    }
+
     func testForecastDisabledWhenStoreIsNil() async throws {
         let monitor = UsageMonitor(path: nil, legacyPath: nil,
                                    fetchAccount: { Account(usageError: "off") },

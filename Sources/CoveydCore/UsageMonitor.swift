@@ -42,6 +42,10 @@ public final class UsageMonitor {
         self.usageInterval = max(0.01, usageInterval)
         self.resolveCodex = resolveCodex
         self.forecastStore = forecastStore
+        // Спека §4.1: рестарт демона не сбрасывает калибровку — сеем факторы
+        // из стора, иначе первый updateForecast перезаписал бы persisted
+        // пустым дефолтом.
+        if let forecastStore { factors = CalibrationFactors(forecastStore.factors) }
         self.transcriptWatcher = transcriptWatcher
         self.glmSessions = glmSessions
         // Тот же экземпляр, что у вотчера, иначе вёдра не доедут до прогноза.

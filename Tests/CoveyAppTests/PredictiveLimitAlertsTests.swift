@@ -76,6 +76,14 @@ final class PredictiveLimitAlertsTests: XCTestCase {
         XCTAssertEqual(a2.count, 1)
     }
 
+    func testImminentDefaultsToTwentyMinutesWhenConfigAbsent() {
+        // Спека §7: ключа imminentMinutes нет → дефолт 20 мин, а не «выключено».
+        let (alerts, _) = predictiveAlerts(forecast: forecast(verdict: .tight, etaMinutes: 10),
+                                           config: GLMForecastConfigSection(), notified: [:], now: now)
+        XCTAssertEqual(alerts.count, 1)
+        XCTAssertTrue(alerts.first?.title.contains("исчерпание") ?? false)
+    }
+
     func testImminentAlertFiresOncePerWindow() {
         // Вердикт fits, но ETA 10 мин < imminent (20) → один алерт, повторы молчат.
         let (a1, m1) = predictiveAlerts(forecast: forecast(verdict: .tight, etaMinutes: 10),

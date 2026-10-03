@@ -20,13 +20,32 @@ final class ForecastEngineRateTests: XCTestCase {
         return f
     }
 
+    /// Свежие факторы обоих режимов — условие instant-ставки: проекция режет
+    /// горизонт на сегменты режимов только когда свежи оба (спека §4.1–4.2).
+    private func freshBoth() -> CalibrationFactors {
+        var f = freshOffPeak()
+        f.peak = 0.06; f.peakAt = t0
+        return f
+    }
+
     func testInstantWinsWhenActiveSessionsAndFreshFactor() {
         let r = ForecastEngine.creditRate(samples: [], sessionRates: [rate(12_000)],
-                                          factors: freshOffPeak(), now: t0,
+                                          factors: freshBoth(), now: t0,
                                           windowStart: t0 - 1800, usedSoFar: 100)
         XCTAssertEqual(r.source, .instant)
-        XCTAssertEqual(r.creditsPerHour, 600, accuracy: 0.001)  // 12000 × 0.05
+        XCTAssertEqual(r.creditsPerHour, 600, accuracy: 0.001)  // 12000 × 0.05 (офф-пик)
         XCTAssertEqual(r.tokensPerHour, 12_000, accuracy: 0.001)
+    }
+
+    func testInstantRequiresBothRegimesFresh() {
+        // Свежий фактор только текущего (офф-пик) режима — не повод для instant:
+        // проекция всё равно не сегментирует горизонт, ставка падает на дельты.
+        let r = ForecastEngine.creditRate(
+            samples: [sample(minAgo: 5, fiveUsed: 0), sample(minAgo: 0, fiveUsed: 300)],
+            sessionRates: [rate(12_000)], factors: freshOffPeak(), now: t0,
+            windowStart: t0 - 1800, usedSoFar: 300)
+        XCTAssertEqual(r.source, .recent)
+        XCTAssertEqual(r.creditsPerHour, 3600, accuracy: 1)
     }
 
     func testInactiveSessionsFallThroughToWindowAverage() {
@@ -56,7 +75,9 @@ final class ForecastEngineRateTests: XCTestCase {
     }
 
     func testInstantFallsBackToRecentWhenFactorStale() {
-        var stale = freshOffPeak()
+        // Оба фактора есть, но офф-пик (текущий режим) протух: свежий пиковый
+        // не спасает — instant требует свежести обоих, падаем на дельты.
+        var stale = freshBoth()
         stale.offPeakAt = t0.addingTimeInterval(-30 * 24 * 3600)  // старше 7 дней
         let r = ForecastEngine.creditRate(
             samples: [sample(minAgo: 5, fiveUsed: 0), sample(minAgo: 0, fiveUsed: 300)],

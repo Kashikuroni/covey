@@ -44,7 +44,8 @@ func predictiveAlerts(forecast: GLMForecast?,
             body: "кончится ~\(etaText) · не хватит \(deficit)%"))
     }
     // Imminent: любой осмысленный (не overflow, не idle) вердикт с ETA < H минут.
-    if (config.imminentMinutes ?? 0) > 0, hasActive {
+    // Спека §7: ключа нет → дефолт 20 мин (0 явно выключает).
+    if (config.imminentMinutes ?? 20) > 0, hasActive {
         for (key, w) in [("predict:five", f.fiveHours), ("predict:week", f.weekly)] {
             guard let w, w.verdict != .overflow, w.verdict != .idle,
                   let eta = etaMinutes(w), eta > 0,

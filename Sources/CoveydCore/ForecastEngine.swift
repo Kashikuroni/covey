@@ -94,6 +94,9 @@ public struct AccountRate: Equatable, Sendable {
 extension ForecastEngine {
     /// Бленд трёх оценок §4.2: instant → recent → windowAverage.
     /// instant — Σ темпов активных сессий × свежий фактор текущего режима;
+    /// свежесть нужна обоим режимам, как в project: иначе горизонт проецируется
+    /// плоской ставкой, а instant дал бы projected = used (спека §4.1 — при
+    /// некалиброванном режиме честные дельты квоты, не оптимизм).
     /// recent — медиана дельт `fiveUsed` минутной серии за последние 15 мин;
     /// windowAverage — usedSoFar за время от начала окна. Первая применимая
     /// оценка выигрывает; без данных — нулевая ставка с source: .windowAverage.
@@ -105,7 +108,8 @@ extension ForecastEngine {
                            windowStart: Date, usedSoFar: Double) -> AccountRate {
         let tokensPerHour = sessionRates.filter(\.active).reduce(0.0) { $0 + $1.tokensPerHour }
         let peak = PeakSchedule.isPeak(at: now)
-        if tokensPerHour > 0, isFresh(factors, peak: peak, now: now),
+        if tokensPerHour > 0, isFresh(factors, peak: true, now: now),
+           isFresh(factors, peak: false, now: now),
            let factor = factors.factor(peak) {
             return AccountRate(creditsPerHour: tokensPerHour * factor,
                                tokensPerHour: tokensPerHour, source: .instant)

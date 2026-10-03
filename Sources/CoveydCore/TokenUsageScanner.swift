@@ -3,6 +3,16 @@ import Foundation
 /// Токены из транскриптов Claude Code. Парсер — чистый; вотчер хранит
 /// инкрементальные офсеты (тот же приём, что TraceMonitor) в QuotaSampleStore.
 public enum TokenUsageScanner {
+    /// Реальные транскрипты пишут миллисекунды («…T11:00:00.123Z»); целые
+    /// секунды — запасной формат. Дробный парсер первым: он же съел бы метку
+    /// с дробной частью как nil, будь он вторым.
+    private static let tsFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let tsWhole = ISO8601DateFormatter()
+
     /// Полные JSONL-строки → события. Хвост без `\n` — чужая недописанная
     /// строка: не учитывать и не двигать офсет за неё.
     public static func parse(_ data: Data, fallbackDate: Date) -> [TokenEvent] {
@@ -22,7 +32,7 @@ public enum TokenUsageScanner {
             let cc = n("cache_creation_input_tokens"), cr = n("cache_read_input_tokens")
             guard input > 0 || output > 0 || cc > 0 || cr > 0 else { continue }
             let t = (obj["timestamp"] as? String).flatMap {
-                ISO8601DateFormatter().date(from: $0)
+                tsFractional.date(from: $0) ?? tsWhole.date(from: $0)
             } ?? fallbackDate
             events.append(TokenEvent(t: t,
                                      sessionKey: (obj["sessionId"] as? String) ?? "unknown",

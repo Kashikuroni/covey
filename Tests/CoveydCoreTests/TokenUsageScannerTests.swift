@@ -54,6 +54,19 @@ final class TokenUsageScannerTests: XCTestCase {
         XCTAssertTrue(TokenUsageScanner.parse(Data(text.utf8), fallbackDate: t0).isEmpty)
     }
 
+    func testFractionalSecondsTimestampWinsOverFallback() {
+        // Реальные транскрипты пишут «…T11:00:00.123Z»: без дробного парсера
+        // метка отваливается в fallbackDate и после даунтайма час событий
+        // сливается в одну минуту (ложный всплеск темпа).
+        let line = #"{"type":"assistant","timestamp":"2026-10-02T11:00:00.123Z","sessionId":"uuid-1","message":{"model":"glm-4.6","usage":{"input_tokens":5}}}"# + "\n"
+        let events = TokenUsageScanner.parse(Data(line.utf8), fallbackDate: t0)
+        XCTAssertEqual(events.count, 1)
+        let expected = ISO8601DateFormatter().date(from: "2026-10-02T11:00:00Z")!
+            .addingTimeInterval(0.123)
+        XCTAssertEqual(events[0].t.timeIntervalSince1970, expected.timeIntervalSince1970,
+                       accuracy: 0.001, "берём метку из строки, а не fallbackDate")
+    }
+
     // MARK: activeFiles
 
     func testActiveFilesReturnsOnlyRecentJsonl() throws {
