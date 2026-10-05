@@ -24,4 +24,16 @@ final class ForecastLineTests: XCTestCase {
     func testIdleIsNil() {
         XCTAssertNil(ForecastText.forecastLine(w(verdict: .idle, headroom: 0), label: "5h", now: Date()))
     }
+
+    /// Метки чипа GLM мапятся на окна прогноза: «5h» → fiveHours, «7d» → weekly.
+    func testWindowLabelMapsToGLMForecastWindows() {
+        var forecast = GLMForecast()
+        forecast.fiveHours = w(verdict: .fits, headroom: 10)
+        forecast.weekly = w(verdict: .tight, headroom: 5)
+        XCTAssertEqual(glmWindowForecast("5h", forecast: forecast)?.verdict, .fits)
+        XCTAssertEqual(glmWindowForecast("7d", forecast: forecast)?.verdict, .tight)
+        // Чужие метки (Claude/Codex) и нет прогноза — строки нет.
+        XCTAssertNil(glmWindowForecast("S 7d", forecast: forecast))
+        XCTAssertNil(glmWindowForecast("5h", forecast: nil))
+    }
 }

@@ -74,4 +74,42 @@ final class MenuBarLimitsTests: XCTestCase {
         store.flush()
         XCTAssertEqual(store.load().menuBarLimitsEnabled, false)
     }
+
+    /// Кандидат на подъём при клике по статус-айтему: рабочее окно с титульным
+    /// стилем; служебные (статус-бар — это NSPanel, безтитульные) пропускаются.
+    @MainActor
+    func testActivationWindowSkipsAuxiliaryWindows() throws {
+        _ = NSApplication.shared
+        let auxiliary = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: 10, height: 10),
+                                 styleMask: [.borderless], backing: .buffered, defer: false)
+        let main = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: 400, height: 300),
+                            styleMask: [.titled], backing: .buffered, defer: false)
+        // close() с дефолтным isReleasedWhenClosed перевыпустит окно под
+        // ногами у аллокатора памяти XCTest — держим окна живыми до конца.
+        auxiliary.isReleasedWhenClosed = false
+        main.isReleasedWhenClosed = false
+        defer { auxiliary.close(); main.close() }
+        XCTAssertEqual(limitsActivationWindow(from: [auxiliary, main]), main)
+        XCTAssertNil(limitsActivationWindow(from: [auxiliary]))
+    }
+
+    /// Действие клика по статус-айтему совпадает с ⌘L: режим limits в главном
+    /// окне (та же команда Show Limits Detail) и обратное закрытие.
+    @MainActor
+    func testStatusBarClickOpensLimitsOverlay() throws {
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        let main = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: 400, height: 300),
+                            styleMask: [.titled], backing: .buffered, defer: false)
+        main.isReleasedWhenClosed = false
+        defer { main.close() }
+        main.makeKeyAndOrderFront(nil)
+
+        XCTAssertNotEqual(model.inputMode, .limits)
+        openLimitsDetailFromStatusBar(model: model)
+        XCTAssertEqual(model.inputMode, .limits)
+        model.apply(.closeOverlay)
+        XCTAssertEqual(model.inputMode, .normal)
+    }
 }

@@ -1,5 +1,35 @@
 import SwiftUI
 
+/// Локальное «HH:mm» для ETA прогноза; один форматтер на процесс. Живёт здесь,
+/// а не в файле рендера статус-айтема: строку прогноза читают и панель, и
+/// строки под окнами GLM в limits overlay.
+enum ForecastText {
+    static let time: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .none
+        f.timeStyle = .short
+        return f
+    }()
+
+    /// Одна строка прогноза под окном GLM (спека §6.2). nil — строки нет.
+    static func forecastLine(_ w: GLMWindowForecast, label: String, now: Date) -> String? {
+        switch w.verdict {
+        case .idle: return nil
+        case .calibrating: return "калибровка…"
+        case .fits: return "влезаем, запас \(Int(max(0, w.headroomPercent).rounded()))%"
+        case .tight: return "впритык, запас \(Int(max(0, w.headroomPercent).rounded()))%"
+        case .overflow:
+            let deficit = Int(max(0, -w.headroomPercent).rounded())
+            let eta = w.exhaustionAt.map {
+                "кончится ~\(time.string(from: Date(timeIntervalSince1970: Double($0) / 1000)))"
+            } ?? "не успеваем"
+            return "⚠ \(eta), не хватит \(deficit)%"
+        case .underuse:
+            return "можно грузить сильнее: к сбросу останется \(Int(max(0, w.headroomPercent).rounded()))%"
+        }
+    }
+}
+
 /// Чистая логика форматирования панели прогноза GLM (спека §6.3) — закреплена
 /// юнит-тестами `ForecastWindowModelTests`.
 enum ForecastWindow {
@@ -62,10 +92,16 @@ enum ForecastWindow {
 
 /// Панель прогноза GLM (спека §6.3): режим, графики обоих окон (факт +
 /// пунктирная проекция к projected), таблица агентов, модели по типам токенов,
-/// статус калибровки. Открывается кнопкой «Прогноз…» из menu-bar панели —
-/// sheet внутри её окна, поэтому панель проектируется под его ширину.
+/// статус калибровки. Открывается action link «Прогноз…» в limits overlay —
+/// второй стеклянной карточкой поверх него, поэтому ширина подгоняется под
+/// ширину карточки оверлея.
 struct ForecastWindowView: View {
     let forecast: GLMForecast?
+    /// Ширина карточки оверлея: панель проектируется под неё, а не под старую
+    /// ширину поповера.
+    var width: CGFloat = 276
+    /// nil — крестика нет (панель открыта там, где рядом есть «Прогноз…»).
+    var onClose: (() -> Void)? = nil
 
     @State private var contentHeight: CGFloat = 320
 
@@ -98,18 +134,24 @@ struct ForecastWindowView: View {
         .font(.system(size: 12))
         .foregroundStyle(.primary)
         .padding(12)
-        .frame(width: 276,
+        .frame(width: width,
                height: min(contentHeight, max(200, (NSScreen.main?.visibleFrame.height ?? 700) - 120)))
     }
 
     // MARK: - Режим
 
     private func regime(_ forecast: GLMForecast, now: Date) -> some View {
-        Text(ForecastWindow.regimeHeader(
-            peakNow: forecast.peakNow,
-            nextFlipAt: forecast.nextFlipAt.map { Date(timeIntervalSince1970: Double($0) / 1000) },
-            now: now))
-            .font(.system(size: 12, weight: .semibold))
+        HStack(alignment: .firstTextBaseline) {
+            Text(ForecastWindow.regimeHeader(
+                peakNow: forecast.peakNow,
+                nextFlipAt: forecast.nextFlipAt.map { Date(timeIntervalSince1970: Double($0) / 1000) },
+                now: now))
+                .font(.system(size: 12, weight: .semibold))
+            if let onClose {
+                Spacer()
+                OverlayActionLink(title: "Скрыть прогноз", action: onClose)
+            }
+        }
     }
 
     // MARK: - Графики

@@ -20,18 +20,70 @@ func glmKeyRowLabel(status: ProviderKeyStatus, valid: Bool) -> (text: String, ac
     }
 }
 
-/// Command palette detail popover: full Claude/Codex/GLM breakdown in a glass
-/// card. The card itself lives in `LimitsOverlayContent`; this wrapper owns
-/// only the surface styling, so new content fields never need threading
-/// through two declarations.
+/// Прогноз окна GLM по метке чипа: «5h» → fiveHours, «7d» → weekly. Чужие
+/// метки (Claude/Codex) и отсутствующий прогноз строки не дают.
+func glmWindowForecast(_ label: String, forecast: GLMForecast?) -> GLMWindowForecast? {
+    switch label {
+    case "5h": return forecast?.fiveHours
+    case "7d": return forecast?.weekly
+    default: return nil
+    }
+}
+
+/// Заголовок action link прогноза: открытая панель предлагает её скрыть.
+func overlayForecastToggleTitle(shown: Bool) -> String {
+    shown ? "Скрыть прогноз" : "Прогноз…"
+}
+
+/// Текстовое действие в языке оверлея: monospace, link-blue, без рамки —
+/// замена системным кнопкам внутри стеклянной карточки. Hover подчёркивает
+/// и ставит курсор-руку, нажатие гасит цвет.
+struct OverlayActionLink: View {
+    let title: String
+    let action: () -> Void
+
+    @State private var hovering = false
+    @Environment(\.isEnabled) private var enabled
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundStyle(Color(nsColor: .linkColor))
+                .underline(hovering)
+                .opacity(enabled ? 1 : 0.4)
+        }
+        .buttonStyle(OverlayActionLinkStyle())
+        .onHover { inside in
+            hovering = inside
+            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
+    }
+}
+
+/// Нажатие гасит линк — bezel нет и во взятом состоянии.
+private struct OverlayActionLinkStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.5 : 1)
+    }
+}
+
+/// Detailed limits overlay (⌘L «Show Limits Detail», клик по статус-айтему):
+/// полный разбор Claude/Codex/GLM в стеклянной карточке. Сама карточка живёт
+/// в `LimitsOverlayContent`; враппер владеет поверхностью и второй карточкой —
+/// панелью прогноза, которая по клику «Прогноз…» ложится поверх контента
+/// (так же, как сам оверлей лежит поверх окна в `ContentView`).
 struct LimitsOverlay: View {
     let content: LimitsOverlayContent
     var onRefreshGLMKeyStatus: () async -> Void = {}
 
+    @State private var showingForecast = false
+
     private let cardWidth: CGFloat = 320
 
     var body: some View {
-        content
+        presentable
             .task { await onRefreshGLMKeyStatus() }
             .frame(width: cardWidth)
             // Tinted with our own surface color so whatever sits behind the
@@ -39,12 +91,31 @@ struct LimitsOverlay: View {
             // enough to fight the card's own text for legibility.
             .glassEffect(.regular.tint(content.tk.surface.opacity(0.6)), in: .rect(cornerRadius: 16))
             .shadow(radius: 12)
+            .overlay(alignment: .top) {
+                if showingForecast, let forecast = content.glmForecast {
+                    ForecastWindowView(forecast: forecast, width: cardWidth,
+                                       onClose: { showingForecast = false })
+                        .glassEffect(.regular.tint(content.tk.surface.opacity(0.6)),
+                                     in: .rect(cornerRadius: 16))
+                        .shadow(radius: 12)
+                        .transition(.scale(scale: 0.96, anchor: .top).combined(with: .opacity))
+                }
+            }
+            .animation(.spring(response: 0.28, dampingFraction: 0.86), value: showingForecast)
+    }
+
+    /// Контент с подключённым переключателем панели прогноза: состояние живет
+    /// здесь (враппер рисует карточку), контенту уходит только замыкание.
+    private var presentable: LimitsOverlayContent {
+        var content = content
+        content.forecastShown = showingForecast
+        content.onToggleForecast = { showingForecast.toggle() }
+        return content
     }
 }
 
-/// The overlay's card without the glass container — the same split as
-/// `NativeLimitsContent` vs `MenuBarLimitsSurface`, so tests can render the
-/// actual rows (glass does not paint offscreen).
+/// The overlay's card without the glass container — tests can render the
+/// actual rows directly (glass does not paint offscreen).
 struct LimitsOverlayContent: View {
     let usage: Usage?
     let plan: String?
@@ -59,6 +130,7 @@ struct LimitsOverlayContent: View {
     var glmQuota: GLMQuota? = nil
     var glmEnabled: Bool = true
     var glmError: String? = nil
+    var glmForecast: GLMForecast? = nil
     var glmKeyStatus: ProviderKeyStatus = .checking
     var glmKeyValid: Bool = false
     var onSaveGLMKey: (String) async -> Bool = { _ in false }
@@ -70,6 +142,10 @@ struct LimitsOverlayContent: View {
     var connectionError: String?
     var settingsPending = false
     var settingsAvailable = true
+    /// Панель прогноза открыта (владеет `LimitsOverlay` — он её и рисует).
+    var forecastShown = false
+    /// Переключатель панели прогноза; nil — линка «Прогноз…» нет.
+    var onToggleForecast: (() -> Void)? = nil
 
     @State private var showingGLMKeyField = false
     @State private var glmKeyDraft = ""
@@ -125,12 +201,10 @@ struct LimitsOverlayContent: View {
                     .foregroundStyle(glmKeyStatus == .checking ? tk.t3
                                      : (glmKeyValid ? tk.ok : tk.err))
                 Spacer()
-                Button(label.action) {
+                OverlayActionLink(title: label.action) {
                     glmKeyDraft = ""
                     showingGLMKeyField.toggle()
                 }
-                .font(.system(size: 13, design: .monospaced))
-                .buttonStyle(.link)
                 .disabled(glmKeySaving)
             }
             if showingGLMKeyField {
@@ -202,9 +276,17 @@ struct LimitsOverlayContent: View {
             }
             .opacity(row.enabled ? 1 : 0.55)
             ForEach(Array(row.chip.windows.enumerated()), id: \.offset) { entry in
-                windowRow(entry.element, now: now)
+                windowRow(entry.element, now: now,
+                          forecast: row.provider == .glm
+                              ? glmWindowForecast(entry.element.label, forecast: glmForecast)
+                              : nil)
             }
             .opacity(row.enabled ? 1 : 0.55)
+            if row.provider == .glm, glmForecast != nil, let onToggleForecast {
+                OverlayActionLink(title: overlayForecastToggleTitle(shown: forecastShown)) {
+                    onToggleForecast()
+                }
+            }
             if let message = row.emptyMessage {
                 Text(message)
                     .font(.system(size: 13, design: .monospaced))
@@ -232,7 +314,8 @@ struct LimitsOverlayContent: View {
         }
     }
 
-    private func windowRow(_ w: LabeledWindow, now: Date) -> some View {
+    private func windowRow(_ w: LabeledWindow, now: Date,
+                           forecast: GLMWindowForecast? = nil) -> some View {
         let pct = displayUsagePercent(w.window.utilization)
         let color = pct.map { levelColor(usageLevel($0), tk: tk) } ?? tk.t3
         return VStack(alignment: .leading, spacing: 7) {
@@ -257,6 +340,14 @@ struct LimitsOverlayContent: View {
                 }
             }
             .frame(height: 6)
+            // Прогноз под окном GLM — вторичные данные, перебор красит err-цветом.
+            if let forecast, let line = ForecastText.forecastLine(forecast, label: w.label, now: now) {
+                Text(line)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(forecast.verdict == .overflow
+                                     ? AnyShapeStyle(tk.err) : AnyShapeStyle(tk.t2))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }

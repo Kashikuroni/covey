@@ -8,6 +8,49 @@ func nativeUsageColor(_ level: UsageLevel) -> NSColor {
     }
 }
 
+/// Both GLM forecast windows that deserve the menu-bar «⚠»: an overflow
+/// verdict, or a non-idle/non-underuse verdict whose quota runs out within
+/// the hour.
+func glmForecastAtRisk(_ forecast: GLMForecast?) -> Bool {
+    guard let forecast else { return false }
+    for window in [forecast.fiveHours, forecast.weekly] {
+        guard let window else { continue }
+        if window.verdict == .overflow { return true }
+        if let eta = window.exhaustionAt,
+           eta - Int64(Date().timeIntervalSince1970 * 1000) < 60 * 60_000,
+           window.verdict != .idle, window.verdict != .underuse { return true }
+    }
+    return false
+}
+
+/// Segments for the status-item title. Claude/Codex keep their stable
+/// placeholder slots; GLM joins only once it has data — status-item width is
+/// too scarce for a permanent em dash of a provider that may never be
+/// configured. A non-nil forecast counts as data; a risky one prefixes the
+/// value with «⚠» and keeps the segment even before quota numbers arrive.
+func menuBarSegments(usage: Usage?, codexUsage: CodexRateLimitsSnapshot?,
+                     glmQuota: GLMQuota?, glmEnabled: Bool,
+                     forecast: GLMForecast? = nil) -> [HeaderSegment] {
+    var segments = headerSegments(usage: usage, usageError: nil, codexUsage: codexUsage,
+                                  glmQuota: glmQuota, glmEnabled: glmEnabled)
+    if glmForecastAtRisk(forecast), let index = segments.firstIndex(where: { $0.label == "GLM" }) {
+        let glm = segments[index]
+        segments[index] = HeaderSegment(label: glm.label,
+                                        value: glm.value == "—" ? "⚠" : "⚠ " + glm.value,
+                                        level: glm.level)
+    }
+    return segments.filter { $0.level != nil || $0.label != "GLM" || forecast != nil }
+}
+
+func menuBarLimitsTitle(usage: Usage?, codexUsage: CodexRateLimitsSnapshot?,
+                        glmQuota: GLMQuota? = nil, glmEnabled: Bool = true,
+                        forecast: GLMForecast? = nil) -> String {
+    menuBarSegments(usage: usage, codexUsage: codexUsage, glmQuota: glmQuota, glmEnabled: glmEnabled,
+                    forecast: forecast)
+        .map { "\($0.label == "Codex" ? "GPT" : $0.label) \($0.value)" }
+        .joined(separator: " · ")
+}
+
 func menuBarLimitsAttributedTitle(usage: Usage?, codexUsage: CodexRateLimitsSnapshot?,
                                   glmQuota: GLMQuota?, glmEnabled: Bool,
                                   forecast: GLMForecast? = nil) -> NSAttributedString {
@@ -37,24 +80,4 @@ func menuBarLimitsImage(_ title: NSAttributedString) -> NSImage {
     }
     image.isTemplate = false
     return image
-}
-
-struct MenuBarLimitsLabel: View {
-    let usage: Usage?
-    let codexUsage: CodexRateLimitsSnapshot?
-    var glmQuota: GLMQuota? = nil
-    var glmEnabled: Bool = true
-    var glmForecast: GLMForecast? = nil
-
-    var body: some View {
-        Image(nsImage: menuBarLimitsImage(menuBarLimitsAttributedTitle(usage: usage, codexUsage: codexUsage,
-                                                                      glmQuota: glmQuota, glmEnabled: glmEnabled,
-                                                                      forecast: glmForecast)))
-            .renderingMode(.original)
-            .fixedSize()
-            .accessibilityLabel("Covey AI Usage Limits")
-            .accessibilityValue(menuBarLimitsTitle(usage: usage, codexUsage: codexUsage,
-                                                   glmQuota: glmQuota, glmEnabled: glmEnabled,
-                                                   forecast: glmForecast))
-    }
 }
