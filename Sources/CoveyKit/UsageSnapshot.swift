@@ -25,6 +25,7 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
     public var glmQuota: GLMQuota?
     public var glmUsageError: String?
     public var glmUsageEnabled = true
+    public var glmForecast: GLMForecast?
     public init() {}
 
     /// Every field is optional on decode so a snapshot written before a
@@ -45,5 +46,6 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
         glmQuota = try c.decodeIfPresent(GLMQuota.self, forKey: .glmQuota)
         glmUsageError = try c.decodeIfPresent(String.self, forKey: .glmUsageError)
         glmUsageEnabled = try c.decodeIfPresent(Bool.self, forKey: .glmUsageEnabled) ?? true
+        glmForecast = try c.decodeIfPresent(GLMForecast.self, forKey: .glmForecast)
     }
 }

@@ -96,4 +96,12 @@ public enum ProviderRegistry {
     public static func profile(id: String, path: String = CoveyConfig.defaultPath) -> ProviderProfile? {
         load(path: path).first { $0.id == id }
     }
+
+    /// `true` when the profile's endpoint is z.ai — its sessions burn GLM
+    /// credits and belong in the quota forecast. No id (plain claude.ai
+    /// session) → false.
+    public static func isZai(_ providerId: String?) -> Bool {
+        guard let providerId else { return false }
+        return profile(id: providerId)?.baseURL?.contains("z.ai") ?? false
+    }
 }

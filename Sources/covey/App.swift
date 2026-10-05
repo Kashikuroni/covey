@@ -6,6 +6,8 @@ import CoveyKit
 struct CoveyApp: App {
     @State private var model: AppModel?
     @State private var startupError: String?
+    /// Статус-айтем лимитов (клик открывает detailed limits overlay).
+    @State private var menuBarItem: MenuBarLimitsStatusItem?
 
     init() {
         // Hold-to-repeat for movement keys (holding j/k to scroll in nvim/less):
@@ -66,6 +68,7 @@ struct CoveyApp: App {
                     await m.start()
                     Notifier.requestPermission()
                     model = m
+                    menuBarItem = MenuBarLimitsStatusItem(model: m)
                 } catch {
                     startupError = "\(error)"
                 }
@@ -131,18 +134,10 @@ struct CoveyApp: App {
                     set: { model?.setVimMode($0) }))
             }
         }
-        MenuBarExtra(isInserted: Binding(
-            get: { model?.menuBarLimitsEnabled ?? false },
-            set: { model?.setMenuBarLimitsEnabled($0) }
-        )) {
-            if let model {
-                MenuBarLimitsPanel(model: model)
-            }
-        } label: {
-            MenuBarLimitsLabel(usage: model?.usage, codexUsage: model?.codexUsage,
-                               glmQuota: model?.glmQuota, glmEnabled: model?.glmUsageEnabled ?? true)
-        }
-        .menuBarExtraStyle(.window)
+        // Статус-айтем лимитов живёт вне SwiftUI-сцен: создается, как только
+        // готова модель, и сам открывает detailed limits overlay по клику
+        // (MenuBarLimitsStatusItem). Переключатель «Show in macOS menu bar»
+        // в оверлее управляет его видимостью.
     }
 
     /// ensureDaemon + connect. The daemon binary lives next to our own binary —

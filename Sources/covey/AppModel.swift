@@ -179,6 +179,7 @@ public final class AppModel {
         codexState == .unauthed ? "Codex is signed out. Sign in to Codex to resume limit updates." : nil
     }
     var glmQuota: GLMQuota? { usageStore.snapshot.glmQuota }
+    var glmForecast: GLMForecast? { usageStore.snapshot.glmForecast }
     var glmUsageError: String? { usageStore.snapshot.glmUsageError }
     /// GLM's z.ai API key presence. Unlike Claude/Codex, GLM has no local
     /// login to read — the key is entered in the limits window.
@@ -373,7 +374,8 @@ public final class AppModel {
         usageStore = UsageStore(
             onPersist: { [weak self] in self?.persist() },
             readMarkers: { [weak self] in self?.persisted.usageNotified ?? [:] },
-            writeMarkers: { [weak self] in self?.persisted.usageNotified = $0 })
+            writeMarkers: { [weak self] in self?.persisted.usageNotified = $0 },
+            glmForecastConfig: CoveyConfig.load().glmForecast ?? GLMForecastConfigSection())
         issueBrowser.toast = { [weak self] msg in self?.showToast(msg) }
         reviewLinks.changed = { [weak self] in self?.persist() }
         issueBrowser.fetchBranches = { [weak self] dir in

@@ -17,17 +17,44 @@ public final class UsageMonitor {
     private var generations: [UsageProvider: UInt64] = [:]
     private var requests: [UsageProvider: UInt64] = [:]
     private var codexServer: CodexAppServer?
+    // Прогноз GLM (все nil → прогноз выключен, монитор ведёт себя как раньше).
+    public private(set) var forecastStore: QuotaSampleStore?
+    private var transcriptWatcher: TranscriptWatcher?
+    private var glmSessions: (() -> [(uuid: String, name: String, isGLM: Bool)])?
+    private var aggregator: TokenAggregator
+    private var config: GLMForecastConfig
+    private var factors = CalibrationFactors()
+    private var lastRawVerdicts: [String: GLMForecastVerdict] = [:]   // "five"|"week" → сырой
+    private var confirmedVerdicts: [String: GLMForecastVerdict] = [:]
 
     public init(path: String? = nil, legacyPath: String? = nil,
                 fetchAccount: @escaping () async -> Account = UsageService.fetchAccount,
                 fetchGLM: @escaping () async -> GLMAccount = GlmUsageService.fetchGLMAccount,
                 usageInterval: TimeInterval = 60,
-                resolveCodex: @escaping () -> String? = resolveCodexPath) {
+                resolveCodex: @escaping () -> String? = resolveCodexPath,
+                forecastStore: QuotaSampleStore? = nil,
+                transcriptWatcher: TranscriptWatcher? = nil,
+                forecastAggregator: TokenAggregator? = nil,
+                glmSessions: (() -> [(uuid: String, name: String, isGLM: Bool)])? = nil) {
         self.path = path
         self.fetchAccount = fetchAccount
         self.fetchGLM = fetchGLM
         self.usageInterval = max(0.01, usageInterval)
         self.resolveCodex = resolveCodex
+        self.forecastStore = forecastStore
+        // Спека §4.1: рестарт демона не сбрасывает калибровку — сеем факторы
+        // из стора, иначе первый updateForecast перезаписал бы persisted
+        // пустым дефолтом.
+        if let forecastStore { factors = CalibrationFactors(forecastStore.factors) }
+        self.transcriptWatcher = transcriptWatcher
+        self.glmSessions = glmSessions
+        // Тот же экземпляр, что у вотчера, иначе вёдра не доедут до прогноза.
+        self.aggregator = forecastAggregator ?? TokenAggregator(buckets: forecastStore?.buckets ?? [])
+        let cfg = CoveyConfig.load()
+        self.config = GLMForecastConfig(
+            includeExternal: cfg.glmForecast?.includeExternal ?? true,
+            marginPercent: cfg.glmForecast?.marginPercent ?? 15,
+            imminentMinutes: cfg.glmForecast?.imminentMinutes ?? 20)
         var restored = UsageSnapshot()
         if let path, FileManager.default.fileExists(atPath: path) {
             do { restored = try JSONDecoder().decode(UsageSnapshot.self, from: Data(contentsOf: URL(fileURLWithPath: path))) }
@@ -133,6 +160,7 @@ public final class UsageMonitor {
                 if let quota = account.quota { $0.glmQuota = quota }
                 $0.glmUsageError = account.error
             }
+            if let quota = account.quota { updateForecast(quota: quota) }
         case .codex:
             break
         }
@@ -162,6 +190,83 @@ public final class UsageMonitor {
         case .codex: return snapshot.codexUsageEnabled
         case .glm: return snapshot.glmUsageEnabled
         }
+    }
+
+    // MARK: - GLM forecast (спека §4–§7)
+
+    /// Прогноз-цикл успешного GLM-поллинга: дочитать транскрипты, приложить
+    /// сэмпл квоты, собрать и украсить прогноз, опубликовать и сохранить стор.
+    private func updateForecast(quota: GLMQuota) {
+        guard let store = forecastStore else { return }
+        let now = Date()
+        transcriptWatcher?.poll(now: now)
+        // Сэмпл из текущего quota (5h и weekly used/reset).
+        func entry(_ w: GLMLimitWindow?) -> (used: Double, reset: Int64) {
+            (w?.used ?? 0, w?.resetAt ?? 0)
+        }
+        let five = entry(quota.limits.fiveHours), week = entry(quota.limits.weekly)
+        let sample = QuotaSample(t: Int64(now.timeIntervalSince1970 * 1000),
+                                 fiveUsed: five.used, fiveReset: five.reset,
+                                 weekUsed: week.used, weekReset: week.reset)
+        store.append(sample)
+        store.setBuckets(aggregator.buckets)   // вёдра вотчера едут в стор на диск
+        let (forecast, newFactors) = ForecastEngine.build(
+            fiveHours: quota.limits.fiveHours, weekly: quota.limits.weekly,
+            aggregator: aggregator, store: store, factors: factors, now: now,
+            config: config)
+        factors = newFactors
+        store.setFactors(factors.persisted)
+        var decorated = forecast
+        decorated.agents = resolveAgentNames(forecast.agents)
+        decorated.fiveHours = debounced("five", forecast.fiveHours)
+        decorated.weekly = debounced("week", forecast.weekly)
+        // Бюджеты агентов (§4.4): остаток 5h-окна / собственный кредитный темп агента.
+        if let five = decorated.fiveHours, five.remaining > 0 {
+            decorated.agents = decorated.agents.map { a in
+                var a = a
+                a.budgetMinutes = a.creditsPerHour > 0 ? five.remaining / a.creditsPerHour * 60 : nil
+                return a
+            }
+        }
+        mutate { $0.glmForecast = decorated }
+        try? store.save()
+    }
+
+    /// Имена агентов: uuid → имя Covey-сессии из `glmSessions`; ключ без
+    /// сессии — внешний, имя «ext:<slug>» (каталог транскрипта; пути опроса
+    /// вотчер держит в офсетах стора).
+    private func resolveAgentNames(_ agents: [GLMAgentForecast]) -> [GLMAgentForecast] {
+        let sessions = glmSessions?() ?? []
+        let byUUID = Dictionary(sessions.map { ($0.uuid, $0.name) }, uniquingKeysWith: { first, _ in first })
+        let slugs = Dictionary((forecastStore?.offsets ?? [:]).keys.map { path -> (String, String) in
+            let url = URL(fileURLWithPath: path)
+            return (url.deletingPathExtension().lastPathComponent.lowercased(),
+                    url.deletingLastPathComponent().lastPathComponent)
+        }, uniquingKeysWith: { first, _ in first })
+        return agents.map { a in
+            var a = a
+            if let name = byUUID[a.name] {
+                a.name = name
+            } else {
+                a.external = true
+                a.name = "ext:\(slugs[a.name] ?? a.name)"
+            }
+            return a
+        }
+    }
+
+    /// Публикуем вердикт только когда он продержался два опроса подряд;
+    /// до того держим прошлый подтверждённый (в первый цикл — .calibrating).
+    private func debounced(_ key: String, _ w: GLMWindowForecast?) -> GLMWindowForecast? {
+        guard var w = w else { return nil }
+        let raw = w.verdict
+        defer { lastRawVerdicts[key] = raw }
+        guard let last = lastRawVerdicts[key] else {
+            return w.replacingVerdict(.calibrating)   // первый опрос: сырого не с чем сравнить
+        }
+        if last == raw { confirmedVerdicts[key] = raw }
+        w.verdict = confirmedVerdicts[key] ?? raw
+        return w
     }
 
     private func startCodexIfNeeded() {
@@ -209,5 +314,16 @@ public final class UsageMonitor {
         let url = URL(fileURLWithPath: path)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try JSONEncoder().encode(value).write(to: url, options: .atomic)
+    }
+}
+
+/// Копия прогноза окна с заменённым вердиктом — дебаунс подменяет сырой
+/// вердикт подтверждённым, не трогая числа.
+extension GLMWindowForecast {
+    func replacingVerdict(_ verdict: GLMForecastVerdict) -> GLMWindowForecast {
+        GLMWindowForecast(verdict: verdict, projected: projected, remaining: remaining,
+                          total: total, resetAt: resetAt, exhaustionAt: exhaustionAt,
+                          headroomPercent: headroomPercent,
+                          rateCreditsPerHour: rateCreditsPerHour, agentMinutes: agentMinutes)
     }
 }

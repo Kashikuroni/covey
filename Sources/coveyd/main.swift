@@ -60,8 +60,25 @@ let ipc = IPCServer(registry: registry, monitor: monitor, gitMonitor: gitMonitor
                     modelMonitor: modelMonitor, traceMonitor: traceMonitor,
                     traceStore: traceStore)
 let usageMonitor = MainActor.assumeIsolated {
+    // Прогноз квоты GLM: сэмплы + вёдра токенов в одном JSON рядом с usage.json.
+    let forecastStore = QuotaSampleStore(path: dir.appendingPathComponent("usage-samples.json").path)
+    let glmAggregator = TokenAggregator(buckets: forecastStore.buckets)
+    // uuid транскрипта → имя Covey-сессии + признак z.ai-провайдера (GLM-квота).
+    let glmSessions: () -> [(uuid: String, name: String, isGLM: Bool)] = {
+        registry.list().compactMap { s in
+            guard let uuid = ClaudeTranscript.sessionUUID(resumeCmd: s.resumeCmd) else { return nil }
+            return (uuid, s.name, ProviderRegistry.isZai(s.providerId))
+        }
+    }
+    let transcriptWatcher = TranscriptWatcher(
+        projectsRoot: NSHomeDirectory() + "/.claude/projects",
+        aggregator: glmAggregator, store: forecastStore,
+        includeExternal: CoveyConfig.load().glmForecast?.includeExternal ?? true,
+        coveyClaudeSessions: glmSessions)
     let usage = UsageMonitor(path: dir.appendingPathComponent("usage.json").path,
-                             legacyPath: dir.appendingPathComponent("state.json").path)
+                             legacyPath: dir.appendingPathComponent("state.json").path,
+                             forecastStore: forecastStore, transcriptWatcher: transcriptWatcher,
+                             forecastAggregator: glmAggregator, glmSessions: glmSessions)
     ipc.attachUsageMonitor(usage)
     return usage
 }
