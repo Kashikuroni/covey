@@ -10,7 +10,9 @@ let package = Package(
         // Exported for the XcodeGen app-bundle targets (project.yml);
         // SPM executables/tests keep working without them.
         .library(name: "CoveyKit", targets: ["CoveyKit"]),
-        .library(name: "CoveydCore", targets: ["CoveydCore"])
+        .library(name: "CoveydCore", targets: ["CoveydCore"]),
+        .library(name: "CoveyGit", targets: ["CoveyGit"]),
+        .library(name: "CoveyCodeGraph", targets: ["CoveyCodeGraph"])
     ],
     dependencies: [
         // Pinned to the post-1.13.0 upstream fix (PR #522): CSI T (scroll-down /
@@ -21,6 +23,18 @@ let package = Package(
         .package(url: "https://github.com/migueldeicaza/SwiftTerm", revision: "94b63560c55e80876f32cb3ceeeba369b474bb2c")
     ],
     targets: [
+        // Every git invocation in covey. Foundation only: no covey models,
+        // no protocol — daemon and GUI both sit on top of it.
+        .target(
+            name: "CoveyGit",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        // Links between source files for the Review graph. Foundation only:
+        // no git, no UI, no CoveyGit — files arrive through `SourceProvider`.
+        .target(
+            name: "CoveyCodeGraph",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
         .target(
             name: "CoveyKit",
             swiftSettings: [.swiftLanguageMode(.v5)]
@@ -29,6 +43,7 @@ let package = Package(
             name: "CoveydCore",
             dependencies: [
                 "CoveyKit",
+                "CoveyGit",
                 .product(name: "SwiftTerm", package: "SwiftTerm")
             ],
             swiftSettings: [.swiftLanguageMode(.v5)]
@@ -42,6 +57,8 @@ let package = Package(
             name: "covey",
             dependencies: [
                 "CoveyKit",
+                "CoveyGit",
+                "CoveyCodeGraph",
                 .product(name: "SwiftTerm", package: "SwiftTerm")
             ],
             swiftSettings: [.swiftLanguageMode(.v5)]
@@ -53,15 +70,26 @@ let package = Package(
         ),
         .testTarget(
             name: "CoveyAppTests",
-            dependencies: ["covey", "CoveydCore"],
+            dependencies: ["covey", "CoveydCore", "CoveyGit", "CoveyCodeGraph"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
             name: "CoveydCoreTests",
             dependencies: [
                 "CoveydCore",
+                "CoveyGit",
                 .product(name: "SwiftTerm", package: "SwiftTerm")
             ],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        .testTarget(
+            name: "CoveyGitTests",
+            dependencies: ["CoveyGit"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        .testTarget(
+            name: "CoveyCodeGraphTests",
+            dependencies: ["CoveyCodeGraph"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         )
     ]

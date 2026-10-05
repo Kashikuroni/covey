@@ -11,7 +11,7 @@ enum AppCommand: String, CaseIterable, Hashable {
     case cleanupMergedBranches, returnToRepositoryRoot
     case splitTerminalVertically, splitTerminalHorizontally, closeTerminalSplit
     case toggleViewTerminal
-    case toggleSessionsPanel, toggleInspector, toggleAgentTrace
+    case toggleReview, toggleSessionsPanel, toggleInspector, toggleAgentTrace
     case toggleStatusBar, toggleTopBar, toggleTheme, cycleUsagePlacement
     case showLimitsDetail, focusSessionList, focusAgent, focusIssues
     case focusTerminalSplit, focusTrace, showKeyboardHelp
@@ -173,6 +173,10 @@ enum CommandCatalog {
         descriptor(.toggleViewTerminal, "Open Terminal", .terminal,
                    ["terminal", "shell", "open terminal", "терминал", "оболочка"]),
 
+        descriptor(.toggleReview, "Review", .view,
+                   ["review", "code review", "diff review", "toggle review",
+                    "ревью", "просмотр изменений", "режим ревью"],
+                   .init(key: "r", modifiers: [.command, .option], display: "⌥⌘R")),
         descriptor(.toggleSessionsPanel, "Toggle Sessions Panel", .view,
                    ["show hide sessions", "панель сессий", "показать сессии", "скрыть сессии"]),
         descriptor(.toggleInspector, "Toggle Inspector", .view,

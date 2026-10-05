@@ -1,5 +1,6 @@
 import XCTest
 @testable import CoveydCore
+import CoveyGit
 import CoveyKit
 
 final class GitMonitorTests: XCTestCase {
@@ -21,7 +22,7 @@ final class GitMonitorTests: XCTestCase {
         p.executableURL = URL(fileURLWithPath: "/bin/sh")
         p.arguments = ["-c", cmd]
         try p.run(); p.waitUntilExit()
-        guard p.terminationStatus == 0 else { throw GitOps.GitError("sh failed: \(cmd)") }
+        guard p.terminationStatus == 0 else { throw GitError("sh failed: \(cmd)") }
     }
 
     func testEmitsOnChangeOnly() throws {

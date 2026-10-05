@@ -5,7 +5,8 @@ import SwiftUI
 /// Live-grep over the app's log directory (`LogPaths.directory`), Telescope-
 /// style: type and results refine as you go, newest file and newest line
 /// first. The query is a case-insensitive regex; an invalid pattern degrades
-/// to a literal search. Read-only — debugging aid; `c` copies `file:line:`.
+/// to a literal search. Read-only — debugging aid; `c` copies the selected
+/// line as `file:line: text`.
 struct LogSearchSheet: View {
     let model: AppModel
     @State private var query = ""

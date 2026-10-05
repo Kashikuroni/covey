@@ -126,6 +126,28 @@ public final class AppModel {
             }
         }
     }
+    /// What the main window shows. Not persisted: covey starts in `.sessions`.
+    /// Changed only by `AppModel+Review`.
+    var windowMode: WindowMode = .sessions
+    /// The one live review. It survives trips back to the sessions and is
+    /// replaced only when Review opens for another worktree.
+    var review: ReviewModel?
+    /// The main window is fully covered; the review stops polling then.
+    @ObservationIgnored var mainWindowOccluded = false
+    /// Bumped by every Review entry and exit, so a toplevel that git resolves
+    /// for a superseded entry is dropped.
+    @ObservationIgnored var reviewEntryGeneration = 0
+    /// The session the last review went to ("⌥⌘R to watch"): the next trip
+    /// back to the sessions selects it, once.
+    @ObservationIgnored var pendingWatchSession: String?
+    /// Worktree toplevel of a directory, nil outside git (test seam).
+    @ObservationIgnored var resolveReviewWorktree: @Sendable (String) async -> String? = { dir in
+        await AppModel.gitToplevel(dir)
+    }
+    /// Builds the review for an opening (test seam; nil = the production model).
+    @ObservationIgnored var reviewModelFactory: ((ReviewOpening) -> ReviewModel)?
+    /// The Review graph's link settings (persisted), shared with the live review.
+    let reviewLinks = ReviewLinkSettings()
     public private(set) var connected = false
     public private(set) var themeRaw: String = "dark"
     public private(set) var splitPct: Int = 38
@@ -300,7 +322,15 @@ public final class AppModel {
     /// Route a view command to the focused pane's terminal (fallback: selected).
     private func sendTerminalCommand(_ cmd: TerminalCommand) {
         let target = focusedPane ?? selected
-        if let target { terminalCommands[target]?(cmd) }
+        if let target { deliverTerminalCommand(cmd, to: target) }
+    }
+
+    /// The one way a command reaches a terminal view. Review hides the
+    /// terminals; none may take the keyboard behind it (sheet dismissal, the
+    /// palette, the limits overlay and `focusPane` all ask).
+    private func deliverTerminalCommand(_ cmd: TerminalCommand, to name: String) {
+        if cmd == .focus, windowMode == .review { return }
+        terminalCommands[name]?(cmd)
     }
 
     var client: IPCClient
@@ -345,6 +375,7 @@ public final class AppModel {
             readMarkers: { [weak self] in self?.persisted.usageNotified ?? [:] },
             writeMarkers: { [weak self] in self?.persisted.usageNotified = $0 })
         issueBrowser.toast = { [weak self] msg in self?.showToast(msg) }
+        reviewLinks.changed = { [weak self] in self?.persist() }
         issueBrowser.fetchBranches = { [weak self] dir in
             await self?.gitInfo(dir).branches ?? []
         }
@@ -364,6 +395,8 @@ public final class AppModel {
         showHeader = persisted.showHeader ?? true
         sbWidth = persisted.sbWidth ?? 360
         vimMode = persisted.vimMode ?? true
+        reviewLinks.showLinks = persisted.showLinks ?? false
+        reviewLinks.linksOnFocus = persisted.linksOnFocus ?? true
         projectNames = persisted.projectNames
         projects = persisted.projects ?? []
         do {
@@ -547,7 +580,7 @@ public final class AppModel {
             lastFocusedAgent = name
             setFocus(.terminal)
         }
-        terminalCommands[name]?(.focus)
+        deliverTerminalCommand(.focus, to: name)
     }
 
     public func create(dir: String, agent: String) async {
@@ -770,12 +803,17 @@ public final class AppModel {
         terminalPaneOwnership.isCurrent(lease)
     }
 
+    /// Resize requests sent to the daemon — each one is a SIGWINCH for the
+    /// agent if the size moved. Tests pin that a mode switch sends none.
+    @ObservationIgnored private(set) var resizesSent = 0
+
     func resize(
         cols: UInt16,
         rows: UInt16,
         lease: TerminalViewLease
     ) async {
         guard isTerminalViewLeaseCurrent(lease) else { return }
+        resizesSent += 1
         try? await client.resize(
             name: lease.session,
             cols: cols,
@@ -784,7 +822,10 @@ public final class AppModel {
     }
 
     /// Sheets fire-and-forget outcomes (issue created after Esc-hide, …).
-    public func showToast(_ message: String) { toast = message }
+    public func showToast(_ message: String) {
+        EventLog.note("toast", message)
+        toast = message
+    }
 
     public func reconnect() async {
         do {
@@ -948,7 +989,8 @@ public final class AppModel {
                        usagePlacement: usagePlacement,
                        claudeUsageEnabled: claudeUsageEnabled,
                        codexUsageEnabled: codexUsageEnabled,
-                       glmUsageEnabled: glmUsageEnabled)
+                       glmUsageEnabled: glmUsageEnabled,
+                       linksOnFocus: reviewLinks.linksOnFocus)
     }
 
     func openSettings() {
@@ -1130,7 +1172,9 @@ public final class AppModel {
             terminalFocused: focus == .terminal && inputMode == .normal,
             agentPaneCount: agentPaneCount,
             canCloseFocusedPane: focusedPane == activeShell
-                || (visibleSplitTree?.contains(session: focusedPane ?? "") ?? false))
+                || (visibleSplitTree?.contains(session: focusedPane ?? "") ?? false),
+            reviewOpen: windowMode == .review,
+            hasActiveReview: review != nil)
     }
 
     func perform(_ command: AppCommand) {
@@ -1181,6 +1225,8 @@ public final class AppModel {
             issueBrowser.screen = .list
             setFocus(.inspector)
             activateIssues()
+        case .toggleReview:
+            Task { await toggleReview() }
         case .promoteWorktree:
             modal = selected.map(Modal.promote)
         case .deleteSessionBranch:
@@ -1280,6 +1326,7 @@ public final class AppModel {
         showHeader = values.showHeader
         showFooter = values.showFooter
         usagePlacement = values.usagePlacement
+        reviewLinks.linksOnFocus = values.linksOnFocus
         if values.claudeUsageEnabled != old.claudeUsageEnabled { setClaudeUsageEnabled(values.claudeUsageEnabled) }
         if values.codexUsageEnabled != old.codexUsageEnabled { setCodexUsageEnabled(values.codexUsageEnabled) }
         if values.glmUsageEnabled != old.glmUsageEnabled { setGlmUsageEnabled(values.glmUsageEnabled) }
@@ -1843,6 +1890,8 @@ public final class AppModel {
         persisted.showHeader = showHeader
         persisted.sbWidth = sbWidth
         persisted.vimMode = vimMode
+        persisted.showLinks = reviewLinks.showLinks
+        persisted.linksOnFocus = reviewLinks.linksOnFocus
         persisted.projectNames = projectNames
         persisted.projects = projects
         snapshotWorkspaceViews()

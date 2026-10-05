@@ -1,4 +1,5 @@
 import Foundation
+import CoveyGit
 import CoveyKit
 
 /// Polls each live session's layered git info and reports
@@ -52,7 +53,7 @@ public final class GitMonitor {
     public func poke(name: String, dir: String) {
         queue.async { [weak self] in
             guard let self else { return }
-            let info = GitOps.readGitInfo(dir)
+            let info = Repository(at: dir).workingTreeSummary().map(GitInfo.init(summary:))
             if (self.prev[name] ?? nil) != info {
                 self.prev[name] = info
                 self.onGitChanged?(name, info)
@@ -63,7 +64,7 @@ public final class GitMonitor {
     private func tickBody() {
         var next: [String: GitInfo?] = [:]
         for (name, dir) in snapshot() {
-            let info = GitOps.readGitInfo(dir)
+            let info = Repository(at: dir).workingTreeSummary().map(GitInfo.init(summary:))
             next[name] = info
             // Normalize the missing-key case: an absent entry and a nil
             // reading are the same "no git info" — emitting a change there

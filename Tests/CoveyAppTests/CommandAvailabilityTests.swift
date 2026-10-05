@@ -76,4 +76,48 @@ final class CommandAvailabilityTests: XCTestCase {
         }
         XCTAssertEqual(results.count, AppCommand.allCases.count)
     }
+
+    func testToggleReviewNeedsASessionOrALiveReview() {
+        XCTAssertEqual(CommandRules.availability(for: .toggleReview, context: .init()),
+                       .disabled(reason: "No session selected"))
+        // No git check here: a session outside git gets a toast instead.
+        XCTAssertEqual(CommandRules.availability(for: .toggleReview,
+                                                 context: .init(hasSelectedSession: true)), .enabled)
+        XCTAssertEqual(CommandRules.availability(for: .toggleReview,
+                                                 context: .init(hasActiveReview: true)), .enabled)
+        let descriptor = CommandCatalog.descriptor(for: .toggleReview)
+        XCTAssertEqual(descriptor.title, "Review")
+        XCTAssertEqual(descriptor.shortcut?.display, "⌥⌘R")
+    }
+
+    func testReviewModeDisablesSessionCommandsWithAReason() {
+        let context = CommandContext(hasSelectedSession: true, hasProject: true, selectedHasGit: true,
+                                     hasTerminalSplit: true, inspectorShown: true,
+                                     visibleSessionCount: 9, terminalFocused: true,
+                                     canCloseFocusedPane: true, reviewOpen: true, hasActiveReview: true)
+        let blocked: [AppCommand] = [
+            .selectSession1, .selectSession9, .selectPreviousSession, .selectNextSession,
+            .killSession, .renameSession, .newSession, .splitTerminalVertically,
+            .splitTerminalHorizontally, .closeTerminalSplit, .focusSessionList, .focusAgent,
+            .focusIssues, .focusTerminalSplit, .focusTrace, .toggleInspector, .toggleSessionsPanel,
+            .toggleTopBar, .toggleStatusBar, .showKeyboardHelp,
+            // Adding a project selects it: the session behind Review would
+            // be deselected and its pane unmounted.
+            .addProject,
+        ]
+        for command in blocked {
+            XCTAssertEqual(CommandRules.availability(for: command, context: context),
+                           .disabled(reason: "Review is open"), "\(command)")
+        }
+    }
+
+    func testReviewModeKeepsTheToggleAndAppCommands() {
+        let context = CommandContext(reviewOpen: true)
+        XCTAssertEqual(CommandRules.availableInReview, [
+            .toggleReview, .toggleTheme, .cycleUsagePlacement, .showLimitsDetail, .settings, .searchLogs,
+        ])
+        for command in CommandRules.availableInReview {
+            XCTAssertEqual(CommandRules.availability(for: command, context: context), .enabled, "\(command)")
+        }
+    }
 }

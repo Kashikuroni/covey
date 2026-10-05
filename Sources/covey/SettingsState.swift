@@ -10,6 +10,7 @@ struct SettingsValues: Equatable {
     var claudeUsageEnabled: Bool
     var codexUsageEnabled: Bool
     var glmUsageEnabled: Bool
+    var linksOnFocus: Bool = true
 }
 
 enum SettingsRow: Int, CaseIterable, Equatable {
@@ -23,6 +24,7 @@ enum SettingsRow: Int, CaseIterable, Equatable {
     case claudeUsage
     case codexUsage
     case glmUsage
+    case linksOnFocus
 }
 
 enum SettingsAction: Equatable { case cancel, save }
@@ -102,6 +104,8 @@ struct SettingsDraft: Equatable {
             values.codexUsageEnabled = increasing
         case .glmUsage:
             values.glmUsageEnabled = increasing
+        case .linksOnFocus:
+            values.linksOnFocus = increasing
         }
     }
 }

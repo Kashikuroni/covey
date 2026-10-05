@@ -98,6 +98,10 @@ struct SettingsSheet: View {
                 checkboxRow(.glmUsage, label: "GLM usage limits",
                             value: $draft.values.glmUsageEnabled)
             }
+            section("Review") {
+                checkboxRow(.linksOnFocus, label: "Links on focus",
+                            value: $draft.values.linksOnFocus)
+            }
             actionRow
         }
         .padding(20)

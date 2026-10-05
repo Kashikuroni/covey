@@ -23,10 +23,34 @@ struct CommandContext: Equatable {
     var agentPaneCount = 0
     /// Cmd+W сейчас что-то закроет: фокус на колонке или agent-панель в дереве.
     var canCloseFocusedPane = false
+    /// Review covers the sessions workspace (`AppModel.windowMode == .review`).
+    var reviewOpen = false
+    /// A review is alive, so Review can come back without a selected session.
+    var hasActiveReview = false
 }
 
 enum CommandRules {
+    /// What still works while Review covers the workspace: the toggle back and
+    /// app-level commands. Nothing here acts on the hidden sessions or changes
+    /// the workspace's size (a new size would reach every agent as SIGWINCH).
+    /// Add Project is not one: the project it adds becomes the selection,
+    /// which deselects the session behind Review and unmounts its pane.
+    static let availableInReview: Set<AppCommand> = [
+        .toggleReview, .toggleTheme, .cycleUsagePlacement, .showLimitsDetail,
+        .settings, .searchLogs,
+    ]
+
     static func availability(
+        for command: AppCommand,
+        context: CommandContext
+    ) -> CommandAvailability {
+        if context.reviewOpen, !availableInReview.contains(command) {
+            return .disabled(reason: "Review is open")
+        }
+        return rule(for: command, context: context)
+    }
+
+    private static func rule(
         for command: AppCommand,
         context: CommandContext
     ) -> CommandAvailability {
@@ -83,6 +107,11 @@ enum CommandRules {
             }
             return !context.hasSelectedSession || context.selectedHasGit
                 ? .enabled : .disabled(reason: "Not a Git repository")
+
+        case .toggleReview:
+            if context.reviewOpen || context.hasActiveReview { return .enabled }
+            return context.hasSelectedSession
+                ? .enabled : .disabled(reason: "No session selected")
 
         case .openIssueList, .cleanupMergedBranches:
             guard context.hasSelectedSession else {

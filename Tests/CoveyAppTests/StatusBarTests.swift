@@ -2,6 +2,13 @@ import XCTest
 @testable import covey
 
 final class StatusBarTests: XCTestCase {
+    func testReviewFooterPointsBackToTheSessions() {
+        let hints = Dictionary(uniqueKeysWithValues: reviewStatusBarHints)
+        XCTAssertEqual(hints["⌘W"], "sessions")
+        XCTAssertEqual(hints["?"], "keys")
+        XCTAssertEqual(hints["⌘P"], "commands")
+    }
+
     func testStandardFooterShowsPanelShortcut() {
         let hints = Dictionary(uniqueKeysWithValues: issueStatusBarHintPairs(
             issueScreen: .browser,

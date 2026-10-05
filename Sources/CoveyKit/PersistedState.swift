@@ -301,6 +301,12 @@ public struct PersistedState: Codable, Equatable {
     public var claudePlan: String?
     public var codexUsage: PersistedCodexUsage?
     public var codexPlan: String?
+    /// Review graph: every link between changed files is drawn (the canvas
+    /// button and `L`); nil = off.
+    public var showLinks: Bool?
+    /// Review graph: a hovered or selected file shows its links (Settings →
+    /// Review); nil = on.
+    public var linksOnFocus: Bool?
 
     public init(
         theme: String? = nil, provider: String? = nil, splitPct: Int? = nil,

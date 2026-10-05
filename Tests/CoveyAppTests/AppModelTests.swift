@@ -1,5 +1,6 @@
 import XCTest
 @testable import covey
+import CoveyGit
 import CoveyKit
 import CoveydCore
 
@@ -438,8 +439,8 @@ final class AppModelTests: XCTestCase {
             name: "plain", expectedBranch: "feat", checkoutBranch: "main"
         )
         XCTAssertNotNil(firstError)
-        XCTAssertEqual(GitOps.currentBranch(repo), "feat")
-        XCTAssertTrue(GitOps.branchExists(repo, "feat"))
+        XCTAssertEqual(Repository(at: repo).currentBranch(), "feat")
+        XCTAssertTrue(Repository(at: repo).branchExists("feat"))
 
         try FileManager.default.removeItem(atPath: "\(repo)/dirty.txt")
         let error = await model.switchAndDeleteBranch(
@@ -447,8 +448,8 @@ final class AppModelTests: XCTestCase {
         )
 
         XCTAssertNil(error)
-        XCTAssertEqual(GitOps.currentBranch(repo), "main")
-        XCTAssertFalse(GitOps.branchExists(repo, "feat"))
+        XCTAssertEqual(Repository(at: repo).currentBranch(), "main")
+        XCTAssertFalse(Repository(at: repo).branchExists("feat"))
         await model.kill("plain")
     }
 
@@ -495,7 +496,7 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(st?.merged, false)
 
         await model.kill("wt", removeWorktree: false, deleteBranch: true)
-        let deleted = await eventually { !GitOps.branchExists(repo, "feat") }
+        let deleted = await eventually { !Repository(at: repo).branchExists("feat") }
         XCTAssertTrue(deleted, "clean unmerged branch deleted via kill")
 
         let protectedPath = try CreateService.prepare(CreateSpec(
@@ -510,7 +511,7 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertNotNil(daemon.registry.get(name: "protected"))
         XCTAssertTrue(FileManager.default.fileExists(atPath: protectedPath))
-        XCTAssertTrue(GitOps.branchExists(repo, "dev"))
+        XCTAssertTrue(Repository(at: repo).branchExists("dev"))
         XCTAssertNotNil(model.toast)
 
         if daemon.registry.get(name: "protected") != nil {

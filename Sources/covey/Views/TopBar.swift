@@ -29,23 +29,27 @@ struct TopBar: View {
     private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
 
     var body: some View {
-        UsageChip(usage: model.claudeUsageEnabled ? model.usage : nil,
-                  usageError: model.claudeUsageEnabled ? model.usageError : nil,
-                  codexUsage: model.codexUsageEnabled ? model.codexUsage : nil,
-                  glmQuota: model.glmUsageEnabled ? model.glmQuota : nil,
-                  glmEnabled: model.glmUsageEnabled,
-                  tk: tk)
-            .font(.system(size: topBarFontSize, design: topBarFontDesign))
-            .frame(maxWidth: .infinity, alignment: topBarAlignment(model.usagePlacement))
-            // Room for the traffic lights overlaid by the hidden title bar:
-            // the cluster ends 69pt in, so 78 leaves it 9pt of air.
-            .padding(.leading, topBarLeadingInset)
-            .padding(.trailing, topBarTrailingInset)
-            // Twice the traffic lights' centre, so the row is symmetric about
-            // them. AppKit puts those 14pt buttons 9pt below the window's top
-            // edge, i.e. centred at 16pt; at any greater height the row grows
-            // downwards only and reads bottom-heavy. The 16pt-tall chip still
-            // clears 8pt above and below.
-            .frame(height: 32)
+        ZStack {
+            UsageChip(usage: model.claudeUsageEnabled ? model.usage : nil,
+                      usageError: model.claudeUsageEnabled ? model.usageError : nil,
+                      codexUsage: model.codexUsageEnabled ? model.codexUsage : nil,
+                      glmQuota: model.glmUsageEnabled ? model.glmQuota : nil,
+                      glmEnabled: model.glmUsageEnabled,
+                      tk: tk)
+                .font(.system(size: topBarFontSize, design: topBarFontDesign))
+                .frame(maxWidth: .infinity, alignment: topBarAlignment(model.usagePlacement))
+            WindowModeSwitch(model: model, tk: tk)
+                .frame(maxWidth: .infinity, alignment: windowModeSwitchAlignment(model.usagePlacement))
+        }
+        // Room for the traffic lights overlaid by the hidden title bar:
+        // the cluster ends 69pt in, so 78 leaves it 9pt of air.
+        .padding(.leading, topBarLeadingInset)
+        .padding(.trailing, topBarTrailingInset)
+        // Twice the traffic lights' centre, so the row is symmetric about
+        // them. AppKit puts those 14pt buttons 9pt below the window's top
+        // edge, i.e. centred at 16pt; at any greater height the row grows
+        // downwards only and reads bottom-heavy. The 16pt-tall chip still
+        // clears 8pt above and below.
+        .frame(height: 32)
     }
 }
