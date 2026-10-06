@@ -62,6 +62,38 @@ public enum CodexTranscript {
         return nil
     }
 
+    /// Верхнеуровневый `timestamp` rollout-строки (ISO8601, допустимы
+    /// дробные секунды). Общий для Trace- и Forecast-адаптеров, чтобы их
+    /// трактовка upstream-схемы не расходилась.
+    static func timestamp(_ object: [String: Any]) -> Date? {
+        guard let raw = object["timestamp"] as? String else { return nil }
+        return parseTimestamp(raw)
+    }
+
+    /// Сырые компоненты `last_token_usage` из `event_msg/token_count` —
+    /// ровно как их отдаёт upstream, без нормализации: Trace хранит input
+    /// как есть, вычитание cached делает только Forecast-сканер.
+    struct RawTokenUsage: Equatable {
+        var input: Double
+        var cached: Double
+        var output: Double
+        var reasoning: Double
+        var total: Double
+        var contextWindow: Double?
+    }
+
+    static func rawTokenUsage(_ info: [String: Any]) -> RawTokenUsage? {
+        guard let last = info["last_token_usage"] as? [String: Any] else { return nil }
+        func num(_ d: [String: Any], _ k: String) -> Double { (d[k] as? NSNumber)?.doubleValue ?? 0 }
+        return RawTokenUsage(
+            input: num(last, "input_tokens"),
+            cached: num(last, "cached_input_tokens"),
+            output: num(last, "output_tokens"),
+            reasoning: num(last, "reasoning_output_tokens"),
+            total: num(last, "total_tokens"),
+            contextWindow: (info["model_context_window"] as? NSNumber)?.doubleValue)
+    }
+
     public static func lastTurnModel(tail: Data) -> String? {
         for line in tail.split(separator: UInt8(ascii: "\n")).reversed() {
             guard let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],

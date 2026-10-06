@@ -53,4 +53,19 @@ final class CodexTraceAdapterTests: XCTestCase {
               case .fileEdit(let path, let added, let removed, _) = edit.kind else { return XCTFail() }
         XCTAssertEqual(path, "/a.swift"); XCTAssertEqual(added, 3); XCTAssertEqual(removed, 1)
     }
+
+    /// Время TraceEvent берётся из верхнеуровневого timestamp rollout-строки,
+    /// а не из момента разбора (Task 3, Step 5).
+    func testTokenCountCarriesSourceTimestamp() throws {
+        let iso = "2026-10-06T10:00:00.5Z"
+        let jsonl = #"{"timestamp":"\#(iso)","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"cached_input_tokens":4,"output_tokens":6,"reasoning_output_tokens":2,"total_tokens":16},"model_context_window":258400}}}"#
+        let events = run(jsonl + "\n")
+        let tok = try XCTUnwrap(events.first(where: { if case .tokenUsage = $0.kind { return true }; return false }))
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let source = try XCTUnwrap(f.date(from: iso))
+        XCTAssertEqual(tok.timestamp.timeIntervalSince1970,
+                       source.timeIntervalSince1970, accuracy: 0.001,
+                       "timestamp события — из rollout-строки, а не из времени разбора")
+    }
 }
