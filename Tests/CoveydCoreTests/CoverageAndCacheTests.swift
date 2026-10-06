@@ -25,7 +25,7 @@ final class CoverageAndCacheTests: XCTestCase {
                               input: 100, output: 1, cacheCreation: 0, cacheRead: 900))
         agg.ingest(TokenEvent(t: t, sessionKey: "s-miss", model: "glm-5.3", isSidechain: false,
                               input: 1000, output: 1, cacheCreation: 0, cacheRead: 0))
-        let rates = agg.sessionRates(now: t, idle: 600)
+        let rates = agg.glmSessionRates(now: t, idle: 600)
         let hit = rates.first { $0.key == "s-hit" }?.cacheHit
         let miss = rates.first { $0.key == "s-miss" }?.cacheHit
         XCTAssertNotNil(hit)

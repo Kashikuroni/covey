@@ -54,36 +54,55 @@ public final class TokenAggregator {
         storage.removeAll { $0.m < cutoff }
     }
 
-    public func sessionRates(now: Date, idle: TimeInterval)
+    /// Общие строки сессий: одна группировка для обоих запросов ниже.
+    private func sessionRows(now: Date, idle: TimeInterval)
+        -> [(key: String, list: [TokenBucket])] {
+        Dictionary(grouping: storage, by: \.s).map { (key: $0.key, list: $0.value) }
+    }
+
+    private func rateRow(key: String, list: [TokenBucket], nowMs: Int64, idleMs: Int64)
+        -> (key: String, tokensPerHour: Double, active: Bool, windowTotal: Double,
+            sidechainShare: Double, cacheHit: Double?) {
+        let fifteenMin = nowMs - 15 * 60_000
+        let last = list.map(\.m).max() ?? 0
+        let recent = list.filter { $0.m >= fifteenMin }
+        let recentTotal = recent.reduce(0.0) { $0 + $1.total }
+        let sidechain = recent.reduce(0.0) { $0 + ($1.x ? $1.total : 0) }
+        // Cache hit сессии — по тем же свежим 15 минутам (этап 1).
+        let cr = recent.reduce(0.0) { $0 + $1.cacheRead }
+        let denom = recent.reduce(0.0) { $0 + $1.cacheRead + $1.input + $1.cacheCreation }
+        // windowTotal — всё хранимое (прун 8д ≥ 7д окна), idle не режет.
+        return (key, recentTotal * 4, last >= nowMs - idleMs,
+                list.reduce(0.0) { $0 + $1.total },
+                recentTotal > 0 ? sidechain / recentTotal : 0,
+                denom > 0 ? cr / denom : nil)
+    }
+
+    /// Ставки ВСЕХ сессий — данные провайдер-нейтральной аналитики
+    /// (claude/gpt/codex без фильтра).
+    public func allSessionRates(now: Date, idle: TimeInterval)
         -> [(key: String, tokensPerHour: Double, active: Bool, windowTotal: Double,
              sidechainShare: Double, cacheHit: Double?)] {
         let nowMs = Int64(now.timeIntervalSince1970 * 1000)
         let idleMs = Int64(idle * 1000)
-        let fifteenMin = nowMs - 15 * 60_000
-        let bySession = Dictionary(grouping: storage, by: \.s)
-        return bySession.compactMap { key, list -> (key: String, tokensPerHour: Double, active: Bool, windowTotal: Double, sidechainShare: Double, cacheHit: Double?)? in
-            // Темпы GLM-квоты — только GLM-сессии; claude/gpt-транскрипты
-            // собираются (вёдра/журнал/таблицы), но квоту z.ai не жгут.
-            guard list.contains(where: { TokenUsageScanner.isGLMModel($0.model) }) else {
-                return nil
-            }
-            let last = list.map(\.m).max() ?? 0
-            let recent = list.filter { $0.m >= fifteenMin }
-            let recentTotal = recent.reduce(0.0) { $0 + $1.total }
-            let sidechain = recent.reduce(0.0) { $0 + ($1.x ? $1.total : 0) }
-            // Cache hit сессии — по тем же свежим 15 минутам (этап 1).
-            let cr = recent.reduce(0.0) { $0 + $1.cacheRead }
-            let denom = recent.reduce(0.0) { $0 + $1.cacheRead + $1.input + $1.cacheCreation }
-            // windowTotal — всё хранимое (прун 8д ≥ 7д окна), idle не режет.
-            return (key, recentTotal * 4, last >= nowMs - idleMs,
-                    list.reduce(0.0) { $0 + $1.total },
-                    recentTotal > 0 ? sidechain / recentTotal : 0,
-                    denom > 0 ? cr / denom : nil)
-        }
+        return sessionRows(now: now, idle: idle)
+            .map { rateRow(key: $0.key, list: $0.list, nowMs: nowMs, idleMs: idleMs) }
+    }
+
+    /// Темпы GLM-квоты — только GLM-сессии; claude/gpt-транскрипты
+    /// собираются (вёдра/журнал/таблицы), но квоту z.ai не жгут.
+    public func glmSessionRates(now: Date, idle: TimeInterval)
+        -> [(key: String, tokensPerHour: Double, active: Bool, windowTotal: Double,
+             sidechainShare: Double, cacheHit: Double?)] {
+        let nowMs = Int64(now.timeIntervalSince1970 * 1000)
+        let idleMs = Int64(idle * 1000)
+        return sessionRows(now: now, idle: idle)
+            .filter { row in row.list.contains(where: { TokenUsageScanner.isGLMModel($0.model) }) }
+            .map { rateRow(key: $0.key, list: $0.list, nowMs: nowMs, idleMs: idleMs) }
     }
 
     public func accountTokensPerHour(now: Date, idle: TimeInterval) -> Double {
-        sessionRates(now: now, idle: idle).filter(\.active).reduce(0.0) { $0 + $1.tokensPerHour }
+        glmSessionRates(now: now, idle: idle).filter(\.active).reduce(0.0) { $0 + $1.tokensPerHour }
     }
 
     public func totals(since: Date) -> GLMTokenUsage {

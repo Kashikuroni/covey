@@ -288,7 +288,7 @@ extension ForecastEngine {
         var out = GLMForecast()
         out.peakNow = PeakSchedule.isPeak(at: now)
         out.nextFlipAt = Int64(PeakSchedule.nextFlip(after: now).timeIntervalSince1970 * 1000)
-        let rates = aggregator.sessionRates(now: now, idle: 600)
+        let rates = aggregator.glmSessionRates(now: now, idle: 600)
         let tokensPerHour = rates.filter(\.active).reduce(0.0) { $0 + $1.tokensPerHour }
         out.tokensPerHour = tokensPerHour
         out.factorPeak = factors.peak; out.factorOffPeak = factors.offPeak
@@ -348,8 +348,19 @@ extension ForecastEngine {
         let windowStart = fiveHours.map { w in
             Date(timeIntervalSince1970: Double(w.resetAt) / 1000).addingTimeInterval(-5 * 3600)
         } ?? now.addingTimeInterval(-7 * 24 * 3600)
-        out.models = aggregator.perModel(windowStart: windowStart, hourStart: now.addingTimeInterval(-3600))
+        // Совместимые analytics-поля GLMForecast — только GLM-модели: GPT
+        // живёт в UsageSnapshot.forecastAnalytics (провайдер-нейтрально).
+        out.models = aggregator.perModel(windowStart: windowStart,
+                                         hourStart: now.addingTimeInterval(-3600))
+            .filter { TokenUsageScanner.isGLMModel($0.model) }
         out.modelDaily = store.modelDays       // год дневных вёдер из стора (§график)
+            .map { day in
+                GLMDayUsage(t: day.t,
+                            models: day.models.filter { TokenUsageScanner.isGLMModel($0.key) },
+                            usage: day.usage.map { usage in
+                                usage.filter { TokenUsageScanner.isGLMModel($0.key) }
+                            })
+            }
         out.fiveHourSeries = store.weekSeries(now: now, days: 7)
             .map { GLMSeriesPoint(t: $0.t, used: $0.fiveUsed) }
         out.weeklySeries = store.weekSeries(now: now, days: 7)

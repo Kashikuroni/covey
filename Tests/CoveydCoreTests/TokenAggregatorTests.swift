@@ -24,7 +24,7 @@ final class TokenAggregatorTests: XCTestCase {
         let agg = TokenAggregator()
         agg.ingest(event(minutesAgo: 5, total: 1000))
         agg.ingest(event(minutesAgo: 20, total: 999_999))  // за пределами 15-мин окна
-        let rates = agg.sessionRates(now: t0, idle: 600)
+        let rates = agg.glmSessionRates(now: t0, idle: 600)
         XCTAssertEqual(rates.count, 1)
         XCTAssertTrue(rates[0].active)
         XCTAssertEqual(rates[0].tokensPerHour, 4000, accuracy: 1)
@@ -33,7 +33,7 @@ final class TokenAggregatorTests: XCTestCase {
     func testIdleSessionIsInactiveButKeepsWindowTotal() {
         let agg = TokenAggregator()
         agg.ingest(event(minutesAgo: 30, total: 500))  // молчит 30 мин > idle 10 мин
-        let rates = agg.sessionRates(now: t0, idle: 600)
+        let rates = agg.glmSessionRates(now: t0, idle: 600)
         XCTAssertFalse(rates[0].active)
         XCTAssertEqual(rates[0].tokensPerHour, 0)
         XCTAssertEqual(rates[0].windowTotal, 500)
@@ -123,7 +123,7 @@ final class TokenAggregatorTests: XCTestCase {
         let agg = TokenAggregator()
         agg.ingest(event(minutesAgo: 1, session: "glm-s", model: "glm-5.3", total: 100))
         agg.ingest(event(minutesAgo: 1, session: "claude-s", model: "claude-opus-4-7", total: 500))
-        let rates = agg.sessionRates(now: t0, idle: 600)
+        let rates = agg.glmSessionRates(now: t0, idle: 600)
         XCTAssertEqual(rates.count, 1, "только GLM-сессия участвует в темпе")
         XCTAssertEqual(rates.first?.key, "glm-s")
         // Данные claude-модели в аналитике остались:
