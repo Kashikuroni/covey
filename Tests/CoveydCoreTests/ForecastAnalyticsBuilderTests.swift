@@ -126,6 +126,18 @@ final class ForecastAnalyticsBuilderTests: XCTestCase {
         XCTAssertEqual(analytics.sessions.first?.external, false)
     }
 
+    func testExternalClaudeSessionResolvesProjectName() {
+        // Спека: внешняя сессия — имя из реального cwd проекта (~), не ext:<uuid>.
+        let agg = TokenAggregator()
+        ingest(agg, key: "uuid-9", model: "glm-5.3")
+        store.setOffset("/proj/my-slug/uuid-9.jsonl", 1)
+        store.setCWD("my-slug", cwd: NSHomeDirectory() + "/work/x")
+        let analytics = ForecastAnalyticsBuilder.build(aggregator: agg, store: store,
+                                                       identities: [], glmForecast: nil,
+                                                       now: now)
+        XCTAssertEqual(analytics.sessions.first { $0.id == "uuid-9" }?.name, "~/work/x")
+    }
+
     // MARK: - GLM non-contamination
 
     private func forecast(with aggregator: TokenAggregator) -> GLMForecast {

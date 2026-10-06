@@ -55,9 +55,15 @@ public enum ForecastAnalyticsBuilder {
                 name = registered
                 external = false
             } else {
-                // Внешний claude-транскрипт: slug ключа → известный cwd.
+                // Внешний claude-транскрипт: uuid-ключ → slug каталога
+                // проекта (из путей офсетов) → снятый вотчером cwd.
                 external = true
-                if let cwd = cwds[rate.key] {
+                let slugs = Dictionary(store.offsets.keys.map { path -> (String, String) in
+                    let url = URL(fileURLWithPath: path)
+                    return (url.deletingPathExtension().lastPathComponent.lowercased(),
+                            url.deletingLastPathComponent().lastPathComponent)
+                }, uniquingKeysWith: { first, _ in first })
+                if let cwd = cwds[slugs[rate.key] ?? ""] {
                     name = UsageMonitor.tildeHomePath(cwd)
                 } else {
                     name = "ext:\(rate.key)"

@@ -38,8 +38,15 @@ public actor ForecastAnalyticsMonitor {
     /// производную историю, собрать провайдер-нейтральную аналитику и
     /// атомарно сохранить стор.
     public func poll(now: Date, sessions: [ForecastSessionIdentity]) throws -> ForecastAnalytics {
-        try claudeWatcher?.poll(now: now, sessions: sessions)
-        _ = try codexWatcher?.poll(now: now, sessions: sessions)
+        claudeWatcher?.poll(now: now, sessions: sessions)
+        do {
+            _ = try codexWatcher?.poll(now: now, sessions: sessions)
+        } catch {
+            // Спека «Ошибки и наблюдаемость»: ошибка Codex analytics не
+            // останавливает Claude analytics — остальной конвейер и
+            // сохранение продолжаются; курсор сбойного файла не двигается.
+            UsageLog.note("codex-watch", [("err", "read failed")])
+        }
         maintainDerivedHistory(now: now, sessions: sessions)
         let analytics = ForecastAnalyticsBuilder.build(aggregator: aggregator, store: store,
                                                        identities: sessions,
@@ -53,7 +60,7 @@ public actor ForecastAnalyticsMonitor {
     public func ingestGLMQuota(_ quota: GLMQuota, now: Date,
                                sessions: [ForecastSessionIdentity]) throws
         -> (forecast: GLMForecast, analytics: ForecastAnalytics) {
-        try claudeWatcher?.poll(now: now, sessions: sessions)
+        claudeWatcher?.poll(now: now, sessions: sessions)
         func entry(_ w: GLMLimitWindow?) -> (used: Double, reset: Int64) {
             (w?.used ?? 0, w?.resetAt ?? 0)
         }
@@ -107,6 +114,18 @@ public actor ForecastAnalyticsMonitor {
         store.upsertSessions(sessionCostRecords(sessions: sessions), now: now)
         store.upsertHourTotals(aggregator.hourTotals(now: now), now: now)
         store.upsertHourUsage(aggregator.perHour(now: now, days: 8), now: now)
+        // Контекст Codex-сессий: две последние точки курсора → lastContext
+        // (интерпретация та же, что у claude-сканера).
+        var codexContexts: [String: LastContextRecord] = [:]
+        for cursor in store.codexCursors.values where !cursor.contexts.isEmpty {
+            let points = cursor.contexts
+            let newest = points[points.count - 1]
+            codexContexts[cursor.sessionKey] = LastContextRecord(
+                tokens: newest.tokens, t: newest.t,
+                deltaPerTurn: points.count > 1
+                    ? newest.tokens - points[points.count - 2].tokens : nil)
+        }
+        if !codexContexts.isEmpty { store.upsertLastContext(codexContexts) }
     }
 
     private func sessionCostRecords(sessions: [ForecastSessionIdentity]) -> [String: SessionCostRecord] {

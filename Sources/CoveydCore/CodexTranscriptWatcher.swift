@@ -65,6 +65,7 @@ public final class CodexTranscriptWatcher {
         var budget = maxBytesPerPoll
         var pendingData = false
         var stoppedByBudget = false
+        var readFailures = 0
 
         for path in paths.sorted() {
             guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
@@ -72,61 +73,16 @@ public final class CodexTranscriptWatcher {
                 store.removeCodexCursor(for: path)
                 continue
             }
-            guard FileManager.default.isReadableFile(atPath: path) else {
-                throw CodexWatchError.readFailed
+            // Сбой чтения ОДНОГО файла изолируется: остальные файлы poll-а
+            // обрабатываются, курсор сбойного не двигается; summary-ошибка
+            // бросается после обхода (владелец не замораживает конвейер).
+            switch readFile(path: path, size: size, sessions: sessions, budget: &budget,
+                            pendingData: &pendingData, report: &report) {
+            case .read: break
+            case .exhaustedBudget: stoppedByBudget = true
+            case .failed: readFailures += 1
             }
-            guard let (metadata, sessionKey, matched) = identify(path: path, sessions: sessions)
-            else { continue }
-            store.setSessionMetadata(
-                ForecastSessionMetadata(source: .codex, cwd: metadata.cwd,
-                                        external: !matched),
-                for: sessionKey)
-            let external = !matched
-            if external && !includeExternal {
-                // Метаданные сохранить можно, курсор — нельзя: иначе повторное
-                // включение пропустит уже просмотренные события.
-                continue
-            }
-            var cursor = store.codexCursors[path]
-            if let cur = cursor, size < cur.offset {
-                aggregator.removeSession(sessionKey)
-                cursor = nil
-            }
-            let offset = cursor?.offset ?? 0
-            guard size > offset else { continue }
-            guard budget > 0 else { stoppedByBudget = true; break }
-            guard let handle = FileHandle(forReadingAtPath: path) else {
-                throw CodexWatchError.readFailed
-            }
-            defer { try? handle.close() }
-            try handle.seek(toOffset: offset)
-            guard let chunk = try handle.read(upToCount: min(Int(size - offset), budget)) else {
-                throw CodexWatchError.readFailed
-            }
-            report.bytesRead += chunk.count
-            budget -= chunk.count
-            report.filesRead += 1
-            if size - offset > chunk.count { pendingData = true }
-            // Курсор двигается только через последний полный `\n`.
-            let complete: Data
-            if let lastNewline = chunk.lastIndex(of: UInt8(ascii: "\n")) {
-                complete = Data(chunk[chunk.startIndex...lastNewline])
-            } else {
-                complete = Data()
-            }
-            guard !complete.isEmpty else { continue }
-            let result = CodexUsageScanner.parse(
-                lines: complete.split(separator: UInt8(ascii: "\n")).map { Data($0) },
-                sessionKey: sessionKey,
-                initialModel: cursor?.model)
-            for event in result.events { aggregator.ingest(event) }
-            report.stats.formUnion(result.stats)
-            store.setCodexCursor(CodexUsageCursor(
-                offset: offset + UInt64(complete.count),
-                model: result.model ?? cursor?.model,
-                sessionKey: sessionKey,
-                contexts: result.contexts.isEmpty ? cursor?.contexts ?? [] : result.contexts),
-                for: path)
+            if stoppedByBudget { break }
         }
 
         aggregator.prune(now: now)
@@ -140,8 +96,73 @@ public final class CodexTranscriptWatcher {
             ("missingTs", "\(report.stats.missingTimestamp)"),
             ("missingModel", "\(report.stats.missingModel)"),
             ("invalidUsage", "\(report.stats.invalidUsage)"),
+            ("readFailures", "\(readFailures)"),
         ])
+        if readFailures > 0 { throw CodexWatchError.readFailed }
         return report
+    }
+
+    private enum ReadOutcome { case read, exhaustedBudget, failed }
+
+    /// Чтение и разбор одного rollout-файла в рамках бюджета poll-а.
+    private func readFile(path: String, size: UInt64, sessions: [ForecastSessionIdentity],
+                          budget: inout Int, pendingData: inout Bool,
+                          report: inout CodexWatcherReport) -> ReadOutcome {
+        guard FileManager.default.isReadableFile(atPath: path) else { return .failed }
+        guard let (metadata, sessionKey, matched) = identify(path: path, sessions: sessions)
+        else { return .read }
+        store.setSessionMetadata(
+            ForecastSessionMetadata(source: .codex, cwd: metadata.cwd,
+                                    external: !matched),
+            for: sessionKey)
+        if !matched && !includeExternal {
+            // Метаданные сохранить можно, курсор — нельзя: иначе повторное
+            // включение пропустит уже просмотренные события.
+            return .read
+        }
+        var cursor = store.codexCursors[path]
+        if let cur = cursor, size < cur.offset {
+            aggregator.removeSession(sessionKey)
+            cursor = nil
+        }
+        let offset = cursor?.offset ?? 0
+        guard size > offset else { return .read }
+        guard budget > 0 else { return .exhaustedBudget }
+        guard let handle = FileHandle(forReadingAtPath: path) else { return .failed }
+        defer { try? handle.close() }
+        do {
+            try handle.seek(toOffset: offset)
+            guard let chunk = try handle.read(upToCount: min(Int(size - offset), budget)) else {
+                return .failed
+            }
+            report.bytesRead += chunk.count
+            budget -= chunk.count
+            report.filesRead += 1
+            if size - offset > chunk.count { pendingData = true }
+            // Курсор двигается только через последний полный `\n`.
+            let complete: Data
+            if let lastNewline = chunk.lastIndex(of: UInt8(ascii: "\n")) {
+                complete = Data(chunk[chunk.startIndex...lastNewline])
+            } else {
+                complete = Data()
+            }
+            guard !complete.isEmpty else { return .read }
+            let result = CodexUsageScanner.parse(
+                lines: complete.split(separator: UInt8(ascii: "\n")).map { Data($0) },
+                sessionKey: sessionKey,
+                initialModel: cursor?.model)
+            for event in result.events { aggregator.ingest(event) }
+            report.stats.formUnion(result.stats)
+            store.setCodexCursor(CodexUsageCursor(
+                offset: offset + UInt64(complete.count),
+                model: result.model ?? cursor?.model,
+                sessionKey: sessionKey,
+                contexts: result.contexts.isEmpty ? cursor?.contexts ?? [] : result.contexts),
+                for: path)
+            return .read
+        } catch {
+            return .failed
+        }
     }
 
     /// Метаданные rollout + ключ сессии + результат матчинга с Covey-сессией
