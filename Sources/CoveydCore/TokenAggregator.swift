@@ -45,6 +45,15 @@ public final class TokenAggregator {
 
     public var buckets: [TokenBucket] { storage }
 
+    public func removeSession(_ sessionKey: String) {
+        storage.removeAll { $0.s == sessionKey }
+    }
+
+    public func prune(now: Date) {
+        let cutoff = Int64(now.addingTimeInterval(-keep).timeIntervalSince1970 * 1000)
+        storage.removeAll { $0.m < cutoff }
+    }
+
     public func sessionRates(now: Date, idle: TimeInterval)
         -> [(key: String, tokensPerHour: Double, active: Bool, windowTotal: Double,
              sidechainShare: Double, cacheHit: Double?)] {

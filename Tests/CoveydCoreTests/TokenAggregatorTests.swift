@@ -161,4 +161,26 @@ final class TokenAggregatorTests: XCTestCase {
         agg.ingest(event(minutesAgo: 1, total: 7))
         XCTAssertEqual(agg.totals(since: .distantPast).total, 7, accuracy: 0.001)
     }
+
+    func testRemoveSessionLeavesOtherSessionsUntouched() {
+        let agg = TokenAggregator()
+        agg.ingest(event(minutesAgo: 1, session: "codex:s1", total: 42))
+        agg.ingest(event(minutesAgo: 1, session: "codex:s2", total: 7))
+
+        agg.removeSession("codex:s1")
+
+        XCTAssertEqual(agg.buckets.map(\.s), ["codex:s2"])
+        XCTAssertEqual(agg.totals(since: .distantPast).total, 7, accuracy: 0.001)
+    }
+
+    func testWallClockPruneDropsHistoricalLastIngestedEvent() {
+        let agg = TokenAggregator()
+        agg.ingest(event(minutesAgo: 9 * 24 * 60, total: 42))
+        XCTAssertEqual(agg.buckets.count, 1,
+                       "ingest only knows the historical event timestamp")
+
+        agg.prune(now: t0)
+
+        XCTAssertTrue(agg.buckets.isEmpty)
+    }
 }

@@ -63,6 +63,65 @@ final class QuotaSampleStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.factors.peak, 0.00002)
     }
 
+    func testCodexCursorAndMetadataSurviveRoundTrip() throws {
+        let dir = NSTemporaryDirectory() + UUID().uuidString
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let path = dir + "/usage-samples.json"
+        let rollout = "/tmp/rollout-s1.jsonl"
+        let store = QuotaSampleStore(path: path)
+        store.setCodexCursor(
+            CodexUsageCursor(
+                offset: 42,
+                model: "gpt-6-sol",
+                sessionKey: "codex:s1",
+                contexts: [CodexContextPoint(tokens: 100, t: 7)]),
+            for: rollout)
+        store.setSessionMetadata(
+            ForecastSessionMetadata(source: .codex, cwd: "/work/app", external: true),
+            for: "codex:s1")
+
+        try store.save()
+        let restored = QuotaSampleStore(path: path)
+
+        XCTAssertEqual(restored.codexCursors[rollout]?.offset, 42)
+        XCTAssertEqual(restored.codexCursors[rollout]?.model, "gpt-6-sol")
+        XCTAssertEqual(restored.codexCursors[rollout]?.contexts,
+                       [CodexContextPoint(tokens: 100, t: 7)])
+        XCTAssertEqual(restored.sessionMetadata["codex:s1"]?.source, .codex)
+        XCTAssertEqual(restored.sessionMetadata["codex:s1"]?.cwd, "/work/app")
+    }
+
+    func testCodexCursorCanBeRemovedWithoutTouchingMetadata() {
+        let store = QuotaSampleStore(path: nil)
+        store.setCodexCursor(
+            CodexUsageCursor(offset: 42, model: nil, sessionKey: "codex:s1", contexts: []),
+            for: "/tmp/rollout-s1.jsonl")
+        store.setSessionMetadata(
+            ForecastSessionMetadata(source: .codex, cwd: nil, external: true),
+            for: "codex:s1")
+
+        store.removeCodexCursor(for: "/tmp/rollout-s1.jsonl")
+
+        XCTAssertTrue(store.codexCursors.isEmpty)
+        XCTAssertNotNil(store.sessionMetadata["codex:s1"])
+    }
+
+    func testLegacyForecastFileDefaultsNewCollectionsToEmpty() throws {
+        let dir = NSTemporaryDirectory() + UUID().uuidString
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let path = dir + "/usage-samples.json"
+        let legacy = """
+        {"minute":[],"fiveMin":[],"buckets":[],"offsets":{},"cwds":{},
+         "gaps":[],"factors":{"recentPeak":[],"recentOffPeak":[]}}
+        """
+        try Data(legacy.utf8).write(to: URL(fileURLWithPath: path))
+
+        let restored = QuotaSampleStore(path: path)
+
+        XCTAssertTrue(restored.codexCursors.isEmpty)
+        XCTAssertTrue(restored.sessionMetadata.isEmpty)
+    }
+
     func testUpsertModelDaysReplacesTodayAndPrunesYear() {
         let store = QuotaSampleStore(path: nil)
         let now = Date(timeIntervalSince1970: 1_800_000_000)

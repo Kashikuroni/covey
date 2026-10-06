@@ -32,6 +32,31 @@ public struct TokenBucket: Codable, Equatable, Sendable {
     public var total: Double { input + output + cacheCreation + cacheRead }
 }
 
+public struct CodexContextPoint: Codable, Equatable, Sendable {
+    public var tokens: Double
+    public var t: Int64
+
+    public init(tokens: Double, t: Int64) {
+        self.tokens = tokens
+        self.t = t
+    }
+}
+
+public struct CodexUsageCursor: Codable, Equatable, Sendable {
+    public var offset: UInt64
+    public var model: String?
+    public var sessionKey: String
+    public var contexts: [CodexContextPoint]
+
+    public init(offset: UInt64, model: String?, sessionKey: String,
+                contexts: [CodexContextPoint]) {
+        self.offset = offset
+        self.model = model
+        self.sessionKey = sessionKey
+        self.contexts = contexts
+    }
+}
+
 public struct PersistedFactors: Codable, Equatable, Sendable {
     public var peak: Double?
     public var offPeak: Double?
@@ -58,6 +83,8 @@ struct ForecastFile: Codable {
     var hourTotals: [GLMSeriesPoint]?     // токены по часам, 90 дней (этап 0)
     var hourUsage: [GLMHourUsage]?        // час × модель × компоненты, 8 дней (§spend)
     var lastContext: [String: LastContextRecord]?     // контекст сессий, 14 дней
+    var codexCursors: [String: CodexUsageCursor]?
+    var sessionMetadata: [String: ForecastSessionMetadata]?
     var factors = PersistedFactors()
 }
 
@@ -138,6 +165,26 @@ public final class QuotaSampleStore {
     public func setBuckets(_ value: [TokenBucket]) { file.buckets = value }
     public var offsets: [String: UInt64] { file.offsets }
     public func setOffset(_ path: String, _ value: UInt64) { file.offsets[path] = value }
+    public var codexCursors: [String: CodexUsageCursor] { file.codexCursors ?? [:] }
+    public func setCodexCursor(_ cursor: CodexUsageCursor, for path: String) {
+        var cursors = codexCursors
+        cursors[path] = cursor
+        file.codexCursors = cursors
+    }
+    public func removeCodexCursor(for path: String) {
+        var cursors = codexCursors
+        cursors[path] = nil
+        file.codexCursors = cursors
+    }
+    public var sessionMetadata: [String: ForecastSessionMetadata] {
+        file.sessionMetadata ?? [:]
+    }
+    public func setSessionMetadata(_ metadata: ForecastSessionMetadata,
+                                   for sessionKey: String) {
+        var values = sessionMetadata
+        values[sessionKey] = metadata
+        file.sessionMetadata = values
+    }
     public var cwds: [String: String] { file.cwds }
     public func setCWD(_ slug: String, cwd: String) { file.cwds[slug] = cwd }
     public var gaps: [[Int64]] { file.gaps }
