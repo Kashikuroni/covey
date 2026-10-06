@@ -196,6 +196,8 @@ public final class AppModel {
     }
     var glmQuota: GLMQuota? { usageStore.snapshot.glmQuota }
     var glmForecast: GLMForecast? { usageStore.snapshot.glmForecast }
+    /// Провайдер-нейтральная аналитика (claude/codex без GLM-зависимости).
+    var forecastAnalytics: ForecastAnalytics? { usageStore.snapshot.forecastAnalytics }
     var glmUsageError: String? { usageStore.snapshot.glmUsageError }
     /// GLM's z.ai API key presence. Unlike Claude/Codex, GLM has no local
     /// login to read — the key is entered in the limits window.

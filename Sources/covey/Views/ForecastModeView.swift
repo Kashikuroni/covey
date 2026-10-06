@@ -6,6 +6,100 @@ import CoveyKit
 // The compact overlay keeps its Russian copy (pinned by ForecastWindowModel
 // tests); this mode follows the design handoff, which specifies English UI.
 
+// MARK: - Provider-neutral presentation (чистые helpers — тестируются без SwiftUI)
+
+/// GLM/z.ai-модель по имени (зеркало CoveydCore-проверки на стороне приложения).
+func isGLMModelName(_ model: String) -> Bool {
+    let m = model.lowercased()
+    return m.contains("glm") || m.contains("zai")
+}
+
+/// Какие секции страницы Forecast показывать: GLM-часть (окна/onboarding/off/
+/// ожидание) и аналитика независимы — GPT-данные живут без GLM.
+struct ForecastContentState: Equatable {
+    var showsGLMWindows = false
+    var showsGLMOnboarding = false
+    var showsGLMOff = false
+    var showsGLMWaiting = false
+    var showsAnalytics = false
+    var showsGPTModels = false
+}
+
+func forecastContentState(glmEnabled: Bool, glmAPIKeyMissing: Bool = false,
+                          glmForecast: GLMForecast?,
+                          analytics: ForecastAnalytics?) -> ForecastContentState {
+    var state = ForecastContentState()
+    if !glmEnabled {
+        state.showsGLMOff = true
+    } else if glmAPIKeyMissing {
+        state.showsGLMOnboarding = true
+    }
+    if glmEnabled, let forecast = glmForecast,
+        forecast.fiveHours != nil || forecast.weekly != nil {
+        state.showsGLMWindows = true
+    } else if glmEnabled, !glmAPIKeyMissing {
+        state.showsGLMWaiting = true
+    }
+    let analytics = analytics ?? ForecastAnalytics()
+    state.showsAnalytics = !(analytics.models.isEmpty && analytics.modelDaily.isEmpty
+        && analytics.hourly.isEmpty && analytics.modelHourly.isEmpty
+        && analytics.sessions.isEmpty && analytics.sessionCosts.isEmpty)
+    state.showsGPTModels = analytics.sessions.contains { $0.source == .codex }
+    return state
+}
+
+/// Строка таблицы сессий: source-бейдж и опциональные квота-поля (для GPT
+/// и обычных Claude-моделей кредиты/бюджет — прочерк).
+func sessionPresentation(_ session: ForecastSessionUsage)
+    -> (source: String, credits: String, budget: String) {
+    let source = session.source == .codex ? "Codex" : "Claude Code"
+    let credits = session.creditsPerHour.map { String(format: "%.1f", $0) } ?? "—"
+    let budget = session.budgetMinutes.map { ForecastEN.duration(minutes: $0) } ?? "—"
+    return (source, credits, budget)
+}
+
+/// Строка таблицы агентов из провайдер-нейтральной аналитики.
+struct AgentRow: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let source: ForecastUsageSource
+    let external: Bool
+    let active: Bool
+    let tokensPerHour: Double
+    let creditsPerHour: Double?
+    let sharePercent: Double
+    let budgetMinutes: Double?
+    let cacheHit: Double?
+    let contextTokens: Double?
+    let contextDeltaPerTurn: Double?
+}
+
+func agentRows(_ sessions: [ForecastSessionUsage]) -> [AgentRow] {
+    let total = sessions.reduce(0.0) { $0 + $1.tokensPerHour }
+    return sessions.map { session in
+        AgentRow(id: session.id, name: session.name, source: session.source,
+                 external: session.external, active: session.active,
+                 tokensPerHour: session.tokensPerHour,
+                 creditsPerHour: session.creditsPerHour,
+                 sharePercent: total > 0 ? session.tokensPerHour / total * 100 : 0,
+                 budgetMinutes: session.budgetMinutes,
+                 cacheHit: session.cacheHit,
+                 contextTokens: session.contextTokens,
+                 contextDeltaPerTurn: session.contextDeltaPerTurn)
+    }
+}
+
+/// Оценка GLM-кредитов записи сессии: фактор множит ТОЛЬКО GLM-модели —
+/// GPT-тотал никогда не переводится в кредиты z.ai.
+func sessionEstimatedGLMCredits(_ entry: ForecastSessionCostEntry,
+                                factor: Double?) -> String {
+    guard let factor else { return "—" }
+    let glmTokens = entry.record.byModel
+        .filter { isGLMModelName($0.key) }
+        .values.reduce(0, +)
+    return "~" + ForecastEN.credits(glmTokens * factor) + " cr"
+}
+
 enum ForecastEN {
     /// «2ч40м» → "2h 40m"; сутки и больше — "3d 18h" / "3d"; под часом — минуты.
     static func duration(from start: Date, to end: Date) -> String {
@@ -86,11 +180,27 @@ struct ForecastModeView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     // Провайдеры — в модалке (клик по часам), настройки
-                    // дашборда — шторкой из топбара: остаётся сетка 2×3.
-                    if model.glmUsageEnabled {
-                        forecastArea(now: context.date)
-                    } else {
+                    // дашборда — шторкой из топбара. GLM-секция и аналитика
+                    // независимы: GPT-данные показываются без GLM.
+                    let state = forecastContentState(
+                        glmEnabled: model.glmUsageEnabled,
+                        glmAPIKeyMissing: model.glmAPIKeyStatus == .missing && model.glmQuota == nil,
+                        glmForecast: model.glmForecast,
+                        analytics: model.forecastAnalytics)
+                    if state.showsGLMOff {
                         forecastOff
+                    }
+                    if state.showsGLMOnboarding {
+                        onboarding
+                    }
+                    if state.showsGLMWindows {
+                        windowCards(forecast: model.glmForecast, now: context.date)
+                    }
+                    if state.showsGLMWaiting {
+                        emptyCard("No forecast yet — it appears after the first GLM poll")
+                    }
+                    if state.showsAnalytics, let analytics = model.forecastAnalytics {
+                        analyticsArea(analytics, now: context.date)
                     }
                     settingsFooter
                 }
@@ -111,11 +221,12 @@ struct ForecastModeView: View {
     /// Все модели, встреченные в текущих метриках (таблица, дневные вёдра,
     /// журнал сессий) — ключ для перерегистрации при изменении набора.
     private var knownModels: [String] {
-        var all = Set(model.glmForecast?.models.map(\.model) ?? [])
-        for day in model.glmForecast?.modelDaily ?? [] {
+        guard let analytics = model.forecastAnalytics else { return [] }
+        var all = Set(analytics.models.map(\.model))
+        for day in analytics.modelDaily {
             all.formUnion(day.models.keys)
         }
-        for entry in model.glmForecast?.sessionCosts ?? [] {
+        for entry in analytics.sessionCosts {
             all.formUnion(entry.record.byModel.keys)
         }
         return all.sorted()
@@ -127,46 +238,48 @@ struct ForecastModeView: View {
 
     // MARK: - Forecast area
 
-    @ViewBuilder
-    private func forecastArea(now: Date) -> some View {
-        if model.glmAPIKeyStatus == .missing, model.glmQuota == nil {
-            onboarding
-        } else if let forecast = model.glmForecast, forecast.fiveHours != nil || forecast.weekly != nil {
-            // Сетка 2×3: графики окон, под ними столбцы/теплокарта, ниже —
-            // таблицы. Карточки одного ряда — одной высоты.
+    /// GLM-окна — отдельная секция (сетка 2×3 начиналась с них).
+    private func windowCards(forecast: GLMForecast?, now: Date) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            windowCard("5h", window: forecast?.fiveHours,
+                       series: forecast?.fiveHourSeries ?? [], hours: 5,
+                       sliding: true, now: now)
+            windowCard("7d", window: forecast?.weekly,
+                       series: forecast?.weeklySeries ?? [], hours: 24 * 7,
+                       sliding: false, now: now, extraStats: [
+                           ("cache hit", weightedCacheHit(model.forecastAnalytics?.models ?? [])),
+                       ])
+        }
+    }
+
+    /// Аналитика: столбцы/теплокарта, таблицы, spend, журнал — из
+    /// провайдер-нейтрального `forecastAnalytics`.
+    private func analyticsArea(_ analytics: ForecastAnalytics, now: Date) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
-                windowCard("5h", window: forecast.fiveHours,
-                           series: forecast.fiveHourSeries, hours: 5,
-                           sliding: true, now: now)
-                windowCard("7d", window: forecast.weekly,
-                           series: forecast.weeklySeries, hours: 24 * 7,
-                           sliding: false, now: now, extraStats: [
-                               ("cache hit", weightedCacheHit(forecast.models)),
-                           ])
-            }
-            HStack(alignment: .top, spacing: 10) {
-                if let daily = forecast.modelDaily, !daily.isEmpty {
-                    ModelBarsCard(daily: daily, tk: tk, settings: settings) {
+                if !analytics.modelDaily.isEmpty {
+                    ModelBarsCard(daily: analytics.modelDaily, tk: tk, settings: settings) {
                         model.showDashboardSettings = true
                     }
                 }
-                if let hourly = forecast.hourly, !hourly.isEmpty {
-                    HeatmapCard(hourly: hourly, tk: tk)
+                if !analytics.hourly.isEmpty {
+                    HeatmapCard(hourly: analytics.hourly, tk: tk)
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
             HStack(alignment: .top, spacing: 10) {
-                agentsCard(forecast)
-                modelsCard(forecast)
+                agentsCard(analytics)
+                modelsCard(analytics)
             }
             .fixedSize(horizontal: false, vertical: true)
-            SpendCard(forecast: forecast, settings: settings, tk: tk)
-            if let costs = forecast.sessionCosts, !costs.isEmpty {
-                SessionCostsCard(entries: costs, forecast: forecast, tk: tk,
-                                 projectParts: agentProjectParts, settings: settings)
+            SpendCard(analytics: analytics, settings: settings, tk: tk)
+            if !analytics.sessionCosts.isEmpty {
+                SessionCostsCard(entries: analytics.sessionCosts,
+                                 glmFactor: model.glmForecast.map {
+                                     $0.peakNow ? $0.factorPeak : $0.factorOffPeak
+                                 } ?? nil,
+                                 tk: tk, projectParts: agentProjectParts, settings: settings)
             }
-        } else {
-            emptyCard("No forecast yet — it appears after the first GLM poll")
         }
     }
 
@@ -510,14 +623,15 @@ struct ForecastModeView: View {
     // Here only the empty-state cards remain.
 
     @ViewBuilder
-    private func agentsCard(_ forecast: GLMForecast?) -> some View {
-        if let agents = forecast?.agents, !agents.isEmpty {
-            AgentsTable(agents: agents, tk: tk, projectParts: agentProjectParts)
+    private func agentsCard(_ analytics: ForecastAnalytics) -> some View {
+        if !analytics.sessions.isEmpty {
+            AgentsTable(rows: agentRows(analytics.sessions), tk: tk,
+                        projectParts: agentProjectParts)
         } else {
             card {
                 VStack(alignment: .leading, spacing: 6) {
-                    sectionTitle("Agents", hint: "glm quota consumers")
-                    emptyState("no active agents", "No GLM transcript activity in the last 10 minutes.")
+                    sectionTitle("Agents", hint: "analytics sessions")
+                    emptyState("no active agents", "No transcript activity in the last 10 minutes.")
                 }
             }
         }
@@ -533,18 +647,18 @@ struct ForecastModeView: View {
     }
 
     @ViewBuilder
-    private func modelsCard(_ forecast: GLMForecast?) -> some View {
-        if let models = forecast?.models, !models.isEmpty {
+    private func modelsCard(_ analytics: ForecastAnalytics) -> some View {
+        if !analytics.models.isEmpty {
             VStack(spacing: 10) {
-                ModelsTable(models: models, tk: tk)
-                if let daily = forecast?.modelDaily, !daily.isEmpty {
-                    tierBar(daily)
+                ModelsTable(models: analytics.models, tk: tk)
+                if !analytics.modelDaily.isEmpty {
+                    tierBar(analytics.modelDaily)
                 }
             }
         } else {
             card {
                 VStack(alignment: .leading, spacing: 6) {
-                    sectionTitle("Models", hint: "glm usage")
+                    sectionTitle("Models", hint: "usage by model")
                     emptyState("no data", "No model usage recorded in the current window yet.")
                 }
             }
@@ -761,7 +875,7 @@ private func tableEmpty(_ title: String, _ hint: String, tk: Tokens) -> some Vie
 }
 
 private struct AgentsTable: View {
-    let agents: [GLMAgentForecast]
+    let rows: [AgentRow]
     let tk: Tokens
     /// Путь агента → (имя проекта, ветка); nil — имя не путь, показ как был.
     let projectParts: (String) -> (project: String, branch: String?)?
@@ -785,8 +899,8 @@ private struct AgentsTable: View {
     @State private var ascending = false
     @State private var activeOnly = true
 
-    private var rows: [GLMAgentForecast] {
-        let pool = activeOnly ? agents.filter(\.active) : agents
+    private var visible: [AgentRow] {
+        let pool = activeOnly ? rows.filter(\.active) : rows
         return pool.sorted { a, b in
             if sort == .name {
                 let order = ForecastEN.tildePath(a.name)
@@ -801,15 +915,15 @@ private struct AgentsTable: View {
     /// Несколько сессий одного проекта дают одинаковые имена — различаем их
     /// коротким id, иначе строки неотличимы.
     private var nameCounts: [String: Int] {
-        Dictionary(grouping: agents, by: \.name).mapValues(\.count)
+        Dictionary(grouping: rows, by: \.name).mapValues(\.count)
     }
 
-    private func numeric(_ a: GLMAgentForecast) -> Double {
+    private func numeric(_ a: AgentRow) -> Double {
         switch sort {
         case .name: return 0
         case .active: return a.active ? 1 : 0
         case .tokens: return a.tokensPerHour
-        case .credits: return a.creditsPerHour
+        case .credits: return a.creditsPerHour ?? -1
         case .cache: return a.cacheHit ?? -1
         case .share: return a.sharePercent
         case .budget: return a.budgetMinutes ?? -1
@@ -819,21 +933,21 @@ private struct AgentsTable: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            tableTitleBar("Agents", hint: "glm quota consumers", tk: tk) {
-                tableChip("all \(agents.count)", selected: !activeOnly, tk: tk) {
+            tableTitleBar("Agents", hint: "analytics sessions", tk: tk) {
+                tableChip("all \(rows.count)", selected: !activeOnly, tk: tk) {
                     activeOnly = false
                 }
-                tableChip("active \(agents.filter(\.active).count)", selected: activeOnly, tk: tk) {
+                tableChip("active \(rows.filter(\.active).count)", selected: activeOnly, tk: tk) {
                     activeOnly = true
                 }
             }
             header
-            if rows.isEmpty {
+            if visible.isEmpty {
                 tableEmpty("no active agents",
-                           "No GLM transcript activity in the last 10 minutes.", tk: tk)
+                           "No transcript activity in the last 10 minutes.", tk: tk)
             } else {
-                ForEach(Array(rows.enumerated()), id: \.element.stableID) { index, agent in
-                    TableRow(tk: tk, divider: index < rows.count - 1) {
+                ForEach(Array(visible.enumerated()), id: \.element.id) { index, agent in
+                    TableRow(tk: tk, divider: index < visible.count - 1) {
                         rowCells(agent)
                     }
                 }
@@ -893,7 +1007,7 @@ private struct AgentsTable: View {
               : "Sort by \(title)")
     }
 
-    private func rowCells(_ a: GLMAgentForecast) -> some View {
+    private func rowCells(_ a: AgentRow) -> some View {
         HStack(spacing: 0) {
             nameCell(a)
                 .tableCell(tk, width: nil, align: .leading)
@@ -901,7 +1015,7 @@ private struct AgentsTable: View {
                 .tableCell(tk, width: Col.active, align: .center, divider: true)
             Text(ForecastWindow.compactTokens(a.tokensPerHour))
                 .tableCell(tk, width: Col.tokens, divider: true)
-            Text(String(format: "%.2f", a.creditsPerHour))
+            Text(a.creditsPerHour.map { String(format: "%.2f", $0) } ?? "—")
                 .tableCell(tk, width: Col.credits, divider: true)
             Text(a.cacheHit.map { "\(Int(($0 * 100).rounded()))%" } ?? "—")
                 .tableCell(tk, width: Col.cache, divider: true)
@@ -920,7 +1034,7 @@ private struct AgentsTable: View {
     /// «45.2k ·+3.1k» — размер промпта последнего хода и рост за ход
     /// (отрицательный = контекст сброшен).
     @ViewBuilder
-    private func ctxCell(_ a: GLMAgentForecast) -> some View {
+    private func ctxCell(_ a: AgentRow) -> some View {
         if let tokens = a.contextTokens {
             let delta = a.contextDeltaPerTurn.map {
                 ($0 >= 0 ? "+" : "−") + ForecastWindow.compactTokens(abs($0))
@@ -933,8 +1047,9 @@ private struct AgentsTable: View {
         }
     }
 
-    private func nameCell(_ a: GLMAgentForecast) -> some View {
+    private func nameCell(_ a: AgentRow) -> some View {
         HStack(spacing: 6) {
+            tag(a.source == .codex ? "Codex" : "Claude Code")
             if let parts = projectParts(a.name) {
                 // Имя проекта как в списке сессий; ветка worktree приглушена.
                 Text(parts.project)
@@ -952,14 +1067,10 @@ private struct AgentsTable: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
-            if a.external, let id = a.id, (nameCounts[a.name] ?? 0) > 1 {
-                tag("#\(id.prefix(8))")
+            if (nameCounts[a.name] ?? 0) > 1 {
+                tag("#\(a.id.prefix(8))")
             }
             if a.external { tag("external") }
-            if a.isSidechainMarked {
-                tag(a.sidechainShare.map { "subagents \(Int(($0 * 100).rounded()))%" }
-                    ?? "subagents")
-            }
         }
         .help(a.name)
     }
@@ -988,7 +1099,7 @@ private struct AgentsTable: View {
             .overlay(Capsule().stroke(tk.bd2))
     }
 
-    private func activeCell(_ a: GLMAgentForecast) -> some View {
+    private func activeCell(_ a: AgentRow) -> some View {
         HStack(spacing: 4) {
             Circle().fill(a.active ? tk.ok : tk.t3).frame(width: 5, height: 5)
             Text(a.active ? "yes" : "—")
@@ -996,7 +1107,7 @@ private struct AgentsTable: View {
         }
     }
 
-    private func shareCell(_ a: GLMAgentForecast) -> some View {
+    private func shareCell(_ a: AgentRow) -> some View {
         HStack(spacing: 6) {
             Text("\(Int(a.sharePercent.rounded()))%")
             ZStack(alignment: .leading) {

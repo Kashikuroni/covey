@@ -5,8 +5,10 @@ import CoveyKit
 /// из стора — живые и заархивированные, топ по расходу. ~cr — оценка
 /// фактором текущего тарифного режима (без калибровки — только токены).
 struct SessionCostsCard: View {
-    let entries: [GLMSessionCostEntry]
-    let forecast: GLMForecast
+    let entries: [ForecastSessionCostEntry]
+    /// Фактор текущего тарифного режима GLM — применяется ТОЛЬКО к GLM-долям
+    /// строк; GPT-тоталы в кредиты не переводятся.
+    let glmFactor: Double?
     let tk: Tokens
     let projectParts: (String) -> (project: String, branch: String?)?
     let settings: DashboardSettings
@@ -19,11 +21,7 @@ struct SessionCostsCard: View {
 
     @State private var span: Span = .week
 
-    private var factor: Double? {
-        forecast.peakNow ? forecast.factorPeak : forecast.factorOffPeak
-    }
-
-    private var rows: [GLMSessionCostEntry] {
+    private var rows: [ForecastSessionCostEntry] {
         let now = Date()
         return entries.filter { e in
             guard let days = span.days else { return true }
@@ -32,14 +30,14 @@ struct SessionCostsCard: View {
         }
     }
 
-    private func tokens(_ e: GLMSessionCostEntry) -> Double {
+    private func tokens(_ e: ForecastSessionCostEntry) -> Double {
         e.record.byModel.values.reduce(0, +)
     }
 
     /// $ за сессию: Σ по компонентам биллинга × прайс модели из реестра
     /// (in/cached/storage/out раздельно — output дороже input в разы).
     /// Показываем, если хоть у одной модели задан прайс.
-    private func dollars(_ e: GLMSessionCostEntry) -> String? {
+    private func dollars(_ e: ForecastSessionCostEntry) -> String? {
         var sum = 0.0
         var any = false
         for (model, usage) in e.record.usage ?? [:] {
@@ -91,7 +89,7 @@ struct SessionCostsCard: View {
         .overlay(RoundedRectangle(cornerRadius: Tokens.rLg).stroke(tk.bd2))
     }
 
-    private func row(_ e: GLMSessionCostEntry, divider: Bool) -> some View {
+    private func row(_ e: ForecastSessionCostEntry, divider: Bool) -> some View {
         HStack(spacing: 0) {
             // Имя: проект как в списке сессий (для путей), иначе как есть.
             HStack(spacing: 6) {
@@ -134,23 +132,22 @@ struct SessionCostsCard: View {
         .help(help(e))
     }
 
-    private func dates(_ e: GLMSessionCostEntry) -> String {
+    private func dates(_ e: ForecastSessionCostEntry) -> String {
         let f = ForecastText.day
         let first = f.string(from: Date(timeIntervalSince1970: Double(e.record.firstSeen) / 1000))
         let last = f.string(from: Date(timeIntervalSince1970: Double(e.record.lastSeen) / 1000))
         return first == last ? first : "\(first) – \(last)"
     }
 
-    private func estimatedCr(_ e: GLMSessionCostEntry) -> String {
-        guard let factor else { return "—" }
-        return "~" + ForecastEN.credits(tokens(e) * factor) + " cr"
+    private func estimatedCr(_ e: ForecastSessionCostEntry) -> String {
+        sessionEstimatedGLMCredits(e, factor: glmFactor)
     }
 
-    private func topModel(_ e: GLMSessionCostEntry) -> String {
+    private func topModel(_ e: ForecastSessionCostEntry) -> String {
         e.record.byModel.max { $0.value < $1.value }?.key ?? "—"
     }
 
-    private func help(_ e: GLMSessionCostEntry) -> String {
+    private func help(_ e: ForecastSessionCostEntry) -> String {
         let models = e.record.byModel.sorted { $0.value > $1.value }
             .map { "\($0.key): \(ForecastWindow.compactTokens($0.value))" }
             .joined(separator: "\n")

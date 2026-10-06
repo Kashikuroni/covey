@@ -6,7 +6,7 @@ import CoveyKit
 /// модели из реестра; тотал за период крупно в шапке. $ — по компонентам
 /// биллинга × прайс; модели без прайса в графике не участвуют.
 struct SpendCard: View {
-    let forecast: GLMForecast
+    let analytics: ForecastAnalytics
     let settings: DashboardSettings
     let tk: Tokens
 
@@ -92,8 +92,8 @@ struct SpendCard: View {
     }
 
     private var series: (points: [Point], byModel: [String: Double], total: Double?) {
-        SpendCard.series(hourly: forecast.modelHourly ?? [],
-                         daily: forecast.modelDaily ?? [],
+        SpendCard.series(hourly: analytics.modelHourly,
+                         daily: analytics.modelDaily,
                          range: range,
                          window: customWindow,
                          cost: { settings.cost(model: $0, usage: $1) },
