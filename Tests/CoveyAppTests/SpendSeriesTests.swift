@@ -7,7 +7,14 @@ import CoveyKit
 /// считаются из компонентов биллинга × прайс; day-режим берёт почасовки,
 /// длинные — дневные вёдра; тотал — сумма периода.
 final class SpendSeriesTests: XCTestCase {
-    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+    /// Конец текущих локальных суток: окно `.day` вмещает все 24 часовые
+    /// точки независимо от времени прогона (раньше фиксированный epoch
+    /// попадал на середину дня, и ряд обрезался по местной полуночи).
+    private let now: Date = {
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: Date())
+        return cal.date(byAdding: DateComponents(day: 1, second: -1), to: start)!
+    }()
     private let cal = Calendar.current
 
     private let prices = ModelPrices(input: 1.0, cachedRead: 0.1, cacheWrite: 0, output: 10.0)
