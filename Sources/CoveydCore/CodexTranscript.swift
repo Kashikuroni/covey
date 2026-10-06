@@ -126,6 +126,52 @@ public enum CodexTranscript {
         return result.sorted()
     }
 
+    /// Явное перечисление локальных календарных дней [from…through]
+    /// включительно — окно backfill прогнозного вотчера (сегодня и семь
+    /// предыдущих дней).
+    public static func rolloutPaths(sessionsRoot: String, from: Date, through: Date) -> [String] {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "yyyy/MM/dd"
+        var result: [String] = []
+        var day = calendar.startOfDay(for: from)
+        let last = calendar.startOfDay(for: through)
+        while day <= last {
+            let directory = "\(sessionsRoot)/\(formatter.string(from: day))"
+            if let names = try? FileManager.default.contentsOfDirectory(atPath: directory) {
+                result += names.filter { $0.hasPrefix("rollout-") && $0.hasSuffix(".jsonl") }
+                    .map { "\(directory)/\($0)" }
+            }
+            guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
+            day = next
+        }
+        return result.sorted()
+    }
+
+    /// Все rollout-файлы в любом подкаталоге корня с mtime не старше
+    /// `recentCutoff` — долго живущая сессия не теряется из-за того, что её
+    /// каталог создания старше окна backfill.
+    public static func recentRolloutPaths(sessionsRoot: String, recentCutoff: Date) -> [String] {
+        let fm = FileManager.default
+        guard let enumerator = fm.enumerator(atPath: sessionsRoot) else { return [] }
+        var result: [String] = []
+        for case let name as String in enumerator {
+            // Enumerator выдаёт пути ОТНОСИТЕЛЬНО корня (включая подкаталоги
+            // дат), поэтому префикс проверяется у имени файла, а не пути.
+            let file = (name as NSString).lastPathComponent
+            guard file.hasPrefix("rollout-"), file.hasSuffix(".jsonl") else { continue }
+            let path = "\(sessionsRoot)/\(name)"
+            if let mtime = (try? fm.attributesOfItem(atPath: path))?[.modificationDate] as? Date,
+               mtime >= recentCutoff {
+                result.append(path)
+            }
+        }
+        return result.sorted()
+    }
+
     public static func readHead(path: String, maxBytes: Int = 65_536) -> Data? {
         guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
         defer { try? handle.close() }
