@@ -9,6 +9,16 @@ final class UsageIPCTests: XCTestCase {
         snapshot.usage = Usage(fiveHour: UsageWindow(utilization: 42, resetUnix: 123),
                                sevenDay: nil, sevenDaySonnet: nil)
         snapshot.codexUsageEnabled = false
+        snapshot.forecastAnalytics = ForecastAnalytics(
+            models: [
+                GLMModelUsage(model: "gpt-6-sol",
+                              window: GLMTokenUsage(input: 100, output: 20, cacheRead: 80),
+                              lastHour: GLMTokenUsage(input: 100, output: 20, cacheRead: 80))
+            ],
+            sessions: [
+                ForecastSessionUsage(id: "codex:s1", name: "app", source: .codex,
+                                     external: true, active: true, tokensPerHour: 12_000)
+            ])
         let message = ServerMessage.event(.usageChanged(snapshot: snapshot))
         XCTAssertEqual(try JSONDecoder().decode(ServerMessage.self,
                        from: JSONEncoder().encode(message)), message)

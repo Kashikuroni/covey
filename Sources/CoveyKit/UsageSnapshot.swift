@@ -26,6 +26,7 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
     public var glmUsageError: String?
     public var glmUsageEnabled = true
     public var glmForecast: GLMForecast?
+    public var forecastAnalytics: ForecastAnalytics?
     public init() {}
 
     /// Every field is optional on decode so a snapshot written before a
@@ -47,5 +48,46 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
         glmUsageError = try c.decodeIfPresent(String.self, forKey: .glmUsageError)
         glmUsageEnabled = try c.decodeIfPresent(Bool.self, forKey: .glmUsageEnabled) ?? true
         glmForecast = try c.decodeIfPresent(GLMForecast.self, forKey: .glmForecast)
+        forecastAnalytics = try c.decodeIfPresent(ForecastAnalytics.self,
+                                                  forKey: .forecastAnalytics)
+            ?? glmForecast.flatMap(ForecastAnalytics.init(legacy:))
+    }
+}
+
+private extension ForecastAnalytics {
+    init?(legacy forecast: GLMForecast) {
+        let modelDaily = forecast.modelDaily ?? []
+        let hourly = forecast.hourly ?? []
+        let modelHourly = forecast.modelHourly ?? []
+        let sessionCosts = forecast.sessionCosts ?? []
+        guard !forecast.models.isEmpty || !modelDaily.isEmpty || !hourly.isEmpty
+                || !modelHourly.isEmpty || !forecast.agents.isEmpty
+                || !sessionCosts.isEmpty else { return nil }
+
+        self.init(
+            models: forecast.models,
+            modelDaily: modelDaily,
+            hourly: hourly,
+            modelHourly: modelHourly,
+            sessions: forecast.agents.map { agent in
+                ForecastSessionUsage(
+                    id: agent.stableID,
+                    name: agent.name,
+                    source: .claudeCode,
+                    external: agent.external,
+                    active: agent.active,
+                    tokensPerHour: agent.tokensPerHour,
+                    cacheHit: agent.cacheHit,
+                    contextTokens: agent.contextTokens,
+                    contextDeltaPerTurn: agent.contextDeltaPerTurn,
+                    creditsPerHour: agent.creditsPerHour,
+                    budgetMinutes: agent.budgetMinutes)
+            },
+            sessionCosts: sessionCosts.map { entry in
+                ForecastSessionCostEntry(record: entry.record,
+                                         name: entry.name,
+                                         source: .claudeCode,
+                                         live: entry.live)
+            })
     }
 }

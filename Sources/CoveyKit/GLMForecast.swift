@@ -156,6 +156,8 @@ public struct GLMForecast: Codable, Equatable, Sendable {
     public var factorOffPeakAt: Int64?
     public var peakNow: Bool = false
     public var nextFlipAt: Int64?         // Unix ms ближайшей смены режима
+    // Compatibility-only analytics fields. New snapshots publish the same
+    // information through UsageSnapshot.forecastAnalytics.
     public var agents: [GLMAgentForecast] = []
     public var models: [GLMModelUsage] = []
     public var modelDaily: [GLMDayUsage]? // дневные токены по моделям (столбцы 7d)
