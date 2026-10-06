@@ -37,6 +37,19 @@ final class MenuBarLimitsTests: XCTestCase {
                        "Claude — · GPT —")
     }
 
+    func testTitleShowsBothGLMWindowsInline() {
+        let quota = GLMQuota(plan: "max", limits: GLMLimits(
+            fiveHours: GLMLimitWindow(total: 28000, used: 5695, remaining: 22304,
+                                      usedPercent: 20, remainingPercent: 80,
+                                      resetAt: 1_790_943_951_592),
+            weekly: GLMLimitWindow(total: 140000, used: 5695, remaining: 134304,
+                                   usedPercent: 4, remainingPercent: 96,
+                                   resetAt: 1_791_529_507_983)))
+        XCTAssertEqual(menuBarLimitsTitle(usage: nil, codexUsage: nil,
+                                          glmQuota: quota, glmEnabled: true),
+                       "Claude — · GPT — · GLM 20·4%")
+    }
+
     @MainActor
     func testMenuBarPreferenceDefaultsOffAndSurvivesRestart() async throws {
         let daemon = try TestDaemon()

@@ -72,6 +72,13 @@ final class UsageStore {
                                                    notified: readMarkers(), now: Date())
             if let alertSink { alertSink(alerts) } else { for a in alerts { Notifier.post(a) } }
             if marks != readMarkers() { writeMarkers(marks); onPersist() }
+            // Спайк-детект (этап 3): темп сессии против недельной EMA-ставки.
+            let (spikeAlerts, spikeMarks) = spikeAlerts(
+                forecast: next.glmForecast, notified: readMarkers(), now: Date(),
+                multiplier: glmForecastConfig.spikeMultiplier ?? 8)
+            if let alertSink { alertSink(spikeAlerts) }
+            else { for a in spikeAlerts { Notifier.post(a) } }
+            if spikeMarks != readMarkers() { writeMarkers(spikeMarks); onPersist() }
         }
     }
 

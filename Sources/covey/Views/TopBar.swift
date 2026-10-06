@@ -5,22 +5,16 @@ let topBarFontDesign: Font.Design = .monospaced
 let topBarLeadingInset: CGFloat = 78
 let topBarTrailingInset: CGFloat = 14
 
+/// Лимиты и часы всегда по центру топбара: слева — режимы, справа пусто;
+/// положение зафиксировано и командой не циклится.
 func topBarAlignment(_ placement: UsagePlacement) -> Alignment {
-    switch placement {
-    case .left: return .leading
-    case .center: return .center
-    case .right: return .trailing
-    }
+    .center
 }
 
 /// Moves the limits card into the same asymmetric horizontal region used by
 /// the compact limits block in `TopBar`.
 func limitsOverlayHorizontalOffset(_ placement: UsagePlacement) -> CGFloat {
-    switch placement {
-    case .left: return topBarLeadingInset
-    case .center: return (topBarLeadingInset - topBarTrailingInset) / 2
-    case .right: return -topBarTrailingInset
-    }
+    (topBarLeadingInset - topBarTrailingInset) / 2
 }
 
 struct TopBar: View {
@@ -35,11 +29,23 @@ struct TopBar: View {
                       codexUsage: model.codexUsageEnabled ? model.codexUsage : nil,
                       glmQuota: model.glmUsageEnabled ? model.glmQuota : nil,
                       glmEnabled: model.glmUsageEnabled,
-                      tk: tk)
+                      tk: tk,
+                      onClockTap: { model.showProvidersPanel = true })
                 .font(.system(size: topBarFontSize, design: topBarFontDesign))
                 .frame(maxWidth: .infinity, alignment: topBarAlignment(model.usagePlacement))
             WindowModeSwitch(model: model, tk: tk)
                 .frame(maxWidth: .infinity, alignment: windowModeSwitchAlignment(model.usagePlacement))
+            // Шестерёнка настроек — справа, на одном уровне с табами и часами.
+            Button {
+                model.showDashboardSettings = true
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 12))
+                    .foregroundStyle(tk.t3)
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .help("Dashboard settings — models, prices, providers, keys")
         }
         // Room for the traffic lights overlaid by the hidden title bar:
         // the cluster ends 69pt in, so 78 leaves it 9pt of air.

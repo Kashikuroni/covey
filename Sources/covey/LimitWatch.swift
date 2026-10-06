@@ -61,6 +61,44 @@ func predictiveAlerts(forecast: GLMForecast?,
     return (alerts, marks)
 }
 
+/// Спайк-детект (этап 3): активная сессия с большим абсолютным темпом
+/// (>= minTokensPerHour) жжёт в multiplier раз больше недельной EMA-ставки.
+/// multiplier 0 выключает; cooldown гасит повторы на сессию (маркер —
+/// unix-секунда последнего алерта). Некалиброванная/нулевая неделя молчит:
+/// базы для сравнения нет.
+func spikeAlerts(forecast: GLMForecast?,
+                 notified: [String: Int64], now: Date,
+                 multiplier: Double = 8,
+                 cooldownSeconds: Int64 = 30 * 60,
+                 minTokensPerHour: Double = 1_000_000)
+    -> (alerts: [LimitAlert], notified: [String: Int64]) {
+    var marks = notified
+    var alerts: [LimitAlert] = []
+    guard multiplier > 0, let f = forecast,
+          let weekly = f.weekly,
+          weekly.verdict != .calibrating,
+          weekly.rateCreditsPerHour > 0 else {
+        return (alerts, marks)
+    }
+    let baseline = weekly.rateCreditsPerHour
+    let nowSec = Int64(now.timeIntervalSince1970)
+    for a in f.agents {
+        guard a.active, a.creditsPerHour > 0,
+              a.tokensPerHour >= minTokensPerHour,
+              a.creditsPerHour / baseline >= multiplier else { continue }
+        let markKey = "glm:spike:\(a.id ?? a.name)"
+        if let last = marks[markKey], nowSec - last < cooldownSeconds { continue }
+        marks[markKey] = nowSec
+        let ratio = a.creditsPerHour / baseline
+        alerts.append(LimitAlert(
+            windowKey: "spike",
+            title: "GLM: всплеск — \(a.name)",
+            body: String(format: "%.1f× недельного темпа · %@ ток/ч",
+                         ratio, ForecastWindow.compactTokens(a.tokensPerHour))))
+    }
+    return (alerts, marks)
+}
+
 /// Same boundary as `usageLevel`'s .err tier.
 let limitAlertThreshold = 80.0
 

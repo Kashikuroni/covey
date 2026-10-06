@@ -106,10 +106,34 @@ func glmPlanLabel(_ raw: String) -> String? {
 }
 
 /// The most-used GLM window; the compact header has one GLM slot.
-func glmHeaderWindow(_ quota: GLMQuota?) -> UsageWindow? {
-    glmChip(quota: quota)?.windows.max {
-        $0.window.utilization < $1.window.utilization
-    }?.window
+/// One GLM window in the header block: its label and rounded percent.
+struct GLMHeaderRow: Equatable {
+    let label: String
+    let pct: Int
+}
+
+/// Both GLM windows for the header, in 5h → 7d order: the chip stacks them
+/// as two rows, the menu bar joins them into one inline value.
+func glmHeaderRows(_ quota: GLMQuota?) -> [GLMHeaderRow] {
+    guard let windows = glmChip(quota: quota)?.windows else { return [] }
+    return windows.compactMap { labeled in
+        displayUsagePercent(labeled.window.utilization).map { GLMHeaderRow(label: labeled.label, pct: $0) }
+    }
+}
+
+/// The GLM segment's inline value: "20·4%" (5h·7d); a single window stays "75%".
+func glmHeaderInlineValue(_ rows: [GLMHeaderRow]) -> String? {
+    switch rows.count {
+    case 0: return nil
+    case 1: return "\(rows[0].pct)%"
+    default: return "\(rows[0].pct)·\(rows[1].pct)%"
+    }
+}
+
+/// The segment's color is set by its most alarming window.
+func glmHeaderLevel(_ rows: [GLMHeaderRow]) -> UsageLevel? {
+    func severity(_ level: UsageLevel) -> Int { level == .err ? 2 : level == .warn ? 1 : 0 }
+    return rows.map { usageLevel($0.pct) }.max { severity($0) < severity($1) }
 }
 
 /// Short fetch codes → panel text; unknown codes pass through. The no-key
@@ -160,7 +184,10 @@ func headerSegments(usage: Usage?, usageError: String?,
         segment("Codex", codexHeaderWindow(codexUsage)),
     ]
     if glmEnabled {
-        segments.append(segment("GLM", glmHeaderWindow(glmQuota)))
+        let rows = glmHeaderRows(glmQuota)
+        segments.append(HeaderSegment(label: "GLM",
+                                      value: glmHeaderInlineValue(rows) ?? "—",
+                                      level: glmHeaderLevel(rows)))
     }
     return segments
 }
@@ -222,6 +249,8 @@ struct UsageChip: View {
     var glmQuota: GLMQuota? = nil
     var glmEnabled: Bool = true
     let tk: Tokens
+    /// Клик по часам: открывает модалку провайдеров (⌘L).
+    var onClockTap: (() -> Void)? = nil
 
     var body: some View {
         // Ticks every minute so the clock and countdown-derived data advance
@@ -238,6 +267,9 @@ struct UsageChip: View {
                 if !segments.isEmpty { divider }
                 Text(headerDateTime(ctx.date)).foregroundStyle(tk.t3)
             }
+            .contentShape(Rectangle())
+            .onTapGesture { onClockTap?() }
+            .help("Providers — ⌘L")
         }
     }
 
@@ -245,11 +277,26 @@ struct UsageChip: View {
         Rectangle().fill(tk.bd3).frame(width: 1, height: 12)
     }
 
+    private var glmRows: [GLMHeaderRow] { glmHeaderRows(glmQuota) }
+
     @ViewBuilder
     private func segmentView(_ seg: HeaderSegment) -> some View {
         HStack(spacing: 6) {
             Text(seg.label).foregroundStyle(brandColor(seg.label))
-            if let level = seg.level {
+            if seg.label == "GLM", !glmRows.isEmpty {
+                // Both GLM windows stacked (5h above 7d) at 10pt so the pair
+                // fits the 32pt top bar; the "GLM" label stays inline-sized.
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(glmRows, id: \.label) { row in
+                        HStack(spacing: 4) {
+                            Text(row.label).foregroundStyle(tk.t3)
+                            Text("\(row.pct)%")
+                                .foregroundStyle(levelColor(usageLevel(row.pct), tk: tk))
+                        }
+                        .font(.system(size: 10, design: .monospaced))
+                    }
+                }
+            } else if let level = seg.level {
                 Text(seg.value).foregroundStyle(levelColor(level, tk: tk))
             } else {
                 Text(seg.value).foregroundStyle(tk.t3)

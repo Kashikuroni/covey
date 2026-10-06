@@ -58,6 +58,29 @@ struct ContentView: View {
         .installSubduedScrollbars()
         .preferredColorScheme(model.themeRaw == "light" ? .light : .dark)
         .tint(Tokens(Theme(raw: model.themeRaw)).accent)
+        .sheet(isPresented: $model.showProvidersPanel) {
+            ProvidersPanel(model: model)
+        }
+        // Шторка настроек дашборда: поверх всего окна, справа, 2/5 ширины.
+        .overlay {
+            GeometryReader { geo in
+                if model.showDashboardSettings {
+                    ZStack(alignment: .trailing) {
+                        Color.black.opacity(0.3)
+                            .ignoresSafeArea()
+                            .onTapGesture { model.showDashboardSettings = false }
+                        DashboardSettingsPanel(model: model,
+                                               settings: model.dashboardSettings,
+                                               tk: Tokens(Theme(raw: model.themeRaw))) {
+                            model.showDashboardSettings = false
+                        }
+                        .frame(width: geo.size.width * 0.4)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
+                    .animation(.easeInOut(duration: 0.18), value: model.showDashboardSettings)
+                }
+            }
+        }
         .sheet(item: $model.modal, onDismiss: { model.modalDidDismiss() }) { modal in
             Group {
                 switch modal {
@@ -263,21 +286,28 @@ struct ContentView: View {
         return nil
     }
 
-    /// Review lies over the sessions workspace, which stays mounted at its
-    /// size — invisible and deaf to the mouse — so a mode switch resizes no
-    /// terminal and no agent gets a SIGWINCH.
+    /// Review — and Forecast — lie over the sessions workspace, which stays
+    /// mounted at its size — invisible and deaf to the mouse — so a mode
+    /// switch resizes no terminal and no agent gets a SIGWINCH.
     private var mainArea: some View {
         let reviewing = model.windowMode == .review
+        let forecasting = model.windowMode == .forecast
         return ZStack {
             workspace
-                .opacity(reviewing ? 0 : 1)
-                .allowsHitTesting(!reviewing)
-                .accessibilityHidden(reviewing)
+                .opacity(reviewing || forecasting ? 0 : 1)
+                .allowsHitTesting(!(reviewing || forecasting))
+                .accessibilityHidden(reviewing || forecasting)
             if reviewing, let review = model.review {
                 ReviewModeView(model: review, app: model)
                     // A replaced review is a new view: none of the old one's
                     // state, change handlers or poll loop carries over.
                     .id(ObjectIdentifier(review))
+                    .padding(.horizontal, Tokens.edge)
+                    .padding(.top, model.showHeader ? 0 : Tokens.edge)
+                    .padding(.bottom, model.showFooter ? 0 : Tokens.edge)
+            }
+            if forecasting {
+                ForecastModeView(model: model)
                     .padding(.horizontal, Tokens.edge)
                     .padding(.top, model.showHeader ? 0 : Tokens.edge)
                     .padding(.bottom, model.showFooter ? 0 : Tokens.edge)

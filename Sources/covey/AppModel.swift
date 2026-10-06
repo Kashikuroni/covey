@@ -91,6 +91,24 @@ public final class AppModel {
     }
     /// Сколько agent-панелей сейчас в окне (лимит 8).
     var agentPaneCount: Int { agentPanes.count }
+    /// Модалка провайдеров (⌘L / клик по часам): мониторинг и ключ z.ai.
+    public var showProvidersPanel = false {
+        didSet {
+            // Клавиатуру терминала отдаём шиту — как у modal.
+            guard showProvidersPanel, focus == .terminal else { return }
+            sendTerminalCommand(.blur)
+        }
+    }
+    /// Шторка настроек дашборда (шестерёнка в топбаре): модели, цены,
+    /// провайдеры, ключи — единое место настроек.
+    public var showDashboardSettings = false {
+        didSet {
+            guard showDashboardSettings, focus == .terminal else { return }
+            sendTerminalCommand(.blur)
+        }
+    }
+    /// Реестр моделей дашборда (цвет/цена/архив) — общий для всех вью.
+    let dashboardSettings = DashboardSettings()
     public var modal: Modal? {
         didSet {
             // A sheet lives in its own key window; its dismissal reshuffles
@@ -1282,9 +1300,8 @@ public final class AppModel {
         case .toggleTheme:
             setTheme(themeRaw == "dark" ? "light" : "dark")
             offerThemeRestart()
-        case .cycleUsagePlacement:
-            usagePlacement = usagePlacement.next
-            persist()
+        case .showProviders:
+            showProvidersPanel = true
         case .showLimitsDetail:
             if focus == .terminal { sendTerminalCommand(.blur) }
             inputMode = .limits

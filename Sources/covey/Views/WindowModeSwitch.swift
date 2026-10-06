@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// The mode switch sits opposite the limits chip, so the two never meet.
+/// The mode switch is pinned left; the limits chip is centered.
 func windowModeSwitchAlignment(_ placement: UsagePlacement) -> Alignment {
-    placement == .left ? .trailing : .leading
+    .leading
 }
 
 /// `Sessions | Review` in the top bar (Review spec, part 1). Either segment
@@ -18,6 +18,8 @@ struct WindowModeSwitch: View {
             segment("Sessions", mode: .sessions, enabled: true)
             segment("Review", mode: .review, enabled: canReview)
                 .help("Review the selected session's worktree  ⌥⌘R")
+            segment("Forecast", mode: .forecast, enabled: true)
+                .help("Limits and the GLM forecast across the whole window")
         }
         .padding(2)
         .background(tk.surf2)
@@ -28,7 +30,7 @@ struct WindowModeSwitch: View {
     private func segment(_ title: String, mode: WindowMode, enabled: Bool) -> some View {
         let on = model.windowMode == mode
         return Button {
-            if !on { model.perform(.toggleReview) }
+            if !on { activate(mode) }
         } label: {
             Text(title)
                 .font(.system(size: 12, weight: on ? .semibold : .regular))
@@ -42,5 +44,24 @@ struct WindowModeSwitch: View {
         .buttonStyle(.plain)
         .disabled(!enabled)
         .opacity(enabled ? 1 : 0.4)
+    }
+
+    /// Session segments keep the ⌥⌘R toggle semantics; Forecast is a plain
+    /// mode flip. From Forecast the Sessions segment must return to the
+    /// sessions — running the review toggle here would instead open a review
+    /// of the selected session.
+    private func activate(_ mode: WindowMode) {
+        switch mode {
+        case .forecast:
+            model.enterForecast()
+        case .sessions:
+            if model.windowMode == .review {
+                model.perform(.toggleReview)
+            } else {
+                model.windowMode = .sessions
+            }
+        case .review:
+            model.perform(.toggleReview)
+        }
     }
 }

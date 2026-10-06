@@ -32,3 +32,21 @@ func sessionRoot(_ s: Session) -> String {
     while repo.count > 1 && repo.hasSuffix("/") { repo.removeLast() }
     return repo
 }
+
+/// Agent-name → project identity for the forecast agents table: a path
+/// (external agents carry `~/…`/absolute cwd) resolves to the same project
+/// name the session list shows — user rename or the root's last component —
+/// plus the worktree branch tail. Anything else (Covey session names,
+/// `ext:` fallbacks) is not a path: nil keeps the existing display.
+enum AgentNaming {
+    static func projectParts(raw: String, home: String,
+                             displayName: (String) -> String) -> (project: String, branch: String?)? {
+        var path = raw
+        if path == "~" { return nil }
+        if path.hasPrefix("~") { path = home + path.dropFirst() }
+        guard path.hasPrefix("/") else { return nil }
+        let root = projectRoot(path)
+        let branch = path.range(of: "/.worktrees/").map { String(path[$0.upperBound...]) }
+        return (displayName(root), branch)
+    }
+}

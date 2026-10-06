@@ -111,16 +111,53 @@ final class UsageChipBuilderTests: XCTestCase {
         XCTAssertNil(glmChip(quota: GLMQuota(plan: "max", limits: GLMLimits())))
     }
 
-    func testGLMHeaderWindowIsTheMostUsed() {
-        XCTAssertEqual(glmHeaderWindow(sampleQuota)?.utilization, 20)
-        XCTAssertEqual(glmHeaderWindow(nil), nil)
+    func testGLMHeaderRowsListBothWindowsInOrder() {
+        XCTAssertEqual(glmHeaderRows(sampleQuota),
+                       [GLMHeaderRow(label: "5h", pct: 20), GLMHeaderRow(label: "7d", pct: 4)])
+        XCTAssertEqual(glmHeaderRows(nil), [])
+
+        let fiveOnly = GLMQuota(plan: "max", limits: GLMLimits(
+            fiveHours: GLMLimitWindow(total: 28000, used: 21000, remaining: 7000,
+                                      usedPercent: 75, remainingPercent: 25,
+                                      resetAt: 1)))
+        XCTAssertEqual(glmHeaderRows(fiveOnly), [GLMHeaderRow(label: "5h", pct: 75)])
+    }
+
+    func testGLMHeaderInlineValueJoinsBothWindows() {
+        XCTAssertEqual(glmHeaderInlineValue([GLMHeaderRow(label: "5h", pct: 20),
+                                             GLMHeaderRow(label: "7d", pct: 4)]), "20·4%")
+        XCTAssertEqual(glmHeaderInlineValue([GLMHeaderRow(label: "5h", pct: 75)]), "75%")
+        XCTAssertNil(glmHeaderInlineValue([]))
+    }
+
+    func testGLMHeaderLevelIsTheWorstWindow() {
+        XCTAssertEqual(glmHeaderLevel([GLMHeaderRow(label: "5h", pct: 8),
+                                       GLMHeaderRow(label: "7d", pct: 85)]), .err)
+        XCTAssertEqual(glmHeaderLevel([GLMHeaderRow(label: "5h", pct: 55),
+                                       GLMHeaderRow(label: "7d", pct: 4)]), .warn)
+        XCTAssertEqual(glmHeaderLevel([GLMHeaderRow(label: "5h", pct: 20),
+                                       GLMHeaderRow(label: "7d", pct: 4)]), .ok)
+        XCTAssertNil(glmHeaderLevel([]))
+    }
+
+    func testHeaderSegmentsGLMShowsBothWindowsWithWorstLevel() {
+        let hot = GLMQuota(plan: "max", limits: GLMLimits(
+            fiveHours: GLMLimitWindow(total: 100, used: 90, remaining: 10,
+                                      usedPercent: 90, remainingPercent: 10, resetAt: 1),
+            weekly: GLMLimitWindow(total: 1000, used: 100, remaining: 900,
+                                   usedPercent: 10, remainingPercent: 90, resetAt: 2)))
+        let segs = headerSegments(usage: nil, usageError: nil, codexUsage: nil,
+                                  glmQuota: hot, glmEnabled: true)
+        XCTAssertEqual(segs.last?.label, "GLM")
+        XCTAssertEqual(segs.last?.value, "90·10%")
+        XCTAssertEqual(segs.last?.level, .err)
     }
 
     func testHeaderSegmentsIncludeGLMOnlyWhenEnabled() {
         let segments = headerSegments(usage: nil, usageError: nil, codexUsage: nil,
                                       glmQuota: sampleQuota, glmEnabled: true)
         XCTAssertEqual(segments.map(\.label), ["Claude", "Codex", "GLM"])
-        XCTAssertEqual(segments.map(\.value), ["—", "—", "20%"])
+        XCTAssertEqual(segments.map(\.value), ["—", "—", "20·4%"])
         XCTAssertEqual(segments.map(\.level), [nil, nil, .ok])
 
         let disabled = headerSegments(usage: nil, usageError: nil, codexUsage: nil,

@@ -11,6 +11,20 @@ enum ForecastText {
         return f
     }()
 
+    /// «5 окт, 10:05» — края домена графика: начало периода и сброс.
+    static let dateTime: DateFormatter = {
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("dMMMHmm")
+        return f
+    }()
+
+    /// «6 окт» — дневные риски на оси 7d.
+    static let day: DateFormatter = {
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("dMMM")
+        return f
+    }()
+
     /// Одна строка прогноза под окном GLM (спека §6.2). nil — строки нет.
     static func forecastLine(_ w: GLMWindowForecast, label: String, now: Date) -> String? {
         switch w.verdict {
@@ -258,7 +272,7 @@ struct ForecastWindowView: View {
                         headerCell("доля").gridColumnAlignment(.trailing)
                         headerCell("бюджет").gridColumnAlignment(.trailing)
                     }
-                    ForEach(forecast.agents, id: \.name) { agent in
+                    ForEach(forecast.agents, id: \.stableID) { agent in
                         GridRow {
                             // Движок уже свернул долю субагентов в признак (>0.5),
                             // поэтому в суффикс уходит 1/0.

@@ -51,7 +51,7 @@ final class CommandCatalogTests: XCTestCase {
             (.splitTerminalVertically, "d", .command, "⌘D"),
             (.splitTerminalHorizontally, "d", [.command, .shift], "⌘⇧D"),
             (.closeTerminalSplit, "w", .command, "⌘W"),
-            (.showLimitsDetail, "l", .command, "⌘L"),
+            (.showProviders, "l", .command, "⌘L"),
         ]
 
         for (command, key, modifiers, display) in expected {
@@ -88,7 +88,7 @@ final class CommandCatalogTests: XCTestCase {
             .renameSession, .renameProject, .restartSession, .restartAllClaudeSessions,
             .splitTerminalVertically, .splitTerminalHorizontally, .closeTerminalSplit,
             .toggleSessionsPanel, .toggleInspector, .toggleAgentTrace, .toggleStatusBar,
-            .toggleTopBar, .toggleTheme, .cycleUsagePlacement, .addProject, .removeProject,
+            .toggleTopBar, .toggleTheme, .addProject, .removeProject,
         ]
 
         XCTAssertTrue(expected.isSubset(of: Set(CommandCatalog.all.map(\.id))))

@@ -12,8 +12,8 @@ enum AppCommand: String, CaseIterable, Hashable {
     case splitTerminalVertically, splitTerminalHorizontally, closeTerminalSplit
     case toggleViewTerminal
     case toggleReview, toggleSessionsPanel, toggleInspector, toggleAgentTrace
-    case toggleStatusBar, toggleTopBar, toggleTheme, cycleUsagePlacement
-    case showLimitsDetail, focusSessionList, focusAgent, focusIssues
+    case toggleStatusBar, toggleTopBar, toggleTheme
+    case showProviders, showLimitsDetail, focusSessionList, focusAgent, focusIssues
     case focusTerminalSplit, focusTrace, showKeyboardHelp
     case addProject, removeProject, renameProject, settings, searchLogs
 }
@@ -189,11 +189,11 @@ enum CommandCatalog {
                    ["header", "top bar", "верхняя панель", "заголовок"]),
         descriptor(.toggleTheme, "Toggle Theme", .view,
                    ["dark light", "color theme", "сменить тему", "темная светлая тема"]),
-        descriptor(.cycleUsagePlacement, "Cycle Limits/Clock Position", .view,
-                   ["usage position", "clock position", "позиция лимитов", "позиция часов"]),
-        descriptor(.showLimitsDetail, "Show Limits Detail", .view,
-                   ["usage limits", "claude codex limits", "показать лимиты", "детали лимитов"],
+        descriptor(.showProviders, "Show Providers", .view,
+                   ["providers", "usage monitoring", "glm key", "провайдеры", "мониторинг лимитов"],
                    .init(key: "l", modifiers: command, display: "⌘L")),
+        descriptor(.showLimitsDetail, "Show Limits Detail", .view,
+                   ["usage limits", "claude codex limits", "показать лимиты", "детали лимитов"]),
         descriptor(.focusSessionList, "Focus Session List", .view,
                    ["focus sessions", "фокус на сессии", "перейти к списку сессий"],
                    .init(key: "1", modifiers: .control, display: "⌃1")),

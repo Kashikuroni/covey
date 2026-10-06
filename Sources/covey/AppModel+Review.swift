@@ -2,9 +2,12 @@ import Foundation
 import CoveyGit
 import CoveyKit
 
-/// What the main window shows (Review spec, part 1).
+/// What the main window shows (Review spec, part 1). `forecast` is the
+/// full-window limits + GLM forecast screen (design handoff:
+/// docs/design_handoff_forecast_window) — the sessions workspace stays
+/// mounted underneath, hidden, exactly as under Review.
 enum WindowMode: Equatable {
-    case sessions, review
+    case sessions, review, forecast
 }
 
 /// Who a review is for: the worktree toplevel, the project whose sessions
@@ -108,6 +111,14 @@ extension AppModel {
         windowMode = .sessions
         syncReviewVisibility()
         review?.flush()
+    }
+
+    /// The top bar's Forecast segment: the full-window limits + forecast
+    /// screen. A live review stays parked underneath, like the sessions do —
+    /// only `windowMode` flips, nothing is torn down.
+    func enterForecast() {
+        windowMode = .forecast
+        syncReviewVisibility()
     }
 
     /// The main window's occlusion, reported by `ContentView`.
