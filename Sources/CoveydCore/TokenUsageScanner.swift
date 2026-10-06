@@ -1,4 +1,5 @@
 import Foundation
+import CoveyKit
 
 /// Токены из транскриптов Claude Code. Парсер — чистый; вотчер хранит
 /// инкрементальные офсеты (тот же приём, что TraceMonitor) в QuotaSampleStore.
@@ -44,6 +45,54 @@ public enum TokenUsageScanner {
         return events
     }
 
+    /// GLM-модель: сбор ведётся по всем провайдерам (claude/gpt идут в
+    /// аналитику), но темпы GLM-квоты — только GLM-сессии.
+    public static func isGLMModel(_ model: String) -> Bool {
+        let m = model.lowercased()
+        return m.contains("glm") || m.contains("zai")
+    }
+
+    /// Реальный cwd проекта из транскрипта (первая попавшаяся запись): slug
+    /// каталога в projectsRoot — путь, сплющенный в `-` (потеряны `/`, `.`,
+    /// `_`), по нему путь не восстановить, а cwd в каждой записи есть.
+    public static func firstCWD(in data: Data) -> String? {
+        guard let lastNewline = data.lastIndex(of: UInt8(ascii: "\n")) else { return nil }
+        for line in data[..<lastNewline].split(separator: UInt8(ascii: "\n")) {
+            guard let obj = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+                  let cwd = obj["cwd"] as? String, !cwd.isEmpty
+            else { continue }
+            return cwd
+        }
+        return nil
+    }
+
+    /// Последние два assistant-хода каждой сессии в порции данных: токены
+    /// контекста (input+cacheCreation+cacheRead) и метка времени — основа
+    /// метрики роста контекста (этап 0). Свежий ход — первый.
+    public static func lastContexts(in data: Data)
+        -> [String: [(tokens: Double, t: Int64)]] {
+        guard let lastNewline = data.lastIndex(of: UInt8(ascii: "\n")) else { return [:] }
+        var out: [String: [(tokens: Double, t: Int64)]] = [:]
+        for line in data[..<lastNewline].split(separator: UInt8(ascii: "\n")) {
+            guard let obj = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+                  obj["type"] as? String == "assistant",
+                  let message = obj["message"] as? [String: Any],
+                  let usage = message["usage"] as? [String: Any]
+            else { continue }
+            func n(_ k: String) -> Double { (usage[k] as? NSNumber)?.doubleValue ?? 0 }
+            let ctx = n("input_tokens") + n("cache_creation_input_tokens") + n("cache_read_input_tokens")
+            let session = (obj["sessionId"] as? String) ?? "unknown"
+            let t = (obj["timestamp"] as? String).flatMap {
+                tsFractional.date(from: $0) ?? tsWhole.date(from: $0)
+            }.map { Int64($0.timeIntervalSince1970 * 1000) }
+            guard let t else { continue }
+            out[session, default: []].append((ctx, t))
+        }
+        return out.mapValues { turns in
+            turns.sorted { $0.t > $1.t }.prefix(2).map { ($0.tokens, $0.t) }
+        }
+    }
+
     /// Активные транскрипты: `projectsRoot/<slug>/<uuid>.jsonl` с mtime моложе cutoff.
     public static func activeFiles(projectsRoot: String, cutoff: Date, now: Date) -> [String] {
         let fm = FileManager.default
@@ -86,9 +135,16 @@ public final class TranscriptWatcher {
 
     public func poll(now: Date) {
         let cutoff = now.addingTimeInterval(-600)   // активность: 10 мин (спека §3.2)
-        let glmuuids = Set(coveyClaudeSessions().filter(\.isGLM).map(\.uuid))
+        let sessions = coveyClaudeSessions()
+        let glmuuids = Set(sessions.filter(\.isGLM).map(\.uuid))
+        // Covey-сессия не-GLM провайдера не жжёт GLM-квоту — не трекается
+        // вовсе (в отличие от внешних Claude Code CLI, которых ведёт
+        // includeExternal).
+        let coveyNonGlm = Set(sessions.filter { !$0.isGLM }.map(\.uuid))
         func isTracked(_ path: String) -> Bool {
-            glmuuids.contains(uuid(of: path)) || includeExternal
+            let id = uuid(of: path)
+            if coveyNonGlm.contains(id) { return false }
+            return glmuuids.contains(id) || includeExternal
         }
         var paths = Set(TokenUsageScanner.activeFiles(projectsRoot: projectsRoot,
                                                       cutoff: cutoff, now: now).filter(isTracked))
@@ -118,6 +174,23 @@ public final class TranscriptWatcher {
         for e in events { aggregator.ingest(e) }
         if let lastNewline = data.lastIndex(of: UInt8(ascii: "\n")) {
             store.setOffset(path, offset + UInt64(lastNewline + 1))
+        }
+        // cwd проекта: снимаем один раз на slug; в хвосте его может не быть —
+        // снимется на следующем чтении, у свежего файла он есть с первой порции.
+        let slug = URL(fileURLWithPath: path).deletingLastPathComponent().lastPathComponent
+        if store.cwds[slug] == nil, let cwd = TokenUsageScanner.firstCWD(in: data) {
+            store.setCWD(slug, cwd: cwd)
+        }
+        // Контекст сессий (этап 0): последние два хода каждой сессии порции.
+        // Не-GLM сессии в rates/ledger не попадают (агрегатор отфильтрован),
+        // их записи контекста протухнут и выпадут 14-дневным пруном.
+        let contexts = TokenUsageScanner.lastContexts(in: data)
+        if !contexts.isEmpty {
+            store.upsertLastContext(contexts.mapValues { turns in
+                LastContextRecord(tokens: turns[0].tokens, t: turns[0].t,
+                                  deltaPerTurn: turns.count > 1
+                                      ? turns[0].tokens - turns[1].tokens : nil)
+            })
         }
     }
 }

@@ -84,6 +84,55 @@ final class TokenUsageScannerTests: XCTestCase {
         XCTAssertEqual(files.map { ($0 as NSString).lastPathComponent }, ["a.jsonl"])
     }
 
+    // MARK: cwd
+
+    func testFirstCWDReturnsWorkingDirectoryFromTranscript() {
+        let data = Data((
+            #"{"type":"user","cwd":"/Users/x/proj"}"# + "\n" +
+            assistantLine(total: 10, minutesAgo: 1)
+        ).utf8)
+        XCTAssertEqual(TokenUsageScanner.firstCWD(in: data), "/Users/x/proj")
+    }
+
+    func testFirstCWDNilWhenAbsent() {
+        let data = Data(assistantLine(total: 10, minutesAgo: 1).utf8)
+        XCTAssertNil(TokenUsageScanner.firstCWD(in: data))
+    }
+
+    func testWatcherCapturesProjectCWDByKeyedSlug() throws {
+        let agg = TokenAggregator(); let store = QuotaSampleStore(path: nil)
+        let watcher = makeWatcher(agg: agg, store: store)
+        let line = #"{"type":"user","cwd":"/Users/x/proj/sub"}"# + "\n" + assistantLine(total: 10, minutesAgo: 1) + "\n"
+        try line.write(toFile: dir + "/uuid-1.jsonl", atomically: true, encoding: .utf8)
+        watcher.poll(now: t0)
+        XCTAssertEqual(store.cwds["-Users-x-proj"], "/Users/x/proj/sub",
+                       "cwd снят из транскрипта и хранится по slug каталога проекта")
+    }
+
+    // MARK: lastContext (этап 0: рост контекста сессии)
+
+    func testLastContextsReturnsTwoNewestPerSession() {
+        let data = Data((
+            assistantLineCtx(total: 100, minutesAgo: 30) +
+            assistantLineCtx(total: 200, minutesAgo: 20) +
+            assistantLineCtx(total: 300, minutesAgo: 10, session: "uuid-2")
+        ).utf8)
+        let ctx = TokenUsageScanner.lastContexts(in: data)
+        XCTAssertEqual(ctx["uuid-1"]?.count, 2, "последние два хода сессии")
+        XCTAssertEqual(ctx["uuid-1"]?.first?.tokens, 200, "свежий первый")
+        XCTAssertEqual(ctx["uuid-1"]?.last?.tokens, 100)
+        XCTAssertEqual(ctx["uuid-2"]?.count, 1, "один ход — одна запись")
+    }
+
+    func testLastContextsEmptyDataReturnsEmpty() {
+        XCTAssertTrue(TokenUsageScanner.lastContexts(in: Data("x".utf8)).isEmpty)
+    }
+
+    private func assistantLineCtx(total: Int, minutesAgo: Double, session: String = "uuid-1") -> String {
+        let ts = ISO8601DateFormatter().string(from: t0 - minutesAgo * 60)
+        return #"{"type":"assistant","timestamp":"\#(ts)","isSidechain":false,"sessionId":"\#(session)","message":{"model":"glm-4.6","usage":{"input_tokens":\#(total),"output_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"# + "\n"
+    }
+
     // MARK: TranscriptWatcher
 
     private func makeWatcher(agg: TokenAggregator, store: QuotaSampleStore,
@@ -120,6 +169,41 @@ final class TokenUsageScannerTests: XCTestCase {
         XCTAssertEqual(store.offsets[path] ?? 0,
                        try FileManager.default.attributesOfItem(atPath: path)[.size] as? UInt64 ?? 0,
                        "офсет = размер файла после целых строк")
+    }
+
+    func testWatcherIngestsAllProvidersModels() throws {
+        // Сбор данных — по всем моделям (claude/gpt идут в аналитику:
+        // таблицы, столбцы, журнал); из GLM-темпов их фильтрует sessionRates.
+        let agg = TokenAggregator(); let store = QuotaSampleStore(path: nil)
+        let watcher = TranscriptWatcher(projectsRoot: (dir as NSString).deletingLastPathComponent,
+                                        aggregator: agg, store: store,
+                                        includeExternal: true, coveyClaudeSessions: { [] })
+        let ts = ISO8601DateFormatter().string(from: t0 - 60)
+        let line = #"{"type":"assistant","timestamp":"\#(ts)","isSidechain":false,"sessionId":"ext-c","message":{"model":"claude-opus-4-7","usage":{"input_tokens":100,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"# + "\n"
+        try line.write(toFile: dir + "/ext-c.jsonl", atomically: true, encoding: .utf8)
+        watcher.poll(now: t0)
+        XCTAssertEqual(agg.totals(since: .distantPast).total, 100, accuracy: 0.001,
+                       "claude-события собираются в агрегатор")
+        XCTAssertEqual(TokenUsageScanner.isGLMModel("glm-5.3"), true)
+        XCTAssertEqual(TokenUsageScanner.isGLMModel("GLM-5.3-Flash"), true)
+        XCTAssertEqual(TokenUsageScanner.isGLMModel("claude-opus-4-7"), false)
+    }
+
+    func testWatcherSkipsCoveySessionsOfOtherProviders() throws {
+        // Covey-сессия не-GLM провайдера не жжёт GLM-квоту — не трекается,
+        // даже при includeExternal (внешние Claude Code CLI — трекаются).
+        let agg = TokenAggregator(); let store = QuotaSampleStore(path: nil)
+        let watcher = TranscriptWatcher(
+            projectsRoot: (dir as NSString).deletingLastPathComponent,
+            aggregator: agg, store: store, includeExternal: true,
+            coveyClaudeSessions: { [("uuid-1", "fix-auth", false)] })
+        try (assistantLine(total: 10, minutesAgo: 1) + "\n")
+            .write(toFile: dir + "/uuid-1.jsonl", atomically: true, encoding: .utf8)
+        try (assistantLine(total: 5, minutesAgo: 1, session: "ext-9") + "\n")
+            .write(toFile: dir + "/ext-9.jsonl", atomically: true, encoding: .utf8)
+        watcher.poll(now: t0)
+        XCTAssertEqual(agg.totals(since: .distantPast).total, 11, accuracy: 0.001,
+                       "только внешняя сессия учтена (assistantLine: 5+1+2+3)")
     }
 
     func testWatcherSkipsExternalWhenDisabled() throws {

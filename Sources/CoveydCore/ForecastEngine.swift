@@ -78,8 +78,8 @@ public enum ForecastEngine {
     }
 }
 
-/// Источник оценки текущего темпа сжигания кредитов (спека §4.2).
-public enum RateSource: String, Equatable, Sendable { case instant, recent, windowAverage }
+/// Источник оценки текущего темпа сжигания кредитов (спека §4.2 + §7d-нормализация).
+public enum RateSource: String, Equatable, Sendable { case instant, recent, windowAverage, daily }
 
 /// Темп расхода квоты аккаунта: кредиты/ч и лежащие в их основе токены/ч.
 public struct AccountRate: Equatable, Sendable {
@@ -103,7 +103,8 @@ extension ForecastEngine {
     /// Внутренний: сигнатура оперирует внутренним CalibrationFactors (как
     /// isFresh/calibrate); потребитель задачи 8 живёт в этом же модуле.
     static func creditRate(samples: [QuotaSample],
-                           sessionRates: [(key: String, tokensPerHour: Double, active: Bool, windowTotal: Double, sidechainShare: Double)],
+                           sessionRates: [(key: String, tokensPerHour: Double, active: Bool, windowTotal: Double,
+                                           sidechainShare: Double, cacheHit: Double?)],
                            factors: CalibrationFactors, now: Date,
                            windowStart: Date, usedSoFar: Double) -> AccountRate {
         let tokensPerHour = sessionRates.filter(\.active).reduce(0.0) { $0 + $1.tokensPerHour }
@@ -131,6 +132,81 @@ extension ForecastEngine {
                                tokensPerHour: tokensPerHour, source: .windowAverage)
         }
         return AccountRate(creditsPerHour: 0, tokensPerHour: tokensPerHour, source: .windowAverage)
+    }
+
+    // MARK: - Нормализация недельного окна (§7d-скачки)
+
+    /// Валидные интервалы серии: 0 < dt ≤ 30 мин, дельта ≥ 0, не пересекает
+    /// разрыв опроса. Общий фильтр EMA-ставки и процентильной полосы.
+    private static func validDeltas(_ samples: [QuotaSample], gaps: [Range<Double>])
+        -> [(rate: Double, midMs: Double, dtMs: Double)] {
+        let byTime = samples.sorted { $0.t < $1.t }
+        return zip(byTime, byTime.dropFirst()).compactMap { a, b in
+            let dt = Double(b.t - a.t)
+            guard dt > 0, dt <= Double(maxIntervalGapMs) else { return nil }
+            let aT = Double(a.t), bT = Double(b.t)
+            guard !gaps.contains(where: { aT < $0.upperBound && $0.lowerBound < bT }) else { return nil }
+            let d = b.weekUsed - a.weekUsed
+            guard d >= 0 else { return nil }
+            return (d / (dt / 3_600_000), (aT + bT) / 2, dt)
+        }
+    }
+
+    /// Недельная ставка (§7d): EMA дельт weekUsed с τ=24ч — окно сглаживания
+    /// масштабировано горизонтом (~неделя/8), 15-мин всплеск весит доли
+    /// процента. Минимум 6ч валидной истории; меньше — среднее окна без
+    /// времени разрывов. Горизонт недели — не мгновенный темп: instant
+    /// остаётся у 5h-окна.
+    static func weeklyRate(samples: [QuotaSample], gaps: [Range<Double>],
+                           windowStart: Date, usedSoFar: Double, now: Date) -> AccountRate {
+        let nowMs = Double(now.timeIntervalSince1970 * 1000)
+        let tau = 24 * 3_600_000.0
+        var num = 0.0, den = 0.0, covered = 0.0
+        for d in validDeltas(samples, gaps: gaps) {
+            let w = exp(-(nowMs - d.midMs) / tau)
+            num += w * d.rate
+            den += w
+            covered += d.dtMs
+        }
+        if den > 0, covered >= 6 * 3_600_000 {
+            return AccountRate(creditsPerHour: num / den, tokensPerHour: 0, source: .daily)
+        }
+        let startMs = Double(windowStart.timeIntervalSince1970 * 1000)
+        let spanTotal = max(0, nowMs - startMs)
+        let gapTime = gaps.reduce(0.0) { acc, g in
+            acc + min(max(0, min(g.upperBound, nowMs) - max(g.lowerBound, startMs)), spanTotal)
+        }
+        let span = max(0, spanTotal - gapTime)
+        if span > 0, usedSoFar >= 0 {
+            return AccountRate(creditsPerHour: usedSoFar / (span / 3_600_000),
+                               tokensPerHour: 0, source: .windowAverage)
+        }
+        return AccountRate(creditsPerHour: 0, tokensPerHour: 0, source: .windowAverage)
+    }
+
+    /// Полоса неопределённости недельной проекции: p50/p90 темпов из того же
+    /// распределения валидных дельт, спроецированные на остаток окна.
+    static func weeklyBand(samples: [QuotaSample], gaps: [Range<Double>],
+                           resetAt: Date, used: Double, now: Date) -> (p50: Double, p90: Double)? {
+        let rates = validDeltas(samples, gaps: gaps).map(\.rate)
+        guard rates.count >= 24 else { return nil }
+        let sorted = rates.sorted()
+        let q = { (p: Double) in sorted[min(sorted.count - 1, Int(p * Double(sorted.count)))] }
+        let hours = max(0, resetAt.timeIntervalSince(now) / 3600)
+        return (used + q(0.5) * hours, used + q(0.9) * hours)
+    }
+
+    /// Покрытие мониторинга (этап 1): доля времени окна без разрывов опроса —
+    /// доверие к средним и индикатор «демона не было».
+    static func dataCoverage(gaps: [Range<Double>], windowStart: Date, now: Date) -> Double? {
+        let startMs = Double(windowStart.timeIntervalSince1970 * 1000)
+        let nowMs = Double(now.timeIntervalSince1970 * 1000)
+        let span = nowMs - startMs
+        guard span > 0 else { return nil }
+        let gapTime = gaps.reduce(0.0) { acc, g in
+            acc + min(max(0, min(g.upperBound, nowMs) - max(g.lowerBound, startMs)), span)
+        }
+        return max(0, 1 - gapTime / span)
     }
 }
 
@@ -207,7 +283,7 @@ extension ForecastEngine {
                       aggregator: TokenAggregator, store: QuotaSampleStore,
                       factors inFactors: CalibrationFactors, now: Date,
                       config: GLMForecastConfig) -> (forecast: GLMForecast, factors: CalibrationFactors) {
-        var factors = calibrate(previous: inFactors, samples: store.minuteSeries(now: now, minutes: 30),
+        let factors = calibrate(previous: inFactors, samples: store.minuteSeries(now: now, minutes: 30),
                                 buckets: store.buckets, now: now)
         var out = GLMForecast()
         out.peakNow = PeakSchedule.isPeak(at: now)
@@ -223,36 +299,64 @@ extension ForecastEngine {
             let duration: TimeInterval = key == "five" ? 5 * 3600 : 7 * 24 * 3600
             let start = Date(timeIntervalSince1970: Double(w.resetAt) / 1000)
                 .addingTimeInterval(-duration)
-            // weekly живёт в 5-мин вёдрах — дельты для «recent» берём оттуда.
-            let series = key == "five" ? store.minuteSeries(now: now, minutes: 15)
-                                       : store.weekSeries(now: now, days: 1)
-            let rate = creditRate(samples: series, sessionRates: rates, factors: factors,
-                                  now: now, windowStart: start, usedSoFar: w.used)
-            let fc = project(used: w.used, total: w.total, remaining: w.remaining,
-                             resetAt: Date(timeIntervalSince1970: Double(w.resetAt) / 1000),
-                             tokensPerHour: tokensPerHour,
-                             flatCreditsPerHour: rate.source == .instant ? 0 : rate.creditsPerHour,
-                             factors: factors, now: now,
-                             marginPercent: config.marginPercent, underusePercent: 30)
-            if key == "five" { out.fiveHours = fc } else { out.weekly = fc }
+            if key == "five" {
+                let rate = creditRate(samples: store.minuteSeries(now: now, minutes: 15),
+                                      sessionRates: rates, factors: factors,
+                                      now: now, windowStart: start, usedSoFar: w.used)
+                out.fiveHours = project(used: w.used, total: w.total, remaining: w.remaining,
+                                        resetAt: Date(timeIntervalSince1970: Double(w.resetAt) / 1000),
+                                        tokensPerHour: tokensPerHour,
+                                        flatCreditsPerHour: rate.source == .instant ? 0 : rate.creditsPerHour,
+                                        factors: factors, now: now,
+                                        marginPercent: config.marginPercent, underusePercent: 30)
+            } else {
+                // §7d: горизонт недели — не мгновенный темп. EMA(τ=24ч) дельт
+                // weekUsed + полоса p50/p90; instant/recent остаются у 5h.
+                let week = store.weekSeries(now: now, days: 7)
+                let rate = weeklyRate(samples: week, gaps: store.gapRanges,
+                                      windowStart: start, usedSoFar: w.used, now: now)
+                var fc = project(used: w.used, total: w.total, remaining: w.remaining,
+                                 resetAt: Date(timeIntervalSince1970: Double(w.resetAt) / 1000),
+                                 tokensPerHour: 0,
+                                 flatCreditsPerHour: rate.creditsPerHour,
+                                 factors: CalibrationFactors(), now: now,
+                                 marginPercent: config.marginPercent, underusePercent: 30)
+                if let band = weeklyBand(samples: week, gaps: store.gapRanges,
+                                         resetAt: Date(timeIntervalSince1970: Double(w.resetAt) / 1000),
+                                         used: w.used, now: now) {
+                    fc.projectedP50 = band.p50
+                    fc.projectedP90 = band.p90
+                }
+                out.weekly = fc
+            }
         }
         // Агенты: имена/external/budgetMinutes резолвит вызывающий (задача 9) — здесь ключи.
+        // id = ключ сессии: после декорирования имена могут совпасть (общий проект).
         out.agents = rates.map { r in
-            GLMAgentForecast(name: r.key, external: false, active: r.active,
+            let ctx = store.lastContext[r.key]
+            return GLMAgentForecast(name: r.key, id: r.key, external: false, active: r.active,
                              isSidechainMarked: r.sidechainShare > 0.5,
                              tokensPerHour: r.tokensPerHour,
                              creditsPerHour: r.tokensPerHour * (factors.factor(out.peakNow) ?? 0),
                              sharePercent: tokensPerHour > 0 ? r.tokensPerHour / tokensPerHour * 100 : 0,
-                             budgetMinutes: nil)
+                             budgetMinutes: nil,
+                             cacheHit: r.cacheHit,
+                             sidechainShare: r.sidechainShare,
+                             contextTokens: ctx?.tokens,
+                             contextDeltaPerTurn: ctx?.deltaPerTurn)
         }
         let windowStart = fiveHours.map { w in
             Date(timeIntervalSince1970: Double(w.resetAt) / 1000).addingTimeInterval(-5 * 3600)
         } ?? now.addingTimeInterval(-7 * 24 * 3600)
         out.models = aggregator.perModel(windowStart: windowStart, hourStart: now.addingTimeInterval(-3600))
+        out.modelDaily = store.modelDays       // год дневных вёдер из стора (§график)
         out.fiveHourSeries = store.weekSeries(now: now, days: 7)
             .map { GLMSeriesPoint(t: $0.t, used: $0.fiveUsed) }
         out.weeklySeries = store.weekSeries(now: now, days: 7)
             .map { GLMSeriesPoint(t: $0.t, used: $0.weekUsed) }
+        out.coverage7d = dataCoverage(gaps: store.gapRanges,
+                                      windowStart: now.addingTimeInterval(-7 * 24 * 3600),
+                                      now: now)
         return (out, factors)
     }
 }

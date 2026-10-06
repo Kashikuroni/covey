@@ -10,8 +10,8 @@ final class ForecastEngineRateTests: XCTestCase {
                     fiveUsed: fiveUsed, fiveReset: 0, weekUsed: 0, weekReset: 0)
     }
 
-    private func rate(_ tokensPerHour: Double, active: Bool = true) -> (key: String, tokensPerHour: Double, active: Bool, windowTotal: Double, sidechainShare: Double) {
-        ("s", tokensPerHour, active, 0, 0)
+    private func rate(_ tokensPerHour: Double, active: Bool = true) -> (key: String, tokensPerHour: Double, active: Bool, windowTotal: Double, sidechainShare: Double, cacheHit: Double?) {
+        ("s", tokensPerHour, active, 0, 0, nil)
     }
 
     private func freshOffPeak() -> CalibrationFactors {

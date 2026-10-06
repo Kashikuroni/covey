@@ -17,16 +17,25 @@ public struct GLMTokenUsage: Codable, Equatable, Sendable {
         self.input = input; self.output = output; self.cacheCreation = cacheCreation; self.cacheRead = cacheRead
     }
     public var total: Double { input + output + cacheCreation + cacheRead }
+    /// Доля попаданий в кэш (этап 1): cacheRead / (cacheRead + input +
+    /// cacheCreation). nil — данных нет. Высокий hit = контекст оплачивается
+    /// кэш-ценой, а не полной ценой input.
+    public var cacheHit: Double? {
+        let denom = cacheRead + input + cacheCreation
+        return denom > 0 ? cacheRead / denom : nil
+    }
 }
 
 public struct GLMWindowForecast: Codable, Equatable, Sendable {
     public init(verdict: GLMForecastVerdict, projected: Double, remaining: Double, total: Double,
                 resetAt: Int64?, exhaustionAt: Int64?, headroomPercent: Double,
-                rateCreditsPerHour: Double, agentMinutes: Double?) {
+                rateCreditsPerHour: Double, agentMinutes: Double?,
+                projectedP50: Double? = nil, projectedP90: Double? = nil) {
         self.verdict = verdict; self.projected = projected; self.remaining = remaining
         self.total = total; self.resetAt = resetAt; self.exhaustionAt = exhaustionAt
         self.headroomPercent = headroomPercent
         self.rateCreditsPerHour = rateCreditsPerHour; self.agentMinutes = agentMinutes
+        self.projectedP50 = projectedP50; self.projectedP90 = projectedP90
     }
     public var verdict: GLMForecastVerdict
     public var projected: Double          // кредиты к resetAt при текущем темпе
@@ -37,18 +46,24 @@ public struct GLMWindowForecast: Codable, Equatable, Sendable {
     public var headroomPercent: Double    // 100 − projected/total·100 (минус = перебор)
     public var rateCreditsPerHour: Double // бленд-темп, на котором построен прогноз
     public var agentMinutes: Double?      // общий запас в агент-минутах
+    public var projectedP50: Double? = nil // полоса p50 недельной проекции (§7d)
+    public var projectedP90: Double? = nil // полоса p90 недельной проекции (§7d)
 }
 
 public struct GLMAgentForecast: Codable, Equatable, Sendable {
-    public init(name: String, external: Bool, active: Bool, isSidechainMarked: Bool,
+    public init(name: String, id: String? = nil, external: Bool, active: Bool, isSidechainMarked: Bool,
                 tokensPerHour: Double, creditsPerHour: Double, sharePercent: Double,
-                budgetMinutes: Double?) {
-        self.name = name; self.external = external; self.active = active
+                budgetMinutes: Double?, cacheHit: Double? = nil, sidechainShare: Double? = nil,
+                contextTokens: Double? = nil, contextDeltaPerTurn: Double? = nil) {
+        self.name = name; self.id = id; self.external = external; self.active = active
         self.isSidechainMarked = isSidechainMarked; self.tokensPerHour = tokensPerHour
         self.creditsPerHour = creditsPerHour; self.sharePercent = sharePercent
         self.budgetMinutes = budgetMinutes
+        self.cacheHit = cacheHit; self.sidechainShare = sidechainShare
+        self.contextTokens = contextTokens; self.contextDeltaPerTurn = contextDeltaPerTurn
     }
     public var name: String
+    public var id: String?                // ключ сессии: identity строки, переживает декорирование
     public var external: Bool             // запущен вне Covey
     public var active: Bool               // транскрипт моложе 10 мин
     public var isSidechainMarked: Bool    // расход в основном субагентами
@@ -56,6 +71,13 @@ public struct GLMAgentForecast: Codable, Equatable, Sendable {
     public var creditsPerHour: Double
     public var sharePercent: Double
     public var budgetMinutes: Double?     // при своём темпе до конца окна
+    public var cacheHit: Double?          // hit за последние 15 мин (этап 1)
+    public var sidechainShare: Double?    // фактическая доля субагентов 0…1 (этап 1)
+    public var contextTokens: Double?     // размер промпта последнего хода (этап 2)
+    public var contextDeltaPerTurn: Double? // рост контекста за ход (этап 2)
+    /// Стабильный id для UI-списков: у нескольких агентов имя (проект) может
+    /// совпасть — дубликаты в ForEach схлопывают строки.
+    public var stableID: String { id ?? "name:\(name)" }
 }
 
 public struct GLMModelUsage: Codable, Equatable, Sendable {
@@ -65,6 +87,56 @@ public struct GLMModelUsage: Codable, Equatable, Sendable {
     public var model: String
     public var window: GLMTokenUsage      // с начала квота-окна
     public var lastHour: GLMTokenUsage
+}
+
+/// Токены одного локального дня по моделям — столбчатый график 7d (§7d).
+public struct GLMDayUsage: Codable, Equatable, Sendable {
+    public init(t: Int64, models: [String: Double], usage: [String: GLMTokenUsage]? = nil) {
+        self.t = t; self.models = models; self.usage = usage
+    }
+    public var t: Int64                   // Unix ms полуночи локального дня
+    public var models: [String: Double]   // модель → total-токены за день
+    public var usage: [String: GLMTokenUsage]? // компоненты биллинга (для $)
+}
+
+/// Токены одного часа по моделям с компонентами биллинга — $-линия дня
+/// (§spend). История 8 дней (живые вёдра), upsert по часу.
+public struct GLMHourUsage: Codable, Equatable, Sendable {
+    public init(t: Int64, usage: [String: GLMTokenUsage]) {
+        self.t = t; self.usage = usage
+    }
+    public var t: Int64                     // Unix ms начала часа
+    public var usage: [String: GLMTokenUsage]
+}
+
+/// Пожизненный тотал сессии для журнала стоимости (этап 0 roadmap: копится
+/// в сторе, UI — этап 2). Тоталы монотонны: вёдра прунятся, снапшот меньше
+/// накопленного тотала его не откатывает.
+public struct SessionCostRecord: Codable, Equatable, Sendable {
+    public init(firstSeen: Int64, lastSeen: Int64, byModel: [String: Double],
+                external: Bool, cwd: String?,
+                usage: [String: GLMTokenUsage]? = nil) {
+        self.firstSeen = firstSeen; self.lastSeen = lastSeen
+        self.byModel = byModel; self.external = external; self.cwd = cwd
+        self.usage = usage
+    }
+    public var firstSeen: Int64           // Unix ms первого замеченного вёдра
+    public var lastSeen: Int64            // Unix ms последней активности
+    public var byModel: [String: Double]  // total-токены по моделям (совместимость)
+    public var external: Bool             // запущена вне Covey
+    public var cwd: String?               // путь проекта на момент активности
+    public var usage: [String: GLMTokenUsage]? // компоненты биллинга (для $)
+}
+
+/// Текущий контекст сессии: размер промпта последнего хода и его рост
+/// (последний − предпоследний ход; отрицательный = контекст сброшен).
+public struct LastContextRecord: Codable, Equatable, Sendable {
+    public init(tokens: Double, t: Int64, deltaPerTurn: Double?) {
+        self.tokens = tokens; self.t = t; self.deltaPerTurn = deltaPerTurn
+    }
+    public var tokens: Double             // input + cacheCreation + cacheRead последнего хода
+    public var t: Int64                   // Unix ms этого хода
+    public var deltaPerTurn: Double?
 }
 
 public struct GLMSeriesPoint: Codable, Equatable, Sendable {
@@ -86,6 +158,22 @@ public struct GLMForecast: Codable, Equatable, Sendable {
     public var nextFlipAt: Int64?         // Unix ms ближайшей смены режима
     public var agents: [GLMAgentForecast] = []
     public var models: [GLMModelUsage] = []
+    public var modelDaily: [GLMDayUsage]? // дневные токены по моделям (столбцы 7d)
     public var fiveHourSeries: [GLMSeriesPoint] = []
     public var weeklySeries: [GLMSeriesPoint] = []
+    public var coverage7d: Double?        // доля времени мониторинга без разрывов (этап 1)
+    public var sessionCosts: [GLMSessionCostEntry]? // журнал стоимости сессий (этап 2)
+    public var hourly: [GLMSeriesPoint]?  // токены по часам, 90 дней (этап 2)
+    public var modelHourly: [GLMHourUsage]? // час × модель × компоненты (§spend, 8 дней)
+}
+
+/// Запись журнала стоимости для UI (этап 2): стор-рекорд + резолвнутое имя
+/// и признак живой сессии.
+public struct GLMSessionCostEntry: Codable, Equatable, Sendable {
+    public init(record: SessionCostRecord, name: String, live: Bool) {
+        self.record = record; self.name = name; self.live = live
+    }
+    public var record: SessionCostRecord
+    public var name: String              // имя Covey-сессии или ~/<проект>
+    public var live: Bool                // активна в ledger (false — архив)
 }

@@ -7,10 +7,14 @@ public struct GLMForecastConfigSection: Codable, Equatable {
     public var includeExternal: Bool?
     public var marginPercent: Double?
     public var imminentMinutes: Double?
+    /// Спайк-алерты (этап 3): во сколько раз темп сессии должен превысить
+    /// недельную ставку; nil → 8, 0 — выключить.
+    public var spikeMultiplier: Double?
     public init(includeExternal: Bool? = nil, marginPercent: Double? = nil,
-                imminentMinutes: Double? = nil) {
+                imminentMinutes: Double? = nil, spikeMultiplier: Double? = nil) {
         self.includeExternal = includeExternal; self.marginPercent = marginPercent
         self.imminentMinutes = imminentMinutes
+        self.spikeMultiplier = spikeMultiplier
     }
 }
 

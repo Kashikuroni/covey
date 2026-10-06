@@ -52,6 +52,16 @@ final class UsageMonitorForecastTests: XCTestCase {
         XCTAssertEqual(f?.agents.first?.name, "fix-auth")
         XCTAssertEqual(f?.fiveHours?.total ?? 0, 1000, accuracy: 1)
         XCTAssertFalse(f?.fiveHourSeries.isEmpty ?? true, "сэмплы поллинга попали в серию")
+        // Этап 0: журнал сессий и почасовые роллапы пишутся с первого полла.
+        XCTAssertEqual(store.sessionLedger["uuid-1"]?.byModel["glm-4.6"], 50_000)
+        XCTAssertFalse(store.hourTotals.isEmpty)
+        XCTAssertNotNil(store.lastContext["uuid-1"], "контекст сессии снят вотчером")
+        // Этап 2: журнал/почасовки/контекст доезжают до аппки через снапшот.
+        XCTAssertEqual(f?.sessionCosts?.first?.record.byModel["glm-4.6"], 50_000)
+        XCTAssertEqual(f?.sessionCosts?.first?.name, "fix-auth")
+        XCTAssertEqual(f?.sessionCosts?.first?.live, true)
+        XCTAssertFalse(f?.hourly?.isEmpty ?? true)
+        XCTAssertEqual(f?.agents.first?.contextTokens, 50_000, "контекст агента в снапшоте")
     }
 
     func testVerdictDebounceNeedsTwoPolls() async throws {

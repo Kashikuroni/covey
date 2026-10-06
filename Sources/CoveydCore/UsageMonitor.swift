@@ -210,6 +210,12 @@ public final class UsageMonitor {
                                  weekUsed: week.used, weekReset: week.reset)
         store.append(sample)
         store.setBuckets(aggregator.buckets)   // вёдра вотчера едут в стор на диск
+        // Дневные токены по моделям: вёдра живут 8 дней, год истории — в сторе.
+        store.upsertModelDays(aggregator.perDay(now: now, days: 8), now: now)
+        // Этап 0 (roadmap): журнал стоимости сессий и почасовые роллапы.
+        store.upsertSessions(sessionCostRecords(), now: now)
+        store.upsertHourTotals(aggregator.hourTotals(now: now), now: now)
+        store.upsertHourUsage(aggregator.perHour(now: now, days: 8), now: now)
         let (forecast, newFactors) = ForecastEngine.build(
             fiveHours: quota.limits.fiveHours, weekly: quota.limits.weekly,
             aggregator: aggregator, store: store, factors: factors, now: now,
@@ -220,6 +226,10 @@ public final class UsageMonitor {
         decorated.agents = resolveAgentNames(forecast.agents)
         decorated.fiveHours = debounced("five", forecast.fiveHours)
         decorated.weekly = debounced("week", forecast.weekly)
+        // Этап 2: журнал стоимости сессий и почасовки теплокарты — в снапшот.
+        decorated.sessionCosts = sessionCostEntries()
+        decorated.hourly = store.hourTotals
+        decorated.modelHourly = store.hourUsage
         // Бюджеты агентов (§4.4): остаток 5h-окна / собственный кредитный темп агента.
         if let five = decorated.fiveHours, five.remaining > 0 {
             decorated.agents = decorated.agents.map { a in
@@ -232,13 +242,67 @@ public final class UsageMonitor {
         try? store.save()
     }
 
-    /// Имена агентов: uuid → имя Covey-сессии из `glmSessions`; ключ без
-    /// сессии — внешний, имя «ext:<slug>» (каталог транскрипта; пути опроса
-    /// вотчер держит в офсетах стора).
-    private func resolveAgentNames(_ agents: [GLMAgentForecast]) -> [GLMAgentForecast] {
-        let sessions = glmSessions?() ?? []
-        let byUUID = Dictionary(sessions.map { ($0.uuid, $0.name) }, uniquingKeysWith: { first, _ in first })
+    /// Записи журнала стоимости для UI (этап 2): ledger + архив, с именами
+    /// (uuid → Covey-сессия; внешняя — ~/<проект>), топ-100 по тоталу.
+    private func sessionCostEntries() -> [GLMSessionCostEntry] {
+        guard let store = forecastStore else { return [] }
+        let byUUID = Dictionary((glmSessions?() ?? []).map { ($0.uuid, $0.name) },
+                                uniquingKeysWith: { first, _ in first })
+        func entry(_ pair: (uuid: String, rec: SessionCostRecord), live: Bool)
+            -> GLMSessionCostEntry {
+            let name = byUUID[pair.uuid]
+                ?? pair.rec.cwd.map(Self.tildeHomePath)
+                ?? pair.uuid
+            return GLMSessionCostEntry(record: pair.rec, name: name, live: live)
+        }
+        return (store.sessionLedger.map { entry($0, live: true) }
+            + store.sessionArchive.map { entry($0, live: false) })
+            .sorted {
+                $0.record.byModel.values.reduce(0, +) > $1.record.byModel.values.reduce(0, +)
+            }
+            .prefix(100).map { $0 }
+    }
+
+    /// Снапшот пожизненных тоталов сессий для журнала (этап 0): вёдра →    /// записи; внешний/путь — тем же резолвом, что и имена агентов.
+    private func sessionCostRecords() -> [String: SessionCostRecord] {
+        let known = Set((glmSessions?() ?? []).map(\.uuid))
         let slugs = Dictionary((forecastStore?.offsets ?? [:]).keys.map { path -> (String, String) in
+            let url = URL(fileURLWithPath: path)
+            return (url.deletingPathExtension().lastPathComponent.lowercased(),
+                    url.deletingLastPathComponent().lastPathComponent)
+        }, uniquingKeysWith: { first, _ in first })
+        let cwds = forecastStore?.cwds ?? [:]
+        var out: [String: SessionCostRecord] = [:]
+        for (uuid, tot) in aggregator.sessionTotals() {
+            let external = !known.contains(uuid)
+            out[uuid] = SessionCostRecord(
+                firstSeen: tot.first, lastSeen: tot.last, byModel: tot.byModel,
+                external: external,
+                cwd: external ? cwds[slugs[uuid] ?? ""] : nil,
+                usage: tot.usage)
+        }
+        return out
+    }
+
+    /// Имена агентов: uuid → имя Covey-сессии из `glmSessions`; ключ без
+    /// сессии — внешний: имя — реальный cwd проекта (вотчер снимает его из
+    /// транскрипта, `store.cwds`), свёрнутый к «~» — slug каталога сплющен
+    /// в «-» и путь по нему не восстановить; без снятого cwd — «ext:<slug>».
+    private func resolveAgentNames(_ agents: [GLMAgentForecast]) -> [GLMAgentForecast] {
+        UsageMonitor.resolvedAgentNames(agents,
+                                        sessions: (glmSessions?() ?? []).map { ($0.uuid, $0.name) },
+                                        offsets: forecastStore?.offsets ?? [:],
+                                        cwds: forecastStore?.cwds ?? [:])
+    }
+
+    /// Чистая резолюция имён (публичная для тестов). id агентов не трогает —
+    /// identity ставит движок и переживёт декорирование.
+    nonisolated static func resolvedAgentNames(_ agents: [GLMAgentForecast],
+                                               sessions: [(uuid: String, name: String)],
+                                               offsets: [String: UInt64],
+                                               cwds: [String: String]) -> [GLMAgentForecast] {
+        let byUUID = Dictionary(sessions.map { ($0.uuid, $0.name) }, uniquingKeysWith: { first, _ in first })
+        let slugs = Dictionary(offsets.keys.map { path -> (String, String) in
             let url = URL(fileURLWithPath: path)
             return (url.deletingPathExtension().lastPathComponent.lowercased(),
                     url.deletingLastPathComponent().lastPathComponent)
@@ -249,11 +313,26 @@ public final class UsageMonitor {
                 a.name = name
             } else {
                 a.external = true
-                a.name = "ext:\(slugs[a.name] ?? a.name)"
+                let slug = slugs[a.name] ?? a.name
+                if let cwd = cwds[slug] {
+                    a.name = tildeHome(cwd)
+                } else {
+                    a.name = "ext:\(slug)"
+                }
             }
             return a
         }
     }
+
+    /// "/Users/me/path" → "~/path" — тот же показ, что и в таблице агентов.
+    nonisolated private static func tildeHome(_ path: String) -> String {
+        let home = NSHomeDirectory()
+        if path == home { return "~" }
+        guard path.hasPrefix(home + "/") else { return path }
+        return "~" + String(path.dropFirst(home.count))
+    }
+
+    nonisolated static func tildeHomePath(_ path: String) -> String { tildeHome(path) }
 
     /// Публикуем вердикт только когда он продержался два опроса подряд;
     /// до того держим прошлый подтверждённый (в первый цикл — .calibrating).
