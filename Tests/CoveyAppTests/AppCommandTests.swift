@@ -10,8 +10,6 @@ final class AppCommandTests: XCTestCase {
                        .consume)
         XCTAssertEqual(commandWHandling(focus: .inspector, inputMode: .normal),
                        .consume)
-        XCTAssertEqual(commandWHandling(focus: .terminal, inputMode: .limits),
-                       .consume)
         XCTAssertEqual(commandWHandling(focus: .terminal,
                                         inputMode: .normal,
                                         modalPresented: true),
@@ -57,10 +55,11 @@ final class AppCommandTests: XCTestCase {
         }
     }
 
-    func testPaletteDoesNotRestoreResponderOverLimitsOverlay() {
+    func testPaletteRestoresResponderInEveryMode() {
+        // The limits overlay (the one mode that kept the terminal) is gone;
+        // the palette always hands the responder back.
         XCTAssertTrue(shouldRestoreCommandPaletteResponder(inputMode: .normal))
         XCTAssertTrue(shouldRestoreCommandPaletteResponder(inputMode: .help))
-        XCTAssertFalse(shouldRestoreCommandPaletteResponder(inputMode: .limits))
     }
 
     @MainActor
@@ -146,37 +145,17 @@ final class AppCommandTests: XCTestCase {
     }
 
     @MainActor
-    func testLimitsOverlayTemporarilyOwnsTerminalFocus() async throws {
+    func testForecastShortcutTogglesWindowMode() async throws {
         let daemon = try TestDaemon()
         defer { daemon.stop() }
         let (model, _) = try makeModel(daemon)
         await model.start()
-        _ = try daemon.registry.create(
-            dir: "/tmp",
-            agent: "claude",
-            argv: ["/bin/cat"],
-            name: "agent"
-        )
-        _ = await eventually { model.sessions.count == 1 }
-        await model.select("agent")
-        model.focusPane("agent")
 
-        var commands: [AppModel.TerminalCommand] = []
-        model.setTerminalCommandHandler(for: "agent") { commands.append($0) }
+        model.perform(.toggleForecast)
+        XCTAssertEqual(model.windowMode, .forecast)
 
-        model.perform(.showLimitsDetail)
-        XCTAssertEqual(model.inputMode, .limits)
-        XCTAssertEqual(commands, [.blur])
-
-        model.restoreCommandPaletteTerminalFocus()
-        XCTAssertEqual(commands, [.blur],
-                       "closing the palette must not steal focus from limits")
-
-        model.apply(.closeOverlay)
-        XCTAssertEqual(model.inputMode, .normal)
-        XCTAssertEqual(commands, [.blur, .focus])
-
-        daemon.registry.kill(name: "agent")
+        model.perform(.toggleForecast)
+        XCTAssertEqual(model.windowMode, .sessions)
     }
 
 }

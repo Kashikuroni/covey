@@ -36,8 +36,8 @@ enum CommandRules {
     /// Add Project is not one: the project it adds becomes the selection,
     /// which deselects the session behind Review and unmounts its pane.
     static let availableInReview: Set<AppCommand> = [
-        .toggleReview, .toggleTheme, .showProviders,
-        .showLimitsDetail, .settings, .searchLogs,
+        .toggleReview, .toggleForecast, .toggleTheme, .showProviders,
+        .settings, .searchLogs,
     ]
 
     static func availability(
@@ -58,7 +58,7 @@ enum CommandRules {
         case .newSession, .recentSessions, .filterSessions,
              .toggleSessionsPanel, .toggleInspector, .toggleAgentTrace,
              .toggleStatusBar, .toggleTopBar, .toggleTheme,
-             .showProviders, .showLimitsDetail, .focusSessionList, .showKeyboardHelp,
+             .showProviders, .toggleForecast, .focusSessionList, .showKeyboardHelp,
              .addProject, .settings, .searchLogs:
             return .enabled
 

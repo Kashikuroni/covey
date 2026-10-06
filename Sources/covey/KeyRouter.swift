@@ -4,7 +4,6 @@ enum InputMode: Equatable {
     case normal
     case selectSession
     case help
-    case limits
 }
 
 /// Non-character keys the router cares about.
@@ -34,10 +33,6 @@ enum KeyAction: Equatable {
     case sendShiftEnter
     case splitFocusToggle
     case cycleFocus(forward: Bool)
-    case limitsSelectNext
-    case limitsSelectPrev
-    case limitsEnableSelected
-    case limitsDisableSelected
 }
 
 /// Map a Cyrillic char to the Latin key at the same physical QWERTY position;
@@ -69,15 +64,6 @@ enum KeyRouter {
         // while a native terminal view held focus.
         if context.vimMode, context.mode == .help {
             return .closeOverlay
-        }
-        if context.vimMode, context.mode == .limits {
-            switch ch {
-            case "j": return .limitsSelectNext
-            case "k": return .limitsSelectPrev
-            case "h": return .limitsDisableSelected
-            case "l": return .limitsEnableSelected
-            default: return .closeOverlay
-            }
         }
 
         if context.focus == .terminal {
@@ -120,7 +106,7 @@ enum KeyRouter {
                 return .selectByNumber(n)
             }
             return nil   // anything else is ignored; the mode stays
-        case .help, .limits:
+        case .help:
             return nil // handled before native terminal focus above
         }
     }

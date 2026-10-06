@@ -51,7 +51,8 @@ final class CommandCatalogTests: XCTestCase {
             (.splitTerminalVertically, "d", .command, "⌘D"),
             (.splitTerminalHorizontally, "d", [.command, .shift], "⌘⇧D"),
             (.closeTerminalSplit, "w", .command, "⌘W"),
-            (.showProviders, "l", .command, "⌘L"),
+            (.toggleViewTerminal, "t", .command, "⌘T"),
+            (.toggleForecast, "l", .command, "⌘L"),
         ]
 
         for (command, key, modifiers, display) in expected {
@@ -83,7 +84,7 @@ final class CommandCatalogTests: XCTestCase {
 
     func testFormerLeaderCommandsRemainInCatalog() {
         let expected: Set<AppCommand> = [
-            .showLimitsDetail, .createGitHubIssue, .openIssueList, .promoteWorktree,
+            .toggleForecast, .createGitHubIssue, .openIssueList, .promoteWorktree,
             .deleteSessionBranch, .cleanupMergedBranches, .returnToRepositoryRoot,
             .renameSession, .renameProject, .restartSession, .restartAllClaudeSessions,
             .splitTerminalVertically, .splitTerminalHorizontally, .closeTerminalSplit,

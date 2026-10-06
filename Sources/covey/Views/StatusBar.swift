@@ -159,7 +159,6 @@ struct StatusBar: View {
         switch model.inputMode {
         case .selectSession: return [("1-9", "jump"), ("esc", "cancel")]
         case .help: return [("any key", "closes")]
-        case .limits: return [("any key", "closes")]
         case .normal:
             guard model.vimMode else {
                 return withPalette([("⌘N", "new"), ("⌘F", "filter")])

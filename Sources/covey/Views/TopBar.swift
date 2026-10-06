@@ -11,12 +11,6 @@ func topBarAlignment(_ placement: UsagePlacement) -> Alignment {
     .center
 }
 
-/// Moves the limits card into the same asymmetric horizontal region used by
-/// the compact limits block in `TopBar`.
-func limitsOverlayHorizontalOffset(_ placement: UsagePlacement) -> CGFloat {
-    (topBarLeadingInset - topBarTrailingInset) / 2
-}
-
 struct TopBar: View {
     @Bindable var model: AppModel
 
@@ -24,11 +18,13 @@ struct TopBar: View {
 
     var body: some View {
         ZStack {
-            UsageChip(usage: model.claudeUsageEnabled ? model.usage : nil,
-                      usageError: model.claudeUsageEnabled ? model.usageError : nil,
-                      codexUsage: model.codexUsageEnabled ? model.codexUsage : nil,
+            UsageChip(usage: model.usage,
+                      usageError: model.usageError,
+                      codexUsage: model.codexUsage,
                       glmQuota: model.glmUsageEnabled ? model.glmQuota : nil,
                       glmEnabled: model.glmUsageEnabled,
+                      claudeEnabled: model.claudeUsageEnabled,
+                      codexEnabled: model.codexUsageEnabled,
                       tk: tk,
                       onClockTap: { model.showProvidersPanel = true })
                 .font(.system(size: topBarFontSize, design: topBarFontDesign))

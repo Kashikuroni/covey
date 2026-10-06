@@ -25,6 +25,16 @@ enum ForecastText {
         return f
     }()
 
+    /// Прогноз окна GLM по метке чипа: «5h» → fiveHours, «7d» → weekly. Чужие
+    /// метки (Claude/Codex) и отсутствующий прогноз строки не дают.
+    static func glmWindowForecast(_ label: String, forecast: GLMForecast?) -> GLMWindowForecast? {
+        switch label {
+        case "5h": return forecast?.fiveHours
+        case "7d": return forecast?.weekly
+        default: return nil
+        }
+    }
+
     /// Одна строка прогноза под окном GLM (спека §6.2). nil — строки нет.
     static func forecastLine(_ w: GLMWindowForecast, label: String, now: Date) -> String? {
         switch w.verdict {

@@ -77,7 +77,7 @@ final class SpendSeriesTests: XCTestCase {
         }
         let from = cal.startOfDay(for: now.addingTimeInterval(-4 * 86_400))
         let to = cal.startOfDay(for: now.addingTimeInterval(-2 * 86_400))
-        let s = SpendCard.series(hourly: [], daily: daily,
+        let s = SpendCard.series(hourly: [], daily: daily, range: .week,
                                  window: from...to.addingTimeInterval(86_400 - 1),
                                  cost: cost, now: now)
         XCTAssertEqual(s.points.count, 3, "дни 4,3,2 назад — окно [4д, 2д]")

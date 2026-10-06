@@ -85,8 +85,8 @@ struct ForecastModeView: View {
         TimelineView(.everyMinute) { context in
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
-                    // Провайдеры — в модалке (⌘L), настройки дашборда —
-                    // шторкой из топбара: остаётся сетка 2×3.
+                    // Провайдеры — в модалке (клик по часам), настройки
+                    // дашборда — шторкой из топбара: остаётся сетка 2×3.
                     if model.glmUsageEnabled {
                         forecastArea(now: context.date)
                     } else {

@@ -21,6 +21,9 @@ final class HelpOverlayTests: XCTestCase {
         let pairs = helpGroups.flatMap(\.1)
 
         XCTAssertTrue(pairs.contains { $0.0 == "⌘P" && $0.1.contains("command") })
+        XCTAssertTrue(pairs.contains {
+            $0.0 == "⌘T" && $0.1.localizedCaseInsensitiveContains("terminal")
+        })
         XCTAssertFalse(helpGroups.contains { $0.0.localizedCaseInsensitiveContains("leader") })
         XCTAssertFalse(pairs.contains {
             $0.0.localizedCaseInsensitiveContains("space") &&

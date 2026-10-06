@@ -77,8 +77,7 @@ enum ReviewModeKeys {
 
     private static func isOverlayAction(_ action: KeyAction) -> Bool {
         switch action {
-        case .closeOverlay, .limitsSelectNext, .limitsSelectPrev,
-             .limitsEnableSelected, .limitsDisableSelected:
+        case .closeOverlay:
             return true
         default:
             return false

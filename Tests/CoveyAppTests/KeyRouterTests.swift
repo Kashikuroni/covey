@@ -156,25 +156,4 @@ final class KeyRouterTests: XCTestCase {
         XCTAssertNil(KeyRouter.route(key(" "), context: ctx(focus: .terminal)))
     }
 
-    func testLimitsModeNavigationAndToggleKeys() {
-        let limits = ctx(mode: .limits)
-        XCTAssertEqual(KeyRouter.route(key("j"), context: limits), .limitsSelectNext)
-        XCTAssertEqual(KeyRouter.route(key("k"), context: limits), .limitsSelectPrev)
-        XCTAssertEqual(KeyRouter.route(key("h"), context: limits), .limitsDisableSelected)
-        XCTAssertEqual(KeyRouter.route(key("l"), context: limits), .limitsEnableSelected)
-        // Cyrillic JCUKEN keys at the same physical position work too (latinize).
-        XCTAssertEqual(KeyRouter.route(key("о"), context: limits), .limitsSelectNext)
-        XCTAssertEqual(KeyRouter.route(key("л"), context: limits), .limitsSelectPrev)
-        XCTAssertEqual(KeyRouter.route(key("р"), context: limits), .limitsDisableSelected)
-        XCTAssertEqual(KeyRouter.route(key("д"), context: limits), .limitsEnableSelected)
-        // Anything else still closes the popover.
-        XCTAssertEqual(KeyRouter.route(key("q"), context: limits), .closeOverlay)
-    }
-
-    func testLimitsModeOwnsKeysWhenTerminalWasFocused() {
-        let limits = ctx(mode: .limits, focus: .terminal)
-
-        XCTAssertEqual(KeyRouter.route(key("j"), context: limits), .limitsSelectNext)
-        XCTAssertEqual(KeyRouter.route(key("q"), context: limits), .closeOverlay)
-    }
 }

@@ -56,7 +56,6 @@ final class UsageHeaderTests: XCTestCase {
         ])
         XCTAssertTrue(snapshot.windows.isEmpty)
         XCTAssertNil(codexHeaderWindow(snapshot))
-        XCTAssertNil(codexChip(snapshot: snapshot, plan: "Pro"))
     }
 
     func testCodexHeaderWindowHandlesArbitraryLabelsAndMissingWindows() {
@@ -84,31 +83,34 @@ final class UsageHeaderTests: XCTestCase {
         let codex = CodexRateLimitsSnapshot(
             primary: LabeledWindow(label: "5h", window: UsageWindow(utilization: 8, resetUnix: 1)),
             secondary: LabeledWindow(label: "7d", window: UsageWindow(utilization: 18, resetUnix: 2)))
-        let segs = headerSegments(usage: usage, usageError: nil, codexUsage: codex)
+        let segs = headerSegments(usage: usage, usageError: nil, codexUsage: codex,
+                                  now: Date(timeIntervalSince1970: 100))
         XCTAssertEqual(segs, [
-            HeaderSegment(label: "Claude", value: "65%", level: .warn),
-            HeaderSegment(label: "Codex", value: "18%", level: .ok),
-            HeaderSegment(label: "GLM", value: "—", level: nil),
+            HeaderSegment(label: "Claude", windowTag: "5h", value: "65%", level: .warn),
+            HeaderSegment(label: "Codex", windowTag: "5h", value: "8%", level: .ok),
+            HeaderSegment(label: "GLM", windowTag: nil, value: "—", level: nil),
         ])
     }
 
     func testHeaderSegmentsKeepProviderNamesAndPlaceholdersOnError() {
-        let segs = headerSegments(usage: nil, usageError: "network", codexUsage: nil)
+        let segs = headerSegments(usage: nil, usageError: "network", codexUsage: nil,
+                                  now: Date(timeIntervalSince1970: 100))
         XCTAssertEqual(segs, [
-            HeaderSegment(label: "Claude", value: "—", level: nil),
-            HeaderSegment(label: "Codex", value: "—", level: nil),
-            HeaderSegment(label: "GLM", value: "—", level: nil),
+            HeaderSegment(label: "Claude", windowTag: nil, value: "—", level: nil),
+            HeaderSegment(label: "Codex", windowTag: nil, value: "—", level: nil),
+            HeaderSegment(label: "GLM", windowTag: nil, value: "—", level: nil),
         ])
     }
 
     func testHeaderSegmentsNeverOmitAbsentProviders() {
         let usage = Usage(fiveHour: UsageWindow(utilization: 5, resetUnix: nil),
                           sevenDay: nil, sevenDaySonnet: nil)
-        let segs = headerSegments(usage: usage, usageError: nil, codexUsage: nil)
+        let segs = headerSegments(usage: usage, usageError: nil, codexUsage: nil,
+                                  now: Date(timeIntervalSince1970: 100))
         XCTAssertEqual(segs, [
-            HeaderSegment(label: "Claude", value: "5%", level: .ok),
-            HeaderSegment(label: "Codex", value: "—", level: nil),
-            HeaderSegment(label: "GLM", value: "—", level: nil),
+            HeaderSegment(label: "Claude", windowTag: "5h", value: "5%", level: .ok),
+            HeaderSegment(label: "Codex", windowTag: nil, value: "—", level: nil),
+            HeaderSegment(label: "GLM", windowTag: nil, value: "—", level: nil),
         ])
     }
 

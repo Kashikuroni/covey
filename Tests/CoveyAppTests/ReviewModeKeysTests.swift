@@ -71,16 +71,11 @@ final class ReviewModeKeysTests: XCTestCase {
     }
 
     func testTheOverlaysOwnKeysAct() {
-        XCTAssertEqual(overlay(.limits, vim: true, KeyInput(char: "j")), .limitsSelectNext)
-        XCTAssertEqual(overlay(.limits, vim: true, KeyInput(char: "k")), .limitsSelectPrev)
-        XCTAssertEqual(overlay(.limits, vim: true, KeyInput(char: "h")), .limitsDisableSelected)
-        XCTAssertEqual(overlay(.limits, vim: true, KeyInput(char: "l")), .limitsEnableSelected)
-        XCTAssertEqual(overlay(.limits, vim: true, KeyInput(char: "q")), .closeOverlay)
         XCTAssertEqual(overlay(.help, vim: true, KeyInput(char: "x")), .closeOverlay)
     }
 
     func testEscapeClosesTheOverlayWhateverTheVimMode() {
-        for mode in [InputMode.limits, .help, .selectSession] {
+        for mode in [InputMode.help, .selectSession] {
             for vim in [true, false] {
                 XCTAssertEqual(overlay(mode, vim: vim, KeyInput(special: .escape)), .closeOverlay,
                                "\(mode) vim \(vim)")
@@ -95,7 +90,6 @@ final class ReviewModeKeysTests: XCTestCase {
                       KeyInput(char: "q", isControl: true), KeyInput(char: "h", isControl: true),
                       KeyInput(char: "l", isControl: true), KeyInput(char: "\\", isControl: true)]
         for key in chords {
-            XCTAssertNil(overlay(.limits, vim: false, key), "\(key)")
             XCTAssertNil(overlay(.help, vim: false, key), "\(key)")
         }
         XCTAssertNil(overlay(.selectSession, vim: true, focus: .sessions, KeyInput(char: "2")),

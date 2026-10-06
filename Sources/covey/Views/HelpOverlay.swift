@@ -20,6 +20,7 @@ let helpGroups: [(String, [(String, String)])] = [
         ("K / J", "move session up / down"),
     ]),
     ("view", [
+        ("⌘T", "open / close terminal"),
         ("[ ] { }", "resize split"),
         ("⌃h / ⌃l", "cycle focus: list · agent · shell · inspector"),
         ("⌃\\", "toggle split pane focus"),

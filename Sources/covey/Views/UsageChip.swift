@@ -49,32 +49,6 @@ struct AgentUsageChip: Equatable {
     let windows: [LabeledWindow]
 }
 
-/// A plan badge that just repeats the agent name is noise — the generic
-/// "Claude" fallback (unrecognized rate_limit_tier) collides with the name
-/// label. Drop it in that case.
-private func distinctPlan(_ plan: String?, name: String) -> String? {
-    guard let plan, plan.caseInsensitiveCompare(name) != .orderedSame else { return nil }
-    return plan
-}
-
-/// Claude chip from the polled Usage (nil when there's no usage snapshot).
-func claudeChip(usage: Usage?, plan: String?) -> AgentUsageChip? {
-    guard let usage else { return nil }
-    var windows: [LabeledWindow] = []
-    if let w = usage.fiveHour { windows.append(LabeledWindow(label: "5h", window: w)) }
-    if let w = usage.sevenDay { windows.append(LabeledWindow(label: "7d", window: w)) }
-    if let w = usage.sevenDaySonnet { windows.append(LabeledWindow(label: "S 7d", window: w)) }
-    return AgentUsageChip(name: "Claude", plan: distinctPlan(plan, name: "Claude"),
-                          windows: windows)
-}
-
-/// Codex chip from the latest merged snapshot (nil when there are no windows).
-func codexChip(snapshot: CodexRateLimitsSnapshot?, plan: String?) -> AgentUsageChip? {
-    guard let snapshot, !snapshot.windows.isEmpty else { return nil }
-    return AgentUsageChip(name: "Codex", plan: distinctPlan(plan, name: "Codex"),
-                          windows: snapshot.windows)
-}
-
 /// GLM chip from the normalized quota: the two windows share the chip
 /// renderer, so each becomes a labeled `UsageWindow` — percent straight from
 /// `used_percent`, `reset_at` ms converted to Unix seconds.
@@ -105,50 +79,32 @@ func glmPlanLabel(_ raw: String) -> String? {
     return raw.prefix(1).uppercased() + raw.dropFirst()
 }
 
-/// The most-used GLM window; the compact header has one GLM slot.
-/// One GLM window in the header block: its label and rounded percent.
-struct GLMHeaderRow: Equatable {
-    let label: String
-    let pct: Int
+/// The 7d takeover cadence: 30 s of 7d every 3 minutes (a 210 s cycle), so a
+/// burnt week surfaces without stacking a second 5h/7d row in the header.
+func weeklyBlinkActive(now: Date) -> Bool {
+    Int(now.timeIntervalSince1970) % 210 < 30
 }
 
-/// Both GLM windows for the header, in 5h → 7d order: the chip stacks them
-/// as two rows, the menu bar joins them into one inline value.
-func glmHeaderRows(_ quota: GLMQuota?) -> [GLMHeaderRow] {
-    guard let windows = glmChip(quota: quota)?.windows else { return [] }
-    return windows.compactMap { labeled in
-        displayUsagePercent(labeled.window.utilization).map { GLMHeaderRow(label: labeled.label, pct: $0) }
+private func isRedWindow(_ window: UsageWindow) -> Bool {
+    displayUsagePercent(window.utilization).map { usageLevel($0) == .err } ?? false
+}
+
+/// The ONE window a provider's header slot shows: the 5h window normally; a
+/// red (≥80 %) 7d window takes the slot while the blink phase is active; a
+/// lone 7d window keeps the slot permanently.
+func headerWindow(fiveHour: UsageWindow?, sevenDay: UsageWindow?,
+                  blinkActive: Bool) -> (label: String?, window: UsageWindow?) {
+    switch (fiveHour, sevenDay) {
+    case (nil, nil):
+        return (nil, nil)
+    case (nil, let seven?):
+        return ("7d", seven)
+    case (_?, let seven?) where blinkActive && isRedWindow(seven):
+        return ("7d", seven)
+    case (let five?, _):
+        return ("5h", five)
     }
 }
-
-/// The GLM segment's inline value: "20·4%" (5h·7d); a single window stays "75%".
-func glmHeaderInlineValue(_ rows: [GLMHeaderRow]) -> String? {
-    switch rows.count {
-    case 0: return nil
-    case 1: return "\(rows[0].pct)%"
-    default: return "\(rows[0].pct)·\(rows[1].pct)%"
-    }
-}
-
-/// The segment's color is set by its most alarming window.
-func glmHeaderLevel(_ rows: [GLMHeaderRow]) -> UsageLevel? {
-    func severity(_ level: UsageLevel) -> Int { level == .err ? 2 : level == .warn ? 1 : 0 }
-    return rows.map { usageLevel($0.pct) }.max { severity($0) < severity($1) }
-}
-
-/// Short fetch codes → panel text; unknown codes pass through. The no-key
-/// text names where to fix it — the menu-bar panel has no key editor.
-func glmErrorText(_ error: String?) -> String {
-    switch error {
-    case nil: return "No usage data"
-    case "no auth": return "API key not set — add it in the limits window"
-    case "net": return "Network error"
-    case "parse": return "Unexpected response"
-    case let code? where Int(code) != nil: return "HTTP \(code)"
-    default: return error ?? "No usage data"
-    }
-}
-
 
 /// The most-used Codex window across every rate-limit bucket. The compact
 /// header has one Codex slot, so it surfaces whichever limit is closest.
@@ -158,73 +114,76 @@ func codexHeaderWindow(_ snapshot: CodexRateLimitsSnapshot?) -> UsageWindow? {
     }?.window
 }
 
-/// One compact top-bar segment: a provider label with its threshold-colored
-/// percent, or a neutral em dash while no usage snapshot is available.
+/// Codex's 5h and 7d windows across buckets (labels end in "5h"/"7d"; foreign
+/// buckets carry a "name 5h" prefix). A multi-bucket snapshot keeps the most
+/// burnt window of each kind. Exotic labels match neither and fall back to
+/// `codexHeaderWindow`, unlabeled.
+func codexHeaderWindows(_ snapshot: CodexRateLimitsSnapshot?)
+    -> (fiveHour: UsageWindow?, sevenDay: UsageWindow?) {
+    guard let snapshot else { return (nil, nil) }
+    var five: UsageWindow?
+    var seven: UsageWindow?
+    for labeled in snapshot.windows {
+        if labeled.label.hasSuffix("5h"),
+           (five?.utilization ?? -1) < labeled.window.utilization {
+            five = labeled.window
+        } else if labeled.label.hasSuffix("7d"),
+                  (seven?.utilization ?? -1) < labeled.window.utilization {
+            seven = labeled.window
+        }
+    }
+    return (five, seven)
+}
+
+/// One compact top-bar segment: a provider label, the window tag it is
+/// showing ("5h"/"7d"; nil when the label is exotic or there is no data),
+/// and a threshold-colored percent — or a neutral em dash with no snapshot.
 struct HeaderSegment: Equatable {
     let label: String
+    let windowTag: String?
     let value: String
     let level: UsageLevel?
 }
 
 /// Claude, Codex, and GLM segments for the compact header, in display order.
-/// The Claude/Codex slots are stable; a provider without data shows an em
-/// dash. GLM's slot appears only while its polling is enabled — a provider
-/// the user turned off should not occupy the header.
+/// Only providers enabled in settings occupy the bar, and each shows ONE
+/// window: 5h normally, with a red 7d taking the slot for a 30 s blink every
+/// 3 minutes (a lone 7d window is permanent) — no stacked 5h/7d rows.
 func headerSegments(usage: Usage?, usageError: String?,
                     codexUsage: CodexRateLimitsSnapshot?,
-                    glmQuota: GLMQuota? = nil, glmEnabled: Bool = true) -> [HeaderSegment] {
-    func segment(_ label: String, _ window: UsageWindow?) -> HeaderSegment {
-        guard let window, let pct = displayUsagePercent(window.utilization) else {
-            return HeaderSegment(label: label, value: "—", level: nil)
+                    glmQuota: GLMQuota? = nil, glmEnabled: Bool = true,
+                    claudeEnabled: Bool = true, codexEnabled: Bool = true,
+                    now: Date = Date()) -> [HeaderSegment] {
+    let blink = weeklyBlinkActive(now: now)
+    func segment(_ label: String, _ pick: (label: String?, window: UsageWindow?)) -> HeaderSegment {
+        guard let window = pick.window, let pct = displayUsagePercent(window.utilization) else {
+            return HeaderSegment(label: label, windowTag: nil, value: "—", level: nil)
         }
-        return HeaderSegment(label: label, value: "\(pct)%", level: usageLevel(pct))
+        return HeaderSegment(label: label, windowTag: pick.label,
+                             value: "\(pct)%", level: usageLevel(pct))
     }
-    var segments = [
-        segment("Claude", usage?.fiveHour),
-        segment("Codex", codexHeaderWindow(codexUsage)),
-    ]
+    let codexPair = codexHeaderWindows(codexUsage)
+    let codexPick = headerWindow(fiveHour: codexPair.fiveHour,
+                                 sevenDay: codexPair.sevenDay, blinkActive: blink)
+    let codex = codexPick.window != nil
+        ? codexPick
+        : (label: nil, window: codexHeaderWindow(codexUsage))   // exotic labels
+    var segments: [HeaderSegment] = []
+    if claudeEnabled {
+        segments.append(segment("Claude", headerWindow(fiveHour: usage?.fiveHour,
+                                                       sevenDay: usage?.sevenDay,
+                                                       blinkActive: blink)))
+    }
+    if codexEnabled {
+        segments.append(segment("Codex", codex))
+    }
     if glmEnabled {
-        let rows = glmHeaderRows(glmQuota)
-        segments.append(HeaderSegment(label: "GLM",
-                                      value: glmHeaderInlineValue(rows) ?? "—",
-                                      level: glmHeaderLevel(rows)))
+        segments.append(segment("GLM", headerWindow(
+            fiveHour: glmQuota?.limits.fiveHours?.usageWindow,
+            sevenDay: glmQuota?.limits.weekly?.usageWindow,
+            blinkActive: blink)))
     }
     return segments
-}
-
-/// Stable provider row for the limits detail popover. A row exists even when
-/// its provider has no snapshot, in which case `emptyMessage` explains why.
-struct LimitsRowModel: Equatable, Identifiable {
-    var id: UsageProvider { provider }
-    let provider: UsageProvider
-    let chip: AgentUsageChip
-    let enabled: Bool
-    let stale: Bool
-    let emptyMessage: String?
-}
-
-func limitsRows(usage: Usage?, plan: String?, error: String?,
-                codexUsage: CodexRateLimitsSnapshot?, codexPlan: String?,
-                claudeEnabled: Bool, codexEnabled: Bool, codexError: String? = nil,
-                glmQuota: GLMQuota? = nil, glmEnabled: Bool = true, glmError: String? = nil) -> [LimitsRowModel] {
-    let claude = claudeChip(usage: usage, plan: plan)
-        ?? AgentUsageChip(name: "Claude", plan: distinctPlan(plan, name: "Claude"), windows: [])
-    let codex = codexChip(snapshot: codexUsage, plan: codexPlan)
-        ?? AgentUsageChip(name: "Codex", plan: distinctPlan(codexPlan, name: "Codex"), windows: [])
-    let glm = glmChip(quota: glmQuota)
-        ?? AgentUsageChip(name: "GLM", plan: glmPlanLabel(glmQuota?.plan ?? "") , windows: [])
-
-    return [
-        LimitsRowModel(provider: .claude, chip: claude, enabled: claudeEnabled,
-                       stale: error != nil && !claude.windows.isEmpty,
-                       emptyMessage: claude.windows.isEmpty ? (error ?? "No usage data") : nil),
-        LimitsRowModel(provider: .codex, chip: codex, enabled: codexEnabled,
-                       stale: false,
-                       emptyMessage: codex.windows.isEmpty ? (codexError ?? "No usage data") : nil),
-        LimitsRowModel(provider: .glm, chip: glm, enabled: glmEnabled,
-                       stale: glmError != nil && !glm.windows.isEmpty,
-                       emptyMessage: glm.windows.isEmpty ? glmErrorText(glmError) : nil),
-    ]
 }
 
 /// Localized "24 июля · 14:32" — day + full month name (in whatever case
@@ -248,17 +207,21 @@ struct UsageChip: View {
     let codexUsage: CodexRateLimitsSnapshot?
     var glmQuota: GLMQuota? = nil
     var glmEnabled: Bool = true
+    var claudeEnabled: Bool = true
+    var codexEnabled: Bool = true
     let tk: Tokens
-    /// Клик по часам: открывает модалку провайдеров (⌘L).
+    /// Клик по часам: открывает модалку провайдеров.
     var onClockTap: (() -> Void)? = nil
 
     var body: some View {
-        // Ticks every minute so the clock and countdown-derived data advance
-        // even when the snapshot is Equatable-equal (no re-render otherwise).
-        TimelineView(.everyMinute) { ctx in
+        // Ticks every 2 s: the clock advances, and the 30-s 7d blink phase
+        // must switch in and out even while snapshots are Equatable-equal.
+        TimelineView(.periodic(from: .now, by: 2)) { ctx in
             let segments = headerSegments(usage: usage, usageError: usageError,
                                           codexUsage: codexUsage,
-                                          glmQuota: glmQuota, glmEnabled: glmEnabled)
+                                          glmQuota: glmQuota, glmEnabled: glmEnabled,
+                                          claudeEnabled: claudeEnabled,
+                                          codexEnabled: codexEnabled, now: ctx.date)
             HStack(spacing: 12) {
                 ForEach(Array(segments.enumerated()), id: \.offset) { index, seg in
                     if index > 0 { divider }
@@ -269,7 +232,7 @@ struct UsageChip: View {
             }
             .contentShape(Rectangle())
             .onTapGesture { onClockTap?() }
-            .help("Providers — ⌘L")
+            .help("Providers")
         }
     }
 
@@ -277,26 +240,14 @@ struct UsageChip: View {
         Rectangle().fill(tk.bd3).frame(width: 1, height: 12)
     }
 
-    private var glmRows: [GLMHeaderRow] { glmHeaderRows(glmQuota) }
-
     @ViewBuilder
     private func segmentView(_ seg: HeaderSegment) -> some View {
         HStack(spacing: 6) {
             Text(seg.label).foregroundStyle(brandColor(seg.label))
-            if seg.label == "GLM", !glmRows.isEmpty {
-                // Both GLM windows stacked (5h above 7d) at 10pt so the pair
-                // fits the 32pt top bar; the "GLM" label stays inline-sized.
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(glmRows, id: \.label) { row in
-                        HStack(spacing: 4) {
-                            Text(row.label).foregroundStyle(tk.t3)
-                            Text("\(row.pct)%")
-                                .foregroundStyle(levelColor(usageLevel(row.pct), tk: tk))
-                        }
-                        .font(.system(size: 10, design: .monospaced))
-                    }
-                }
-            } else if let level = seg.level {
+            if let tag = seg.windowTag {
+                Text(tag).foregroundStyle(tk.t3)
+            }
+            if let level = seg.level {
                 Text(seg.value).foregroundStyle(levelColor(level, tk: tk))
             } else {
                 Text(seg.value).foregroundStyle(tk.t3)

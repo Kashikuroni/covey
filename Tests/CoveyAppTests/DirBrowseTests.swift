@@ -39,18 +39,15 @@ final class DirBrowseTests: XCTestCase {
     func testFieldSequence() {
         XCTAssertEqual(
             formFieldSequence(isRepo: false, showWorktreeToggle: false,
-                              showBase: false, customAgent: false,
-                              showProvider: true),
-            [.name, .dir, .agent, .provider])
+                              showBase: false, customAgent: false),
+            [.name, .dir, .agent])
         XCTAssertEqual(
             formFieldSequence(isRepo: true, showWorktreeToggle: true,
-                              showBase: true, customAgent: false,
-                              showProvider: false),
+                              showBase: true, customAgent: false),
             [.name, .dir, .branch, .worktree, .base, .agent])
         XCTAssertEqual(
             formFieldSequence(isRepo: true, showWorktreeToggle: false,
-                              showBase: false, customAgent: true,
-                              showProvider: false),
+                              showBase: false, customAgent: true),
             [.name, .dir, .branch, .agent, .customAgent])
     }
 }

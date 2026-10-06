@@ -9,7 +9,7 @@ public final class TraceStore {
     private let now: () -> Date
     private let queue = DispatchQueue(label: "covey.trace.store")
 
-    public init(root: String = NSHomeDirectory() + "/.covey/traces",
+    public init(root: String = CoveyPaths.path("traces"),
                 retention: TimeInterval = 7 * 24 * 3600,
                 now: @escaping () -> Date = Date.init) {
         self.root = root; self.retention = retention; self.now = now

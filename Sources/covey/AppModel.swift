@@ -91,7 +91,7 @@ public final class AppModel {
     }
     /// Сколько agent-панелей сейчас в окне (лимит 8).
     var agentPaneCount: Int { agentPanes.count }
-    /// Модалка провайдеров (⌘L / клик по часам): мониторинг и ключ z.ai.
+    /// Модалка провайдеров (клик по часам): мониторинг и ключ z.ai.
     public var showProvidersPanel = false {
         didSet {
             // Клавиатуру терминала отдаём шиту — как у modal.
@@ -186,8 +186,6 @@ public final class AppModel {
     /// Which provider the limits detail popover highlights — j/k moves it, h/l
     /// disables/enables it. Resets to `.claude` every time the popover opens;
     /// not persisted, this is transient keyboard-navigation state.
-    public enum LimitsProvider: Equatable, CaseIterable { case claude, codex, glm }
-    public private(set) var limitsSelectedProvider: LimitsProvider = .claude
     // Codex limits are consumed only in-module (TopBar) + @testable tests, so
     // these stay internal — their types (CodexRateLimitsSnapshot/State) are too.
     var codexUsage: CodexRateLimitsSnapshot? { usageStore.snapshot.codexUsage }
@@ -708,10 +706,9 @@ public final class AppModel {
     @discardableResult
     public func createFull(name: String?, dir: String, agent: String,
                            terminal: Bool, worktree: WorktreeSpec?,
-                           model: String?, effort: String?,
-                           providerId: String? = nil) async -> String? {
+                           model: String?, effort: String?) async -> String? {
         let (resolved, providerError) = Self.resolveProviderLaunch(
-            agent: agent, selectedProviderId: providerId
+            agent: agent, selectedProviderId: nil
         )
         if let providerError { return providerError }
         guard let resolved else { return "Unable to resolve Claude Code provider." }
@@ -1144,7 +1141,7 @@ public final class AppModel {
     }
 
     func restoreCommandPaletteTerminalFocus() {
-        guard modal == nil, inputMode != .limits, focus == .terminal else { return }
+        guard modal == nil, focus == .terminal else { return }
         sendTerminalCommand(.focus)
     }
 
@@ -1302,10 +1299,15 @@ public final class AppModel {
             offerThemeRestart()
         case .showProviders:
             showProvidersPanel = true
-        case .showLimitsDetail:
-            if focus == .terminal { sendTerminalCommand(.blur) }
-            inputMode = .limits
-            limitsSelectedProvider = .claude
+        case .toggleForecast:
+            // ⌘L: the full-window limits + forecast screen. A toggle, like
+            // the top bar segment — nothing is torn down on the way back.
+            if windowMode == .forecast {
+                windowMode = .sessions
+                syncReviewVisibility()
+            } else {
+                enterForecast()
+            }
         case .focusSessionList:
             focusZone(.session)
         case .focusAgent:
@@ -1525,9 +1527,7 @@ public final class AppModel {
             setFocus(.sessions)
             sendTerminalCommand(.blur)
         case .closeOverlay:
-            let restoreTerminalFocus = inputMode == .limits && focus == .terminal
             inputMode = .normal
-            if restoreTerminalFocus { sendTerminalCommand(.focus) }
         case .enterSelectMode:
             inputMode = .selectSession
         case .resizeSplit(let delta):
@@ -1546,23 +1546,6 @@ public final class AppModel {
             // so a split's shell companion gets its own ⇧Enter.
             guard let target = focusedPane ?? selected else { return }
             Task { try? await client.input(name: target, bytes: [0x1b, 0x0d]) }
-        case .limitsSelectNext, .limitsSelectPrev:
-            let all = LimitsProvider.allCases
-            let i = all.firstIndex(of: limitsSelectedProvider) ?? 0
-            let delta = action == .limitsSelectNext ? 1 : -1
-            limitsSelectedProvider = all[(i + delta + all.count) % all.count]
-        case .limitsEnableSelected:
-            switch limitsSelectedProvider {
-            case .claude: setClaudeUsageEnabled(true)
-            case .codex: setCodexUsageEnabled(true)
-            case .glm: setGlmUsageEnabled(true)
-            }
-        case .limitsDisableSelected:
-            switch limitsSelectedProvider {
-            case .claude: setClaudeUsageEnabled(false)
-            case .codex: setCodexUsageEnabled(false)
-            case .glm: setGlmUsageEnabled(false)
-            }
         case .splitFocusToggle:
             guard let shell = activeShell else { return }
             focusPane(focusedPane == shell ? (focusedAgentPane ?? shell) : shell)

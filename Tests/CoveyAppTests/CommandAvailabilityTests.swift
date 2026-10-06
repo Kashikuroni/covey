@@ -114,8 +114,8 @@ final class CommandAvailabilityTests: XCTestCase {
     func testReviewModeKeepsTheToggleAndAppCommands() {
         let context = CommandContext(reviewOpen: true)
         XCTAssertEqual(CommandRules.availableInReview, [
-            .toggleReview, .toggleTheme, .showProviders,
-            .showLimitsDetail, .settings, .searchLogs,
+            .toggleReview, .toggleForecast, .toggleTheme, .showProviders,
+            .settings, .searchLogs,
         ])
         for command in CommandRules.availableInReview {
             XCTAssertEqual(CommandRules.availability(for: command, context: context), .enabled, "\(command)")

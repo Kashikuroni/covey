@@ -489,50 +489,6 @@ final class AppModelReviewTests: XCTestCase {
         daemon.registry.kill(name: "helper")
     }
 
-    /// The limits overlay opened over Review (its chip stays clickable) owns
-    /// the keys, but only its own: with vim mode off the sessions router maps
-    /// ⇧Tab and ⇧Enter to bytes for the focused terminal — hidden behind
-    /// Review. Esc closes the overlay whatever the vim mode.
-    @MainActor
-    func testTheLimitsOverlayOverReviewSendsNothingToTheHiddenAgent() async throws {
-        let daemon = try TestDaemon()
-        defer { daemon.stop() }
-        let (model, _) = try makeModel(daemon)
-        await model.start()
-        // Created through the client: only then does live output flow.
-        await model.create(dir: "/tmp", agent: "/bin/cat")
-        _ = await eventually { model.sessions.count == 1 }
-        let name = try XCTUnwrap(model.sessions.first?.name)
-        defer { daemon.registry.kill(name: name) }
-        await model.select(name)
-        _ = ReviewFixture(model)
-        model.setVimMode(false)
-        model.focusPane(name)
-        var received: [UInt8] = []
-        model.setTerminalSink(for: name) { received += $0 }
-        // Let the attach preamble land and drop it: it is full of escapes.
-        try await Task.sleep(nanoseconds: 300_000_000)
-        received = []
-
-        await model.toggleReview()
-        model.perform(.showLimitsDetail)
-        XCTAssertEqual(model.inputMode, .limits, "precondition: the limits overlay is open over Review")
-        XCTAssertEqual(model.focus, .terminal, "precondition: the hidden agent had the keyboard")
-        model.applyReviewOverlayKey(KeyInput(isShift: true, special: .tab))
-        model.applyReviewOverlayKey(KeyInput(isShift: true, special: .enter))
-        XCTAssertEqual(model.inputMode, .limits, "a swallowed key leaves the overlay open")
-
-        // `cat` writes its line back: once a marker sent after the keys
-        // echoes, anything the keys sent (ESC [ Z, ESC CR) has come back too.
-        try await Task.sleep(nanoseconds: 100_000_000)
-        await model.sendInput(Array("marker\n".utf8), to: name)
-        let echoed = await eventually { String(decoding: received, as: UTF8.self).contains("marker") }
-        XCTAssertTrue(echoed, "precondition: the session echoes")
-        XCTAssertFalse(received.contains(0x1b), "no key reached the hidden agent")
-
-        model.applyReviewOverlayKey(KeyInput(special: .escape))
-        XCTAssertEqual(model.inputMode, .normal, "Esc closes the overlay")
-    }
 }
 
 /// Wires an `AppModel` for Review without real git: `/tmp` and `/usr` are

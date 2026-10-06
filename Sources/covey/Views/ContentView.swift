@@ -19,7 +19,7 @@ func isCommandW(_ event: NSEvent) -> Bool {
 }
 
 func shouldRestoreCommandPaletteResponder(inputMode: InputMode) -> Bool {
-    inputMode != .limits
+    true   // the limits overlay (the one mode that kept the terminal) is gone
 }
 
 struct ContentView: View {
@@ -108,26 +108,6 @@ struct ContentView: View {
         .overlay(alignment: .bottom) { toastBar }
         .overlay {
             if model.inputMode == .help { HelpOverlay(tk: tokens) }
-        }
-        // Click anywhere outside the limits popover closes it — added below
-        // the popover itself in this call chain so the popover's own taps
-        // are not swallowed by this catcher (later `.overlay` calls draw on
-        // top, so this one, added first, sits underneath).
-        .overlay {
-            if model.inputMode == .limits {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture { model.apply(.closeOverlay) }
-            }
-        }
-        .overlay(alignment: topOverlayAlignment(model.usagePlacement)) {
-            if model.inputMode == .limits {
-                LimitsPanel(model: model)
-                    .padding(.top, 42)
-                    .offset(x: limitsOverlayHorizontalOffset(model.usagePlacement))
-                    .transition(.scale(scale: 0.92, anchor: .top).combined(with: .opacity))
-                    .animation(.spring(response: 0.28, dampingFraction: 0.86), value: model.inputMode)
-            }
         }
         .overlay {
             if model.commandPalettePresented {

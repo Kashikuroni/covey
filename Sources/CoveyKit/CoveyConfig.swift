@@ -49,8 +49,7 @@ public struct CoveyConfig: Codable, Equatable {
     }
 
     public static var defaultPath: String {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".covey/config.json").path
+        CoveyPaths.path("config.json")
     }
 
     /// Presets for the agent picker: the config's list (default agent first)

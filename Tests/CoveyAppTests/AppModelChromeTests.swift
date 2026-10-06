@@ -323,73 +323,12 @@ final class AppModelChromeTests: XCTestCase {
         model.perform(.showKeyboardHelp)
         XCTAssertEqual(model.inputMode, .help)
         model.apply(.closeOverlay)
-        model.perform(.showLimitsDetail)
-        XCTAssertEqual(model.inputMode, .limits)
-        model.apply(.closeOverlay)
         XCTAssertEqual(model.inputMode, .normal)
         model.perform(.newSession)
         XCTAssertEqual(model.modal, .newSession)
         model.modal = nil
         model.apply(.resizeSplit(3))
         XCTAssertEqual(model.splitPct, 41)   // 38 default + 3
-    }
-
-    @MainActor
-    func testLimitsSelectionNavigatesAndTogglesViaApply() async throws {
-        let daemon = try TestDaemon(); defer { daemon.stop() }
-        let monitor = UsageMonitor(path: daemon.path + ".usage.json", legacyPath: daemon.path + ".legacy.json",
-                                   fetchAccount: { Account() },
-                                   resolveCodex: { nil })
-        daemon.attachUsageMonitor(monitor)
-        let (model, _) = try makeModel(daemon)
-        await model.start()
-        model.perform(.showLimitsDetail)
-        XCTAssertEqual(model.limitsSelectedProvider, .claude, "opens with Claude highlighted")
-        model.apply(.limitsSelectNext)
-        XCTAssertEqual(model.limitsSelectedProvider, .codex)
-        model.apply(.limitsDisableSelected)
-        _ = await eventually { !model.codexUsageEnabled && !model.usageSettingsPending }
-        XCTAssertFalse(model.codexUsageEnabled)
-        XCTAssertTrue(model.claudeUsageEnabled, "only the highlighted provider is affected")
-        model.apply(.limitsSelectPrev)
-        XCTAssertEqual(model.limitsSelectedProvider, .claude)
-        model.apply(.limitsDisableSelected)
-        _ = await eventually { !model.claudeUsageEnabled && !model.usageSettingsPending }
-        XCTAssertFalse(model.claudeUsageEnabled)
-        model.apply(.limitsEnableSelected)
-        _ = await eventually { model.claudeUsageEnabled && !model.usageSettingsPending }
-        XCTAssertTrue(model.claudeUsageEnabled)
-        model.apply(.closeOverlay)
-        model.perform(.showLimitsDetail)
-        XCTAssertEqual(model.limitsSelectedProvider, .claude, "reopening resets the highlight")
-    }
-
-    @MainActor
-    func testLimitsSelectionCyclesThroughThreeProviders() async throws {
-        let daemon = try TestDaemon(); defer { daemon.stop() }
-        let monitor = UsageMonitor(path: daemon.path + ".usage.json", legacyPath: daemon.path + ".legacy.json",
-                                   fetchAccount: { Account() },
-                                   resolveCodex: { nil })
-        daemon.attachUsageMonitor(monitor)
-        let (model, _) = try makeModel(daemon)
-        await model.start()
-        model.perform(.showLimitsDetail)
-        XCTAssertEqual(model.limitsSelectedProvider, .claude)
-        model.apply(.limitsSelectNext)
-        XCTAssertEqual(model.limitsSelectedProvider, .codex)
-        model.apply(.limitsSelectNext)
-        XCTAssertEqual(model.limitsSelectedProvider, .glm)
-        model.apply(.limitsSelectNext)
-        XCTAssertEqual(model.limitsSelectedProvider, .claude, "wraps forward past glm")
-        model.apply(.limitsSelectPrev)
-        XCTAssertEqual(model.limitsSelectedProvider, .glm, "wraps backward before claude")
-        model.apply(.limitsDisableSelected)
-        let disabled = await eventually { !model.glmUsageEnabled && !model.usageSettingsPending }
-        XCTAssertTrue(disabled)
-        XCTAssertTrue(model.claudeUsageEnabled)
-        model.apply(.limitsEnableSelected)
-        let enabled = await eventually { model.glmUsageEnabled && !model.usageSettingsPending }
-        XCTAssertTrue(enabled)
     }
 
     @MainActor

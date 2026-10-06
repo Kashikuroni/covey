@@ -30,10 +30,10 @@ final class ForecastLineTests: XCTestCase {
         var forecast = GLMForecast()
         forecast.fiveHours = w(verdict: .fits, headroom: 10)
         forecast.weekly = w(verdict: .tight, headroom: 5)
-        XCTAssertEqual(glmWindowForecast("5h", forecast: forecast)?.verdict, .fits)
-        XCTAssertEqual(glmWindowForecast("7d", forecast: forecast)?.verdict, .tight)
+        XCTAssertEqual(ForecastText.glmWindowForecast("5h", forecast: forecast)?.verdict, .fits)
+        XCTAssertEqual(ForecastText.glmWindowForecast("7d", forecast: forecast)?.verdict, .tight)
         // Чужие метки (Claude/Codex) и нет прогноза — строки нет.
-        XCTAssertNil(glmWindowForecast("S 7d", forecast: forecast))
-        XCTAssertNil(glmWindowForecast("5h", forecast: nil))
+        XCTAssertNil(ForecastText.glmWindowForecast("S 7d", forecast: forecast))
+        XCTAssertNil(ForecastText.glmWindowForecast("5h", forecast: nil))
     }
 }

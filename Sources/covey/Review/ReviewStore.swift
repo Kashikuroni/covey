@@ -1,13 +1,13 @@
 import Foundation
 import CryptoKit
+import CoveyKit
 import CoveyGit
 
 /// Review records at `<root>/<id>.json` plus `<root>/index.json` (worktree →
 /// last comparison). Saves are debounced and atomic, like `StateStore`; the
 /// repository itself is never written to.
 final class ReviewStore: @unchecked Sendable {
-    static let shared = ReviewStore(root: FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".covey/reviews").path)
+    static let shared = ReviewStore(root: CoveyPaths.path("reviews"))
 
     struct Loaded {
         var record: ReviewRecord

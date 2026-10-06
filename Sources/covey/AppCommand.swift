@@ -13,7 +13,7 @@ enum AppCommand: String, CaseIterable, Hashable {
     case toggleViewTerminal
     case toggleReview, toggleSessionsPanel, toggleInspector, toggleAgentTrace
     case toggleStatusBar, toggleTopBar, toggleTheme
-    case showProviders, showLimitsDetail, focusSessionList, focusAgent, focusIssues
+    case showProviders, toggleForecast, focusSessionList, focusAgent, focusIssues
     case focusTerminalSplit, focusTrace, showKeyboardHelp
     case addProject, removeProject, renameProject, settings, searchLogs
 }
@@ -171,7 +171,8 @@ enum CommandCatalog {
                    ["close split", "remove shell", "закрыть сплит", "убрать разделение терминала"],
                    .init(key: "w", modifiers: command, display: "⌘W")),
         descriptor(.toggleViewTerminal, "Open Terminal", .terminal,
-                   ["terminal", "shell", "open terminal", "терминал", "оболочка"]),
+                   ["terminal", "shell", "open terminal", "терминал", "оболочка"],
+                   .init(key: "t", modifiers: command, display: "⌘T")),
 
         descriptor(.toggleReview, "Review", .view,
                    ["review", "code review", "diff review", "toggle review",
@@ -190,10 +191,10 @@ enum CommandCatalog {
         descriptor(.toggleTheme, "Toggle Theme", .view,
                    ["dark light", "color theme", "сменить тему", "темная светлая тема"]),
         descriptor(.showProviders, "Show Providers", .view,
-                   ["providers", "usage monitoring", "glm key", "провайдеры", "мониторинг лимитов"],
+                   ["providers", "usage monitoring", "glm key", "провайдеры", "мониторинг лимитов"]),
+        descriptor(.toggleForecast, "Forecast", .view,
+                   ["usage limits", "forecast", "прогноз лимитов", "лимиты", "детали лимитов"],
                    .init(key: "l", modifiers: command, display: "⌘L")),
-        descriptor(.showLimitsDetail, "Show Limits Detail", .view,
-                   ["usage limits", "claude codex limits", "показать лимиты", "детали лимитов"]),
         descriptor(.focusSessionList, "Focus Session List", .view,
                    ["focus sessions", "фокус на сессии", "перейти к списку сессий"],
                    .init(key: "1", modifiers: .control, display: "⌃1")),

@@ -60,8 +60,7 @@ struct CoveyApp: App {
             .task {
                 guard model == nil else { return }
                 do {
-                    let store = StateStore(path: FileManager.default
-                        .homeDirectoryForCurrentUser.appendingPathComponent(".covey/state.json").path)
+                    let store = StateStore(path: CoveyPaths.path("state.json"))
                     let m = AppModel(client: try CoveyApp.makeClient(),
                                      makeClient: CoveyApp.makeClient,
                                      store: store)
@@ -104,6 +103,8 @@ struct CoveyApp: App {
                 CatalogCommandButton(.renameSession, model: model)
             }
             CommandMenu("Terminal") {
+                CatalogCommandButton(.toggleViewTerminal, model: model)
+                Divider()
                 CatalogCommandButton(.splitTerminalVertically, model: model)
                 CatalogCommandButton(.splitTerminalHorizontally, model: model)
                 CatalogCommandButton(.closeTerminalSplit, model: model)
@@ -121,7 +122,8 @@ struct CoveyApp: App {
                 CatalogCommandToggle(.toggleInspector, model: model,
                                      isOn: model?.showInspector ?? false)
                 Divider()
-                CatalogCommandButton(.showLimitsDetail, model: model)
+                CatalogCommandToggle(.toggleForecast, model: model,
+                                     isOn: model?.windowMode == .forecast)
                 Divider()
                 CatalogCommandButton(.focusSessionList, model: model)
                 CatalogCommandButton(.focusAgent, model: model)
@@ -146,8 +148,7 @@ struct CoveyApp: App {
         let binDir = URL(fileURLWithPath: Bundle.main.executablePath ?? CommandLine.arguments[0])
             .deletingLastPathComponent()
         let daemonBinary = binDir.appendingPathComponent("coveyd").path
-        let socket = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".covey/coveyd.sock").path
+        let socket = CoveyPaths.socketPath
         try DaemonLauncher.ensureDaemon(socketPath: socket, binaryPath: daemonBinary)
         let client = IPCClient(path: socket)
         try client.connect()

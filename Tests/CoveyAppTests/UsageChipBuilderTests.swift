@@ -2,88 +2,6 @@ import XCTest
 @testable import covey
 
 final class UsageChipBuilderTests: XCTestCase {
-    func testClaudeChipFromUsage() {
-        let u = Usage(fiveHour: UsageWindow(utilization: 12, resetUnix: 1),
-                      sevenDay: UsageWindow(utilization: 40, resetUnix: 2),
-                      sevenDaySonnet: nil)
-        let chip = claudeChip(usage: u, plan: "Max 5×")
-        XCTAssertEqual(chip?.name, "Claude")
-        XCTAssertEqual(chip?.plan, "Max 5×")
-        XCTAssertEqual(chip?.windows.map(\.label), ["5h", "7d"])
-    }
-
-    func testClaudeChipNilWhenNoUsage() {
-        XCTAssertNil(claudeChip(usage: nil, plan: "Max"))
-    }
-
-    func testPlanDroppedWhenItDuplicatesName() {
-        // Unrecognized rate_limit_tier → planLabel fallback "Claude", which
-        // would repeat the brand-name label. It must be suppressed.
-        let u = Usage(fiveHour: UsageWindow(utilization: 10, resetUnix: 1),
-                      sevenDay: nil, sevenDaySonnet: nil)
-        XCTAssertNil(claudeChip(usage: u, plan: "Claude")?.plan)
-        XCTAssertNil(claudeChip(usage: u, plan: "claude")?.plan)   // case-insensitive
-        XCTAssertEqual(claudeChip(usage: u, plan: "Max 5×")?.plan, "Max 5×")
-    }
-
-    func testCodexChipFromSnapshot() {
-        let snap = CodexRateLimitsSnapshot(
-            primary: LabeledWindow(label: "5h", window: UsageWindow(utilization: 8, resetUnix: 1)),
-            secondary: LabeledWindow(label: "7d", window: UsageWindow(utilization: 22, resetUnix: 2)))
-        let chip = codexChip(snapshot: snap, plan: "Pro")
-        XCTAssertEqual(chip?.name, "Codex")
-        XCTAssertEqual(chip?.plan, "Pro")
-        XCTAssertEqual(chip?.windows.map(\.label), ["5h", "7d"])
-    }
-
-    func testCodexChipNilWhenNoSnapshot() {
-        XCTAssertNil(codexChip(snapshot: nil, plan: "Pro"))
-        XCTAssertNil(codexChip(snapshot: CodexRateLimitsSnapshot(primary: nil, secondary: nil),
-                               plan: "Pro"))
-    }
-
-    func testLimitsRowsAlwaysContainAllProvidersInOrder() {
-        let rows = limitsRows(
-            usage: nil, plan: nil, error: nil,
-            codexUsage: nil, codexPlan: nil,
-            claudeEnabled: true, codexEnabled: true
-        )
-
-        XCTAssertEqual(rows.map(\.provider), [.claude, .codex, .glm])
-        XCTAssertEqual(rows.map(\.chip.name), ["Claude", "Codex", "GLM"])
-        XCTAssertEqual(rows.map(\.emptyMessage), [
-            "No usage data", "No usage data", "No usage data",
-        ])
-    }
-
-    func testLimitsRowsUseProviderErrorOnlyForItsEmptyRow() {
-        let rows = limitsRows(
-            usage: nil, plan: nil, error: "Claude offline",
-            codexUsage: nil, codexPlan: nil,
-            claudeEnabled: true, codexEnabled: false,
-            glmQuota: nil, glmEnabled: false, glmError: "401"
-        )
-
-        XCTAssertEqual(rows.map(\.emptyMessage), [
-            "Claude offline", "No usage data", "HTTP 401",
-        ])
-        XCTAssertEqual(rows.map(\.enabled), [true, false, false])
-    }
-
-    func testLimitsRowsKeepUsageAndMarkLaterErrorAsStale() {
-        let usage = Usage(fiveHour: UsageWindow(utilization: 17, resetUnix: 1),
-                          sevenDay: nil, sevenDaySonnet: nil)
-        let rows = limitsRows(
-            usage: usage, plan: "Max", error: "network",
-            codexUsage: nil, codexPlan: nil,
-            claudeEnabled: true, codexEnabled: true
-        )
-
-        XCTAssertEqual(rows[0].chip.windows.map(\.label), ["5h"])
-        XCTAssertTrue(rows[0].stale)
-        XCTAssertNil(rows[0].emptyMessage)
-    }
-
     // MARK: - GLM
 
     private var sampleQuota: GLMQuota {
@@ -111,94 +29,122 @@ final class UsageChipBuilderTests: XCTestCase {
         XCTAssertNil(glmChip(quota: GLMQuota(plan: "max", limits: GLMLimits())))
     }
 
-    func testGLMHeaderRowsListBothWindowsInOrder() {
-        XCTAssertEqual(glmHeaderRows(sampleQuota),
-                       [GLMHeaderRow(label: "5h", pct: 20), GLMHeaderRow(label: "7d", pct: 4)])
-        XCTAssertEqual(glmHeaderRows(nil), [])
+    // MARK: - header single-window pick
 
-        let fiveOnly = GLMQuota(plan: "max", limits: GLMLimits(
-            fiveHours: GLMLimitWindow(total: 28000, used: 21000, remaining: 7000,
-                                      usedPercent: 75, remainingPercent: 25,
-                                      resetAt: 1)))
-        XCTAssertEqual(glmHeaderRows(fiveOnly), [GLMHeaderRow(label: "5h", pct: 75)])
+    /// Pinned moments of the 210 s cycle: the first 30 s blink 7d.
+    private let blinkOn = Date(timeIntervalSince1970: 10)
+    private let blinkOff = Date(timeIntervalSince1970: 100)
+
+    func testWeeklyBlinkPhase() {
+        XCTAssertTrue(weeklyBlinkActive(now: Date(timeIntervalSince1970: 0)))
+        XCTAssertTrue(weeklyBlinkActive(now: Date(timeIntervalSince1970: 29)))
+        XCTAssertFalse(weeklyBlinkActive(now: Date(timeIntervalSince1970: 30)))
+        XCTAssertFalse(weeklyBlinkActive(now: Date(timeIntervalSince1970: 209)))
+        XCTAssertTrue(weeklyBlinkActive(now: Date(timeIntervalSince1970: 210)),
+                      "the 3-minute cycle wraps")
     }
 
-    func testGLMHeaderInlineValueJoinsBothWindows() {
-        XCTAssertEqual(glmHeaderInlineValue([GLMHeaderRow(label: "5h", pct: 20),
-                                             GLMHeaderRow(label: "7d", pct: 4)]), "20·4%")
-        XCTAssertEqual(glmHeaderInlineValue([GLMHeaderRow(label: "5h", pct: 75)]), "75%")
-        XCTAssertNil(glmHeaderInlineValue([]))
+    func testHeaderWindowShows5hByDefault() {
+        let pick = headerWindow(fiveHour: UsageWindow(utilization: 40, resetUnix: 1),
+                                sevenDay: UsageWindow(utilization: 90, resetUnix: 2),
+                                blinkActive: false)
+        XCTAssertEqual(pick.label, "5h")
+        XCTAssertEqual(pick.window?.utilization, 40, "5h wins outside the blink")
     }
 
-    func testGLMHeaderLevelIsTheWorstWindow() {
-        XCTAssertEqual(glmHeaderLevel([GLMHeaderRow(label: "5h", pct: 8),
-                                       GLMHeaderRow(label: "7d", pct: 85)]), .err)
-        XCTAssertEqual(glmHeaderLevel([GLMHeaderRow(label: "5h", pct: 55),
-                                       GLMHeaderRow(label: "7d", pct: 4)]), .warn)
-        XCTAssertEqual(glmHeaderLevel([GLMHeaderRow(label: "5h", pct: 20),
-                                       GLMHeaderRow(label: "7d", pct: 4)]), .ok)
-        XCTAssertNil(glmHeaderLevel([]))
+    func testHeaderWindowRed7dTakesOverDuringBlink() {
+        let borderline = UsageWindow(utilization: 80, resetUnix: 1)
+        XCTAssertEqual(headerWindow(fiveHour: UsageWindow(utilization: 10, resetUnix: 1),
+                                     sevenDay: borderline, blinkActive: true).label,
+                       "7d", "80% is red and takes the slot")
+        XCTAssertEqual(headerWindow(fiveHour: UsageWindow(utilization: 10, resetUnix: 1),
+                                     sevenDay: UsageWindow(utilization: 79, resetUnix: 1),
+                                     blinkActive: true).label,
+                       "5h", "79% is not red")
+        XCTAssertEqual(headerWindow(fiveHour: UsageWindow(utilization: 10, resetUnix: 1),
+                                     sevenDay: borderline, blinkActive: false).label,
+                       "5h", "red 7d outside the blink phase stays hidden")
     }
 
-    func testHeaderSegmentsGLMShowsBothWindowsWithWorstLevel() {
-        let hot = GLMQuota(plan: "max", limits: GLMLimits(
-            fiveHours: GLMLimitWindow(total: 100, used: 90, remaining: 10,
-                                      usedPercent: 90, remainingPercent: 10, resetAt: 1),
-            weekly: GLMLimitWindow(total: 1000, used: 100, remaining: 900,
-                                   usedPercent: 10, remainingPercent: 90, resetAt: 2)))
+    func testHeaderWindowLone7dIsPermanent() {
+        let lone = headerWindow(fiveHour: nil,
+                                sevenDay: UsageWindow(utilization: 45, resetUnix: 1),
+                                blinkActive: false)
+        XCTAssertEqual(lone.label, "7d")
+        XCTAssertEqual(lone.window?.utilization, 45)
+        let none = headerWindow(fiveHour: nil, sevenDay: nil, blinkActive: true)
+        XCTAssertNil(none.window)
+    }
+
+    // MARK: - header segments
+
+    private var twoWindowUsage: Usage {
+        Usage(fiveHour: UsageWindow(utilization: 40, resetUnix: 1),
+              sevenDay: UsageWindow(utilization: 91, resetUnix: 2),
+              sevenDaySonnet: nil)
+    }
+
+    private var twoWindowCodex: CodexRateLimitsSnapshot {
+        CodexRateLimitsSnapshot(
+            primary: LabeledWindow(label: "5h", window: UsageWindow(utilization: 8, resetUnix: 1)),
+            secondary: LabeledWindow(label: "7d", window: UsageWindow(utilization: 18, resetUnix: 2)))
+    }
+
+    func testHeaderSegmentsShowOneWindowPerProvider() {
+        let segs = headerSegments(usage: twoWindowUsage, usageError: nil,
+                                  codexUsage: twoWindowCodex,
+                                  glmQuota: sampleQuota, glmEnabled: true,
+                                  now: blinkOff)
+        XCTAssertEqual(segs.map(\.label), ["Claude", "Codex", "GLM"])
+        XCTAssertEqual(segs.map(\.windowTag), ["5h", "5h", "5h"])
+        XCTAssertEqual(segs.map(\.value), ["40%", "8%", "20%"])
+    }
+
+    func testHeaderSegmentsBlinkSwapsRed7dIntoTheSlot() {
+        let hotCodex = CodexRateLimitsSnapshot(
+            primary: LabeledWindow(label: "5h", window: UsageWindow(utilization: 8, resetUnix: 1)),
+            secondary: LabeledWindow(label: "7d", window: UsageWindow(utilization: 85, resetUnix: 2)))
+        let segs = headerSegments(usage: twoWindowUsage, usageError: nil,
+                                  codexUsage: hotCodex,
+                                  glmQuota: sampleQuota, glmEnabled: true,
+                                  now: blinkOn)
+        XCTAssertEqual(segs.map(\.windowTag), ["7d", "7d", "5h"],
+                       "red 7d takes over; GLM's calm 7d does not")
+        XCTAssertEqual(segs.map(\.value), ["91%", "85%", "20%"])
+        XCTAssertEqual(segs.map(\.level), [.err, .err, .ok])
+    }
+
+    func testHeaderSegmentsShowOnlyEnabledProviders() {
         let segs = headerSegments(usage: nil, usageError: nil, codexUsage: nil,
-                                  glmQuota: hot, glmEnabled: true)
-        XCTAssertEqual(segs.last?.label, "GLM")
-        XCTAssertEqual(segs.last?.value, "90·10%")
-        XCTAssertEqual(segs.last?.level, .err)
+                                  glmQuota: sampleQuota, glmEnabled: false,
+                                  claudeEnabled: false, codexEnabled: true)
+        XCTAssertEqual(segs.map(\.label), ["Codex"], "disabled providers free their slots")
+
+        let all = headerSegments(usage: nil, usageError: nil, codexUsage: nil,
+                                 glmQuota: nil, glmEnabled: true,
+                                 claudeEnabled: false, codexEnabled: false)
+        XCTAssertEqual(all.map(\.label), ["GLM"])
     }
 
-    func testHeaderSegmentsIncludeGLMOnlyWhenEnabled() {
-        let segments = headerSegments(usage: nil, usageError: nil, codexUsage: nil,
-                                      glmQuota: sampleQuota, glmEnabled: true)
-        XCTAssertEqual(segments.map(\.label), ["Claude", "Codex", "GLM"])
-        XCTAssertEqual(segments.map(\.value), ["—", "—", "20·4%"])
-        XCTAssertEqual(segments.map(\.level), [nil, nil, .ok])
-
-        let disabled = headerSegments(usage: nil, usageError: nil, codexUsage: nil,
-                                      glmQuota: sampleQuota, glmEnabled: false)
-        XCTAssertEqual(disabled.map(\.label), ["Claude", "Codex"], "a disabled provider frees its slot")
+    func testHeaderSegmentsLone7dWindowIsAlwaysShown() {
+        let weeklyOnly = GLMQuota(plan: "max", limits: GLMLimits(
+            weekly: GLMLimitWindow(total: 140000, used: 5695, remaining: 134304,
+                                   usedPercent: 45, remainingPercent: 55,
+                                   resetAt: 1_791_529_507_983)))
+        let segs = headerSegments(usage: nil, usageError: nil, codexUsage: nil,
+                                  glmQuota: weeklyOnly, glmEnabled: true,
+                                  now: blinkOff)
+        XCTAssertEqual(segs.last?.windowTag, "7d")
+        XCTAssertEqual(segs.last?.value, "45%")
     }
 
-    func testGLMErrorTextMapsShortCodes() {
-        XCTAssertEqual(glmErrorText(nil), "No usage data")
-        XCTAssertEqual(glmErrorText("no auth"), "API key not set — add it in the limits window")
-        XCTAssertEqual(glmErrorText("net"), "Network error")
-        XCTAssertEqual(glmErrorText("parse"), "Unexpected response")
-        XCTAssertEqual(glmErrorText("401"), "HTTP 401")
-        XCTAssertEqual(glmErrorText("weird"), "weird")
-    }
-
-    func testGLMKeyRowLabelFollowsSpec() {
-        func label(_ status: ProviderKeyStatus, _ valid: Bool) -> (text: String, action: String) {
-            glmKeyRowLabel(status: status, valid: valid)
-        }
-        // Key present + limits arriving → valid | edit.
-        XCTAssertEqual(label(.set, true).text, "api key — valid")
-        XCTAssertEqual(label(.set, true).action, "edit")
-        // Key present but fetch failing → invalid | edit (update the key).
-        XCTAssertEqual(label(.set, false).text, "api key — invalid")
-        XCTAssertEqual(label(.set, false).action, "edit")
-        // No key at all → invalid | add.
-        XCTAssertEqual(label(.missing, false).text, "api key — invalid")
-        XCTAssertEqual(label(.missing, false).action, "add")
-        XCTAssertEqual(label(.checking, false).text, "api key — checking…")
-    }
-
-    func testLimitsRowsGLMStaleKeepsWindows() {
-        let rows = limitsRows(
-            usage: nil, plan: nil, error: nil,
-            codexUsage: nil, codexPlan: nil,
-            claudeEnabled: true, codexEnabled: true,
-            glmQuota: sampleQuota, glmEnabled: true, glmError: "net"
-        )
-        XCTAssertEqual(rows[2].chip.windows.count, 2)
-        XCTAssertTrue(rows[2].stale)
-        XCTAssertNil(rows[2].emptyMessage)
+    func testHeaderSegmentsCodexExoticLabelsFallBackToMostUsed() {
+        let exotic = CodexRateLimitsSnapshot(
+            primary: LabeledWindow(label: "primary", window: UsageWindow(utilization: 9, resetUnix: 1)),
+            secondary: nil)
+        let segs = headerSegments(usage: nil, usageError: nil, codexUsage: exotic,
+                                  now: blinkOff)
+        XCTAssertEqual(segs[1].windowTag, nil)
+        XCTAssertEqual(segs[1].value, "9%")
     }
 }

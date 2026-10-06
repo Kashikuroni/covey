@@ -15,12 +15,6 @@ final class TopBarTests: XCTestCase {
         XCTAssertEqual(topBarAlignment(.right), .center)
     }
 
-    func testUsagePlacementMapsToTopOverlayAlignment() {
-        XCTAssertEqual(topOverlayAlignment(.left), .topLeading)
-        XCTAssertEqual(topOverlayAlignment(.center), .top)
-        XCTAssertEqual(topOverlayAlignment(.right), .topTrailing)
-    }
-
     func testModeSwitchPinnedLeftAndLimitsCentered() {
         // Позиция зафиксирована: свитч слева, лимиты/часы всегда по центру.
         XCTAssertEqual(windowModeSwitchAlignment(.left), .leading)
@@ -31,9 +25,4 @@ final class TopBarTests: XCTestCase {
         XCTAssertEqual(topBarAlignment(.right), .center)
     }
 
-    func testLimitsOverlayAlignsInsideTopBarContentRegion() {
-        XCTAssertEqual(limitsOverlayHorizontalOffset(.left), 32)
-        XCTAssertEqual(limitsOverlayHorizontalOffset(.center), 32)
-        XCTAssertEqual(limitsOverlayHorizontalOffset(.right), 32)
-    }
 }
