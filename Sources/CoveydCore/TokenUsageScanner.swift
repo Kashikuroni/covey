@@ -115,43 +115,35 @@ public enum TokenUsageScanner {
 
 /// Инкрементальное чтение активных транскриптов в агрегатор. Офсеты переживают
 /// рестарт через QuotaSampleStore; урезанный файл перечитывается с нуля.
-@MainActor
+/// Сессии передаются снимком на каждый poll (реестр не захватывается closures):
+/// трекаются Covey-сессии любого провайдера и, при includeExternal, внешние
+/// Claude Code CLI. Фильтрация GLM-моделей живёт в glmSessionRates, не здесь.
 public final class TranscriptWatcher {
     private let projectsRoot: String
     private let aggregator: TokenAggregator
     private let store: QuotaSampleStore
     private let includeExternal: Bool
-    private let coveyClaudeSessions: () -> [(uuid: String, name: String, isGLM: Bool)]
 
     public init(projectsRoot: String, aggregator: TokenAggregator, store: QuotaSampleStore,
-                includeExternal: Bool,
-                coveyClaudeSessions: @escaping () -> [(uuid: String, name: String, isGLM: Bool)]) {
+                includeExternal: Bool) {
         self.projectsRoot = projectsRoot
         self.aggregator = aggregator
         self.store = store
         self.includeExternal = includeExternal
-        self.coveyClaudeSessions = coveyClaudeSessions
     }
 
-    public func poll(now: Date) {
+    public func poll(now: Date, sessions: [ForecastSessionIdentity]) {
         let cutoff = now.addingTimeInterval(-600)   // активность: 10 мин (спека §3.2)
-        let sessions = coveyClaudeSessions()
-        let glmuuids = Set(sessions.filter(\.isGLM).map(\.uuid))
-        // Covey-сессия не-GLM провайдера не жжёт GLM-квоту — не трекается
-        // вовсе (в отличие от внешних Claude Code CLI, которых ведёт
-        // includeExternal).
-        let coveyNonGlm = Set(sessions.filter { !$0.isGLM }.map(\.uuid))
+        let known = Set(sessions.compactMap(\.sourceID))
         func isTracked(_ path: String) -> Bool {
-            let id = uuid(of: path)
-            if coveyNonGlm.contains(id) { return false }
-            return glmuuids.contains(id) || includeExternal
+            known.contains(uuid(of: path)) || includeExternal
         }
         var paths = Set(TokenUsageScanner.activeFiles(projectsRoot: projectsRoot,
                                                       cutoff: cutoff, now: now).filter(isTracked))
         // Притихшие Covey-файлы с недочитанным хвостом дочитываем; внешние —
         // только пока активны (потеря их хвоста допустима: спека — неактивные
         // не участвуют в темпе, итоги окна критичны для Covey-сессий).
-        for path in store.offsets.keys where glmuuids.contains(uuid(of: path)) {
+        for path in store.offsets.keys where known.contains(uuid(of: path)) {
             paths.insert(path)
         }
         for path in paths.sorted() { read(path) }

@@ -18,6 +18,22 @@ final class UsageMonitorForecastTests: XCTestCase {
         return #"{"data":{"level":"max","limits":[{"type":"CREDIT_LIMIT","unit":3,"number":5,"percentage":\#(used / 10),"usage":1000,"currentValue":\#(used),"remaining":\#(1000 - used),"nextResetTime":\#(reset)}]}}"#.data(using: .utf8)!
     }
 
+    /// Обвязка новой архитектуры: вотчер + актор + монитор с identity-снимком.
+    private func makeForecastStack(projectsRoot: String? = nil,
+                                    store: QuotaSampleStore? = nil,
+                                    sessions: @escaping () -> [ForecastSessionIdentity] = { [] })
+        -> (store: QuotaSampleStore, agg: TokenAggregator, monitor: ForecastAnalyticsMonitor) {
+        let store = store ?? QuotaSampleStore(path: nil)
+        let agg = TokenAggregator(buckets: store.buckets)
+        let watcher = TranscriptWatcher(projectsRoot: projectsRoot ?? dir,
+                                        aggregator: agg, store: store,
+                                        includeExternal: true)
+        let monitor = ForecastAnalyticsMonitor(store: store, aggregator: agg,
+                                               claudeWatcher: watcher, codexWatcher: nil,
+                                               glmConfig: GLMForecastConfig())
+        return (store, agg, monitor)
+    }
+
     private func transcript(total: Int) throws {
         let ts = ISO8601DateFormatter().string(from: Date())
         let line = #"{"type":"assistant","timestamp":"\#(ts)","isSidechain":false,"sessionId":"uuid-1","message":{"model":"glm-4.6","usage":{"input_tokens":\#(total),"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"# + "\n"
@@ -26,11 +42,11 @@ final class UsageMonitorForecastTests: XCTestCase {
 
     func testForecastAppearsInSnapshotAfterGLMPoll() async throws {
         try transcript(total: 50_000)
-        let store = QuotaSampleStore(path: nil)
-        let agg = TokenAggregator()
-        let watcher = TranscriptWatcher(projectsRoot: dir, aggregator: agg, store: store,
-                                        includeExternal: true,
-                                        coveyClaudeSessions: { [("uuid-1", "fix-auth", true)] })
+        let stack = makeForecastStack(sessions: {
+            [ForecastSessionIdentity(sourceID: "uuid-1", name: "fix-auth",
+                                     cwd: "/w/x", agent: "claude", created: 0)]
+        })
+        let (store, _, forecastMonitor) = stack
         var fetchCount = 0
         let monitor = UsageMonitor(
             path: nil, legacyPath: nil,
@@ -43,8 +59,11 @@ final class UsageMonitorForecastTests: XCTestCase {
             },
             usageInterval: 0.01,
             resolveCodex: { nil },
-            forecastStore: store, transcriptWatcher: watcher, forecastAggregator: agg,
-            glmSessions: { [("uuid-1", "fix-auth", true)] })
+            forecastMonitor: forecastMonitor,
+            forecastSessions: {
+                [ForecastSessionIdentity(sourceID: "uuid-1", name: "fix-auth",
+                                         cwd: "/w/x", agent: "claude", created: 0)]
+            })
         await monitor.refresh(.glm)
         await monitor.refresh(.glm)   // второй опрос: дебаунс подтверждает вердикт
         let f = monitor.snapshot.glmForecast
@@ -66,10 +85,7 @@ final class UsageMonitorForecastTests: XCTestCase {
 
     func testVerdictDebounceNeedsTwoPolls() async throws {
         try transcript(total: 50_000)
-        let store = QuotaSampleStore(path: nil)
-        let agg = TokenAggregator()
-        let watcher = TranscriptWatcher(projectsRoot: dir, aggregator: agg, store: store,
-                                        includeExternal: true, coveyClaudeSessions: { [] })
+        let forecastMonitor = makeForecastStack().monitor
         var used = 0.0
         let monitor = UsageMonitor(
             path: nil, legacyPath: nil,
@@ -79,8 +95,8 @@ final class UsageMonitorForecastTests: XCTestCase {
                 return GLMAccount(quota: parseGLMQuota(self.glmJSON(used: used, resetInHours: 0.5))!)
             },
             usageInterval: 0.01, resolveCodex: { nil },
-            forecastStore: store, transcriptWatcher: watcher, forecastAggregator: agg,
-            glmSessions: { [] })
+            forecastMonitor: forecastMonitor,
+            forecastSessions: { [] })
         await monitor.refresh(.glm)
         // Один опрос: вердикт ещё не подтверждён — публикуется .calibrating-заглушка или прошлый.
         // Второй опрос с тем же характером данных: вердикт подтверждён.
@@ -104,7 +120,8 @@ final class UsageMonitorForecastTests: XCTestCase {
             fetchAccount: { Account(usageError: "off") },
             fetchGLM: { GLMAccount(quota: parseGLMQuota(self.glmJSON(used: 100, resetInHours: 5))!) },
             usageInterval: 0.01, resolveCodex: { nil },
-            forecastStore: store)
+            forecastMonitor: makeForecastStack(store: store).monitor,
+            forecastSessions: { [] })
         await monitor.refresh(.glm)
         await monitor.refresh(.glm)   // квота неизменна → дельт, меняющих факторы, нет
         let f = monitor.snapshot.glmForecast

@@ -13,11 +13,13 @@ for (key, value) in terminalEnvDefaults(ProcessInfo.processInfo.environment) {
     setenv(key, value, 0)
 }
 
-// Resolve ~/.covey/coveyd.sock
-let home = FileManager.default.homeDirectoryForCurrentUser
-let dir = home.appendingPathComponent(".covey", isDirectory: true)
+// Resolve the state root (~/.covey; COVEY_HOME relocates it for a dev instance)
+let dir = URL(fileURLWithPath: CoveyPaths.root, isDirectory: true)
 try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-let socketPath = dir.appendingPathComponent("coveyd.sock").path
+let socketPath = CoveyPaths.socketPath
+// Pidfile next to the socket: `make dev-stop` (and humans) can find THIS
+// daemon without guessing which coveyd owns which state root.
+let pidPath = CoveyPaths.path("coveyd.pid")
 
 // Single-instance: if an existing socket accepts a connection, another daemon is alive.
 if FileManager.default.fileExists(atPath: socketPath) {
@@ -60,25 +62,41 @@ let ipc = IPCServer(registry: registry, monitor: monitor, gitMonitor: gitMonitor
                     modelMonitor: modelMonitor, traceMonitor: traceMonitor,
                     traceStore: traceStore)
 let usageMonitor = MainActor.assumeIsolated {
-    // Прогноз квоты GLM: сэмплы + вёдра токенов в одном JSON рядом с usage.json.
+    // Прогнозная аналитика: один стор/агрегатор/актор на оба провайдера.
     let forecastStore = QuotaSampleStore(path: dir.appendingPathComponent("usage-samples.json").path)
-    let glmAggregator = TokenAggregator(buckets: forecastStore.buckets)
-    // uuid транскрипта → имя Covey-сессии + признак z.ai-провайдера (GLM-квота).
-    let glmSessions: () -> [(uuid: String, name: String, isGLM: Bool)] = {
-        registry.list().compactMap { s in
-            guard let uuid = ClaudeTranscript.sessionUUID(resumeCmd: s.resumeCmd) else { return nil }
-            return (uuid, s.name, ProviderRegistry.isZai(s.providerId))
+    let forecastAggregator = TokenAggregator(buckets: forecastStore.buckets)
+    // Провайдер-нейтральные идентичности реестра: для Claude — uuid
+    // транскрипта, для Codex — nil (роллаут матчуется по cwd/созданию).
+    let forecastSessions: () -> [ForecastSessionIdentity] = {
+        registry.list().map { s in
+            ForecastSessionIdentity(
+                sourceID: ClaudeTranscript.sessionUUID(resumeCmd: s.resumeCmd),
+                name: s.name, cwd: s.cwd, agent: s.agent,
+                created: s.created, providerID: s.providerId)
         }
     }
-    let transcriptWatcher = TranscriptWatcher(
+    let cfg = CoveyConfig.load()
+    let glmConfig = GLMForecastConfig(
+        includeExternal: cfg.glmForecast?.includeExternal ?? true,
+        marginPercent: cfg.glmForecast?.marginPercent ?? 15,
+        imminentMinutes: cfg.glmForecast?.imminentMinutes ?? 20)
+    let claudeWatcher = TranscriptWatcher(
         projectsRoot: NSHomeDirectory() + "/.claude/projects",
-        aggregator: glmAggregator, store: forecastStore,
-        includeExternal: CoveyConfig.load().glmForecast?.includeExternal ?? true,
-        coveyClaudeSessions: glmSessions)
+        aggregator: forecastAggregator, store: forecastStore,
+        includeExternal: glmConfig.includeExternal)
+    let codexWatcher = CodexTranscriptWatcher(
+        sessionsRoot: NSHomeDirectory() + "/.codex/sessions",
+        aggregator: forecastAggregator, store: forecastStore,
+        includeExternal: glmConfig.includeExternal)
+    let analyticsMonitor = ForecastAnalyticsMonitor(store: forecastStore,
+                                                    aggregator: forecastAggregator,
+                                                    claudeWatcher: claudeWatcher,
+                                                    codexWatcher: codexWatcher,
+                                                    glmConfig: glmConfig)
     let usage = UsageMonitor(path: dir.appendingPathComponent("usage.json").path,
                              legacyPath: dir.appendingPathComponent("state.json").path,
-                             forecastStore: forecastStore, transcriptWatcher: transcriptWatcher,
-                             forecastAggregator: glmAggregator, glmSessions: glmSessions)
+                             forecastMonitor: analyticsMonitor,
+                             forecastSessions: forecastSessions)
     ipc.attachUsageMonitor(usage)
     return usage
 }
@@ -98,6 +116,7 @@ signal(SIGINT, SIG_IGN)
 let onSignal: () -> Void = {
     MainActor.assumeIsolated { usageMonitor.stop() }
     unlink(socketPath)
+    unlink(pidPath)
     exit(0)
 }
 let termSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
@@ -109,6 +128,7 @@ intSource.resume()
 
 do {
     try server.start()
+    try? "\(getpid())".write(toFile: pidPath, atomically: true, encoding: .utf8)
     FileHandle.standardError.write(Data("coveyd: listening at \(socketPath)\n".utf8))
 } catch {
     FileHandle.standardError.write(Data("coveyd: failed to start: \(error)\n".utf8))
