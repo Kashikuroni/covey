@@ -38,6 +38,7 @@ struct TerminalPaneView: View {
             let frames = PanelLayout.splitFrames(
                 tree: model.visibleSplitTree, soloAgent: model.selected,
                 companionShell: model.activeView?.terminal?.shellSession,
+                companionAxis: model.activeView?.terminal?.axis ?? .vertical,
                 companionRatio: model.activeView?.agentAreaRatio ?? 0.6,
                 size: geo.size, gutter: Tokens.gutter)
             ZStack(alignment: .topLeading) {
@@ -60,8 +61,8 @@ struct TerminalPaneView: View {
                 }
                 if model.activeView?.terminal != nil, let area = frames.agentArea,
                    let col = frames.companion {
-                    columnDivider(areaWidth: area.width, colMinX: col.minX,
-                                  height: geo.size.height)
+                    columnDivider(area: area, companion: col,
+                                  axis: model.activeView?.terminal?.axis ?? .vertical)
                 }
             }
         }
@@ -119,23 +120,30 @@ struct TerminalPaneView: View {
             )
     }
 
-    /// Делята между agent-областью и шелл-колонкой.
-    private func columnDivider(areaWidth: CGFloat, colMinX: CGFloat,
-                               height: CGFloat) -> some View {
-        Rectangle()
+    /// Делята между agent-областью и шелл-зоной: вертикальная колонка — шов
+    /// по X (курсор ↔), горизонтальная полоса — шов по Y (курсор ↕).
+    private func columnDivider(area: CGRect, companion: CGRect, axis: PaneAxis) -> some View {
+        let vertical = axis == .vertical
+        return Rectangle()
             .fill(Color.clear)
-            .frame(width: Tokens.gutter, height: height)
+            .frame(width: vertical ? Tokens.gutter : area.width,
+                   height: vertical ? area.height : Tokens.gutter)
             .contentShape(Rectangle())
-            .position(x: areaWidth + Tokens.gutter / 2, y: height / 2)
+            .position(x: vertical ? area.maxX + Tokens.gutter / 2 : area.midX,
+                      y: vertical ? area.midY : area.maxY + Tokens.gutter / 2)
             .onHover { inside in
-                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                if inside {
+                    (vertical ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).push()
+                } else { NSCursor.pop() }
             }
             .gesture(
                 DragGesture(coordinateSpace: .named(Self.splitSpace))
                     .onChanged { value in
-                        let usable = max(0, colMinX - Tokens.gutter)
+                        let usable = max(0, (vertical ? companion.minX : companion.minY)
+                                       - Tokens.gutter)
                         guard usable > 0 else { return }
-                        model.setCompanionRatio(value.location.x / usable)
+                        let pos = vertical ? value.location.x : value.location.y
+                        model.setCompanionRatio(pos / usable)
                     }
             )
     }

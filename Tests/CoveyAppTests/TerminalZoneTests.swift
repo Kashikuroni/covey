@@ -13,7 +13,7 @@ import CoveyKit
         return model
     }
 
-    func testToggleSpawnsHiddenShellAtProjectRoot() async throws {
+    func testToggleSpawnsHiddenShellAtAgentCwd() async throws {
         let daemon = try TestDaemon(); defer { daemon.stop() }
         let model = try await modelWithWorktreeSession(daemon)
         await model.toggleActiveTerminal()
@@ -21,11 +21,38 @@ import CoveyKit
 
         let shell = try XCTUnwrap(model.activeView?.terminal?.shellSession)
         let s = try XCTUnwrap(daemon.registry.get(name: shell))
-        XCTAssertEqual(s.dir, "/repo")            // project root, not the worktree
+        XCTAssertEqual(s.dir, "/repo/.worktrees/feat")   // the agent's cwd, not the repo root
         XCTAssertEqual(s.hidden, true)
         XCTAssertNil(s.companionOf)
         XCTAssertFalse(model.visibleSessions.contains { $0.name == shell })
         XCTAssertNil(model.viewOfSession[shell])  // the shell is not a workspace-view session
+    }
+
+    func testToggleBelowOpensHorizontalZone() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let model = try await modelWithWorktreeSession(daemon)
+        await model.toggleActiveTerminal(axis: .horizontal)
+        _ = await eventually { model.activeView?.terminal?.shellSession != nil }
+        XCTAssertEqual(model.activeView?.terminal?.axis, .horizontal)
+        await model.kill(model.activeView!.terminal!.shellSession!)
+    }
+
+    func testToggleRotatesAxisKeepingTheShellAlive() async throws {
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let model = try await modelWithWorktreeSession(daemon)
+        await model.toggleActiveTerminal()   // ⌘T: right column
+        _ = await eventually { model.activeView?.terminal?.shellSession != nil }
+        let shell = try XCTUnwrap(model.activeView?.terminal?.shellSession)
+
+        await model.toggleActiveTerminal(axis: .horizontal)   // ⌘⇧T: rotate below
+        XCTAssertEqual(model.activeView?.terminal?.axis, .horizontal)
+        XCTAssertEqual(model.activeView?.terminal?.shellSession, shell,
+                      "rotation must not respawn the shell")
+        XCTAssertNotNil(daemon.registry.get(name: shell))
+
+        await model.toggleActiveTerminal(axis: .horizontal)   // same axis again: close
+        XCTAssertNil(model.activeView?.terminal)
+        _ = await eventually { daemon.registry.get(name: shell) == nil }
     }
 
     func testToggleGivesTheColumnRoomAndFocusesIt() async throws {

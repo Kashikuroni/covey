@@ -60,6 +60,22 @@ import CoveyKit
         XCTAssertNil(back.terminal?.shellSession)
     }
 
+    func testTerminalAxisRoundTrips() {
+        var v = WorkspaceView.single("a", id: "v1")
+        v.terminal = TerminalZone(shellSession: "s-9", axis: .horizontal)
+        XCTAssertEqual(WorkspaceView(persisted: v.persisted).terminal?.axis, .horizontal)
+        v.terminal?.axis = .vertical
+        XCTAssertEqual(WorkspaceView(persisted: v.persisted).terminal?.axis, .vertical)
+    }
+
+    func testLegacyTerminalZoneDecodesAsVertical() {
+        // A payload saved before `terminalAxis` existed: nil axis = right column.
+        let v = WorkspaceView(persisted: PersistedWorkspaceView(
+            id: "v1", agentTree: .agent(session: "a"),
+            terminalShell: "s-9", terminalOpen: true))
+        XCTAssertEqual(v.terminal?.axis, .vertical)
+    }
+
     func testHiddenInspectorRoundTrips() {
         let v = WorkspaceView.single("a", id: "v1")
         XCTAssertEqual(WorkspaceView(persisted: v.persisted).inspector, .hidden)

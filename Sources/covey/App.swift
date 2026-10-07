@@ -104,6 +104,7 @@ struct CoveyApp: App {
             }
             CommandMenu("Terminal") {
                 CatalogCommandButton(.toggleViewTerminal, model: model)
+                CatalogCommandButton(.openTerminalBelow, model: model)
                 Divider()
                 CatalogCommandButton(.splitTerminalVertically, model: model)
                 CatalogCommandButton(.splitTerminalHorizontally, model: model)

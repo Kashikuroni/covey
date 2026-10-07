@@ -234,17 +234,21 @@ public struct PersistedWorkspaceView: Codable, Equatable {
     /// true when the terminal zone is open even though `terminalShell` is nil —
     /// keeps the column after a daemon restart dropped the shell, pending relink.
     public var terminalOpen: Bool?
+    /// "vertical" (right column) | "horizontal" (bottom band); nil = vertical —
+    /// payloads saved before ⌘⇧T existed.
+    public var terminalAxis: String?
     /// "issues" | "trace"; nil = inspector hidden.
     public var inspector: String?
     public var agentAreaRatio: Double?
 
     public init(id: String, agentTree: PersistedPaneNode, terminalShell: String? = nil,
-                terminalOpen: Bool? = nil, inspector: String? = nil,
-                agentAreaRatio: Double? = nil) {
+                terminalOpen: Bool? = nil, terminalAxis: String? = nil,
+                inspector: String? = nil, agentAreaRatio: Double? = nil) {
         self.id = id
         self.agentTree = agentTree
         self.terminalShell = terminalShell
         self.terminalOpen = terminalOpen
+        self.terminalAxis = terminalAxis
         self.inspector = inspector
         self.agentAreaRatio = agentAreaRatio
     }

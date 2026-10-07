@@ -1283,7 +1283,9 @@ public final class AppModel {
         case .closeTerminalSplit:
             closeFocusedPane()
         case .toggleViewTerminal:
-            Task { await toggleActiveTerminal() }
+            Task { await toggleActiveTerminal(axis: .vertical) }
+        case .openTerminalBelow:
+            Task { await toggleActiveTerminal(axis: .horizontal) }
 
         case .toggleSessionsPanel:
             setShowSessions(!showSessions)

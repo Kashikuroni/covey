@@ -118,8 +118,9 @@ struct PanelLayout: Equatable {
         var dividers: [SplitDivider] = []
     }
 
-    /// Геометрия окна: [agent-дерево | шелл-колонка]; внутри дерева — рекурсия
-    /// по `.split`-узлам. Все кадры — в координатной области split-вью.
+    /// Геометрия окна: [agent-дерево | шелл-колонка] при `.vertical`,
+    /// [agent-дерево / шелл-полоса] при `.horizontal`; внутри дерева —
+    /// рекурсия по `.split`-узлам. Все кадры — в координатной области split-вью.
     ///
     /// `soloAgent` — панель одиночного агента: по инварианту дерева один лист
     /// живёт вне `tree` (`splitTree == nil`), и без него agent-область осталась
@@ -127,18 +128,30 @@ struct PanelLayout: Equatable {
     /// источник истины — дерево.
     static func splitFrames(tree: PaneNode?, soloAgent: String? = nil,
                             companionShell: String?,
+                            companionAxis: PaneAxis = .vertical,
                             companionRatio: Double, size: CGSize,
                             gutter: CGFloat) -> SplitFrames {
         var result = SplitFrames()
         let agentLeaves = tree?.leafCount ?? 0
         if companionShell != nil {
-            let columnWidth = size.width - firstBranchSize(
-                requested: companionRatio, available: size.width,
-                firstLeaves: max(agentLeaves, 1), secondLeaves: 1, gutter: gutter)
-            let areaWidth = max(0, size.width - columnWidth - gutter)
-            result.agentArea = CGRect(x: 0, y: 0, width: areaWidth, height: size.height)
-            result.companion = CGRect(x: areaWidth + gutter, y: 0,
-                                      width: max(0, columnWidth), height: size.height)
+            if companionAxis == .vertical {
+                let columnWidth = size.width - firstBranchSize(
+                    requested: companionRatio, available: size.width,
+                    firstLeaves: max(agentLeaves, 1), secondLeaves: 1, gutter: gutter)
+                let areaWidth = max(0, size.width - columnWidth - gutter)
+                result.agentArea = CGRect(x: 0, y: 0, width: areaWidth, height: size.height)
+                result.companion = CGRect(x: areaWidth + gutter, y: 0,
+                                          width: max(0, columnWidth), height: size.height)
+            } else {
+                // Mirror of the column math on height: agents on top, band below.
+                let bandHeight = size.height - firstBranchSize(
+                    requested: companionRatio, available: size.height,
+                    firstLeaves: max(agentLeaves, 1), secondLeaves: 1, gutter: gutter)
+                let areaHeight = max(0, size.height - bandHeight - gutter)
+                result.agentArea = CGRect(x: 0, y: 0, width: size.width, height: areaHeight)
+                result.companion = CGRect(x: 0, y: areaHeight + gutter,
+                                          width: size.width, height: max(0, bandHeight))
+            }
         } else {
             result.agentArea = CGRect(x: 0, y: 0, width: size.width, height: size.height)
         }

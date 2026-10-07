@@ -197,18 +197,26 @@ extension AppModel {
 
     // MARK: - Terminal zone
 
-    /// Toggle the active view's terminal zone (Command-P › Open Terminal).
-    func toggleActiveTerminal() async {
+    /// Toggle the active view's terminal zone (⌘T right column, ⌘⇧T bottom
+    /// band). Open at the requested axis; already open at it → close; open at
+    /// the other axis → rotate in place (the shell session survives).
+    func toggleActiveTerminal(axis: PaneAxis = .vertical) async {
         guard let id = activeViewID, let v = views[id] else { toast = "no session"; return }
-        if v.terminal != nil { closeActiveTerminal(); return }
-        mutateForView(id) { $0.terminal = TerminalZone(shellSession: nil) }
+        if let zone = v.terminal {
+            if zone.axis == axis { closeActiveTerminal(); return }
+            mutateForView(id) { $0.terminal?.axis = axis }
+            if let shell = zone.shellSession { focusPane(shell) }
+            return
+        }
+        mutateForView(id) { $0.terminal = TerminalZone(shellSession: nil, axis: axis) }
         await spawnShell(for: id)
         if let shell = views[id]?.terminal?.shellSession { focusPane(shell) }
     }
 
-    /// Spawn a hidden shell at the project root for a view whose terminal zone
-    /// is open but unlinked. Links from the create response — no shared pending
-    /// slot, so relinking several views in a row is race-free.
+    /// Spawn a hidden shell at the anchor agent's cwd (its worktree when it has
+    /// one — where the agent works, not the repo root) for a view whose
+    /// terminal zone is open but unlinked. Links from the create response — no
+    /// shared pending slot, so relinking several views in a row is race-free.
     func spawnShell(for viewID: ViewID) async {
         guard let v = views[viewID], v.terminal != nil, v.terminal?.shellSession == nil
         else { return }
@@ -217,7 +225,7 @@ extension AppModel {
             .compactMap({ n in self.sessions.first { $0.name == n } }).first
         else { return }
         do {
-            let shell = try await client.create(dir: sessionRoot(anchor), agent: "sh",
+            let shell = try await client.create(dir: anchor.cwd, agent: "sh",
                                                 terminal: true, hidden: true)
             guard views[viewID]?.terminal != nil else {   // view closed while awaiting
                 await kill(shell.name); return

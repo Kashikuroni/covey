@@ -142,6 +142,51 @@ final class SplitFrameTests: XCTestCase {
         XCTAssertEqual(f.dividers[0].axis, .vertical)
     }
 
+    // MARK: - companion axis (⌘T right column vs ⌘⇧T bottom band)
+
+    func testHorizontalCompanionPutsShellBandBelowTheAgentArea() {
+        let f = PanelLayout.splitFrames(tree: nil, soloAgent: "a",
+                                        companionShell: "sh", companionAxis: .horizontal,
+                                        companionRatio: 0.6, size: size, gutter: gutter)
+        let agent = f.agentArea!, band = f.companion!
+        XCTAssertEqual(agent.minX, 0); XCTAssertEqual(agent.width, 1000)
+        XCTAssertEqual(agent.minY, 0)
+        XCTAssertEqual(band.minX, 0); XCTAssertEqual(band.width, 1000, accuracy: 0.5)
+        XCTAssertEqual(band.maxY, 500, accuracy: 0.5, "band reaches the bottom edge")
+        XCTAssertEqual(agent.maxY + gutter, band.minY, accuracy: 0.5,
+                       "agent area ends exactly at the band's seam")
+        XCTAssertEqual(f.leaves["a"], agent, "the agent fills the whole area above")
+    }
+
+    func testHorizontalCompanionHonorsRatioAndClamps() {
+        // ratio 0.6 of usable height → band gets the remainder plus the gutter
+        let f = PanelLayout.splitFrames(tree: nil, soloAgent: "a",
+                                        companionShell: "sh", companionAxis: .horizontal,
+                                        companionRatio: 0.6, size: size, gutter: gutter)
+        XCTAssertEqual(f.companion!.height, (500 - gutter) * 0.4 + gutter, accuracy: 0.5)
+        // requested 0.02: the agent keeps its 120pt floor (minus the gutter)
+        let tiny = PanelLayout.splitFrames(tree: nil, soloAgent: "a",
+                                           companionShell: "sh", companionAxis: .horizontal,
+                                           companionRatio: 0.02, size: size, gutter: gutter)
+        XCTAssertEqual(tiny.agentArea!.height, PanelLayout.minSplitPane - gutter, accuracy: 0.5)
+        // requested 0.99 clamps so the band keeps a floor as well
+        let greedy = PanelLayout.splitFrames(tree: nil, soloAgent: "a",
+                                             companionShell: "sh", companionAxis: .horizontal,
+                                             companionRatio: 0.99, size: size, gutter: gutter)
+        XCTAssertLessThanOrEqual(greedy.companion!.height, 500 * 0.85 + 0.5)
+        XCTAssertGreaterThanOrEqual(greedy.agentArea!.height, PanelLayout.minSplitPane - 0.5)
+    }
+
+    func testVerticalCompanionKeepsRightColumnAsBefore() {
+        let f = PanelLayout.splitFrames(tree: nil, soloAgent: "a",
+                                        companionShell: "sh", companionAxis: .vertical,
+                                        companionRatio: 0.6, size: size, gutter: gutter)
+        XCTAssertEqual(f.companion!.width, (1000 - gutter) * 0.4 + gutter, accuracy: 0.5)
+        XCTAssertEqual(f.agentArea!.width + gutter + f.companion!.width, 1000, accuracy: 0.5)
+        XCTAssertEqual(f.companion!.minX, f.agentArea!.maxX + gutter, accuracy: 0.5)
+        XCTAssertEqual(f.companion!.height, 500)
+    }
+
     /// Ручка делителя обязана стоять В ШВЕ между панелями при ЛЮБОМ ratio.
     /// Она рисовалась по середине узла: при 0.5 совпадало, после первого же
     /// драга уезжала от шва — и «ресайз перестаёт работать».

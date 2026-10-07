@@ -30,6 +30,16 @@ final class CommandCatalogTests: XCTestCase {
         XCTAssertEqual(keys.count, Set(keys).count)
     }
 
+    func testTerminalShortcutsAreColumnAndBand() throws {
+        let column = try XCTUnwrap(CommandCatalog.descriptor(for: .toggleViewTerminal).shortcut)
+        XCTAssertEqual(column.key, "t")
+        XCTAssertEqual(column.modifiers, .command)
+
+        let band = try XCTUnwrap(CommandCatalog.descriptor(for: .openTerminalBelow).shortcut)
+        XCTAssertEqual(band.key, "t")
+        XCTAssertEqual(band.modifiers, [.command, .shift])
+    }
+
     func testSessionCyclingCommandsUseCommandBrackets() throws {
         let expected: [(AppCommand, Character, String)] = [
             (.selectPreviousSession, "[", "⌘["),

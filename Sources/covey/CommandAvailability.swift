@@ -174,7 +174,7 @@ enum CommandRules {
             return context.hasTerminalSplit
                 ? .enabled : .disabled(reason: "No terminal split")
 
-        case .toggleViewTerminal:
+        case .toggleViewTerminal, .openTerminalBelow:
             return context.hasSelectedSession
                 ? .enabled : .disabled(reason: "No session selected")
 

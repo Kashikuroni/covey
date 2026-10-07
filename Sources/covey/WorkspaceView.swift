@@ -6,10 +6,17 @@ import CoveyKit
 typealias ViewID = String
 
 /// The terminal zone of a view: a covey-owned hidden shell shown as the right
-/// column. `shellSession == nil` while the zone is open but the daemon session
+/// column (`.vertical`, ⌘T) or the bottom band (`.horizontal`, ⌘⇧T).
+/// `shellSession == nil` while the zone is open but the daemon session
 /// is not yet linked (spawn pending, or a relink after a daemon restart).
 struct TerminalZone: Equatable {
     var shellSession: String?
+    var axis: PaneAxis
+
+    init(shellSession: String?, axis: PaneAxis = .vertical) {
+        self.shellSession = shellSession
+        self.axis = axis
+    }
 }
 
 /// The inspector zone of a view. Content (issues by project root, trace by the
@@ -73,7 +80,9 @@ struct WorkspaceView: Identifiable, Equatable {
 extension WorkspaceView {
     init(persisted p: PersistedWorkspaceView) {
         let terminal = (p.terminalShell != nil || p.terminalOpen == true)
-            ? TerminalZone(shellSession: p.terminalShell) : nil
+            ? TerminalZone(shellSession: p.terminalShell,
+                           axis: p.terminalAxis.flatMap(PaneAxis.init(rawValue:)) ?? .vertical)
+            : nil
         self.init(id: p.id,
                   agentTree: PaneNode(persisted: p.agentTree),
                   terminal: terminal,
@@ -87,6 +96,7 @@ extension WorkspaceView {
             agentTree: agentTree.persisted,
             terminalShell: terminal?.shellSession,
             terminalOpen: terminal != nil ? true : nil,
+            terminalAxis: terminal?.axis == .horizontal ? PaneAxis.horizontal.rawValue : nil,
             inspector: inspector.persistedString,
             agentAreaRatio: agentAreaRatio)
     }
