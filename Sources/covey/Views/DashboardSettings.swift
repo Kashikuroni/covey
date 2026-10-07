@@ -32,7 +32,7 @@ struct ModelRecord: Codable, Equatable, Identifiable {
 final class DashboardSettings: ObservableObject {
     @Published private(set) var records: [ModelRecord] = []
     @Published private(set) var deleted: [String] = []
-    private let defaults: UserDefaults
+    let defaults: UserDefaults
     private static let key = "dashboard.modelRecords"
     private static let deletedKey = "dashboard.deletedModels"
 
@@ -131,6 +131,33 @@ final class DashboardSettings: ObservableObject {
             return c
         }
         return ModelPalette.defaultColor(model: model, within: siblings)
+    }
+
+    // MARK: - Цвета имён источников (таблица Agents)
+
+    /// Дефолтные цвета имён: Claude Code — оранжевый, Codex — бирюзовый
+    /// (те же базовые тона, что в палитре моделей); оба читаемы на тёмном.
+    static func defaultSourceColorHex(_ source: ForecastUsageSource) -> String {
+        source == .codex ? "#12AD9E" : "#F2731A"
+    }
+
+    func sourceColorHex(for source: ForecastUsageSource) -> String {
+        defaults.string(forKey: "dashboard.sourceColor.\(source.rawValue)")
+            ?? Self.defaultSourceColorHex(source)
+    }
+
+    func setSourceColor(hex: String, for source: ForecastUsageSource) {
+        defaults.set(hex, forKey: "dashboard.sourceColor.\(source.rawValue)")
+    }
+
+    func resetSourceColor(for source: ForecastUsageSource) {
+        defaults.removeObject(forKey: "dashboard.sourceColor.\(source.rawValue)")
+    }
+
+    func sourceColor(for source: ForecastUsageSource) -> Color {
+        ModelPalette.color(fromHex: sourceColorHex(for: source))
+            ?? ModelPalette.color(fromHex: Self.defaultSourceColorHex(source))
+            ?? .gray
     }
 
     /// Разовая миграция цветов старого формата `modelColor.<model>`.

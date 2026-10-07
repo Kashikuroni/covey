@@ -307,9 +307,60 @@ struct DashboardSettingsPanel: View {
 
     // MARK: - Модели
 
+    /// Цвета имён источников в таблице Agents: Claude Code / Codex,
+    /// тот же свотч-паттерн, что у моделей.
+    private var sourceColorsRow: some View {
+        sectionCard {
+            sourceColorRow("Claude Code", source: .claudeCode)
+            Divider().overlay(tk.bd2)
+            sourceColorRow("Codex", source: .codex)
+        }
+    }
+
+    @State private var editingSourceColor: ForecastUsageSource?
+
+    private func sourceColorRow(_ title: String, source: ForecastUsageSource) -> some View {
+        HStack(spacing: 10) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    editingSourceColor = editingSourceColor == source ? nil : source
+                }
+            } label: {
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(settings.sourceColor(for: source))
+                    .frame(width: 14, height: 14)
+                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(tk.bd2))
+            }
+            .buttonStyle(.plain)
+            .help("Pick color")
+            Text(title)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(tk.t1)
+            if editingSourceColor == source {
+                ColorPicker("", selection: Binding(
+                    get: { settings.sourceColor(for: source) },
+                    set: { c in settings.setSourceColor(hex: ModelPalette.hex(c),
+                                                        for: source) }),
+                            supportsOpacity: false)
+                    .labelsHidden()
+                    .frame(width: 30)
+                Button("reset") {
+                    settings.resetSourceColor(for: source)
+                    editingSourceColor = nil
+                }
+                .font(.system(size: 9, design: .monospaced))
+                .buttonStyle(.plain)
+                .foregroundStyle(tk.t3)
+            }
+            Spacer(minLength: 8)
+        }
+        .padding(.vertical, 3)
+    }
+
     private var modelsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             sectionTitle("Models", hint: "color · $ per 1M · archive")
+            sourceColorsRow
             sectionCard {
                 if active.isEmpty {
                     Text("No models yet — they appear as Covey meets them in metrics")

@@ -12,6 +12,29 @@ final class DashboardSettingsTests: XCTestCase {
         return DashboardSettings(defaults: suite)
     }
 
+    func testSourceNameColorsHaveReadableDefaults() {
+        let settings = fresh()
+        XCTAssertEqual(settings.sourceColorHex(for: .claudeCode), "#F2731A",
+                       "Claude Code — оранжевый из палитры")
+        XCTAssertEqual(settings.sourceColorHex(for: .codex), "#12AD9E",
+                       "Codex — читаемый бирюзовый")
+    }
+
+    func testSourceNameColorRoundTripAndReset() {
+        let settings = fresh()
+        settings.setSourceColor(hex: "#FF8800", for: .codex)
+        XCTAssertEqual(settings.sourceColorHex(for: .codex), "#FF8800")
+        XCTAssertEqual(settings.sourceColor(for: .codex),
+                       ModelPalette.color(fromHex: "#FF8800"))
+        settings.resetSourceColor(for: .codex)
+        XCTAssertEqual(settings.sourceColorHex(for: .codex), "#12AD9E",
+                       "сброс возвращает дефолт")
+        // Персистентность: кастом claude переживает пересоздание настроек.
+        settings.setSourceColor(hex: "#AABBCC", for: .claudeCode)
+        let reloaded = DashboardSettings(defaults: settings.defaults)
+        XCTAssertEqual(reloaded.sourceColorHex(for: .claudeCode), "#AABBCC")
+    }
+
     func testEnsureCreatesRecordOnceAndKeepsUserFields() {
         let s = fresh()
         s.ensure("glm-4.6")

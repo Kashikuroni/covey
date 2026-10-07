@@ -681,7 +681,8 @@ struct ForecastModeView: View {
     private func agentsCard(_ analytics: ForecastAnalytics) -> some View {
         if !analytics.sessions.isEmpty {
             AgentsTable(rows: agentRows(analytics.sessions), tk: tk,
-                        projectParts: agentProjectParts)
+                        projectParts: agentProjectParts,
+                        sourceColor: { settings.sourceColor(for: $0) })
         } else {
             card {
                 VStack(alignment: .leading, spacing: 6) {
@@ -934,10 +935,13 @@ private struct AgentsTable: View {
     let tk: Tokens
     /// Путь агента → (имя проекта, ветка); nil — имя не путь, показ как был.
     let projectParts: (String) -> (project: String, branch: String?)?
+    /// Цвет имени по источнику (Claude Code / Codex) — из настроек дашборда.
+    let sourceColor: (ForecastUsageSource) -> Color
 
     /// Ширины колонок — общие для шапки и строк; заголовок не должен переноситься.
     private enum Col {
         static let active: CGFloat = 76
+        static let ext: CGFloat = 56
         static let tokens: CGFloat = 86
         static let credits: CGFloat = 88
         static let cache: CGFloat = 64
@@ -947,7 +951,7 @@ private struct AgentsTable: View {
     }
 
     private enum Sort {
-        case name, active, tokens, credits, cache, share, budget, ctx
+        case name, active, ext, tokens, credits, cache, share, budget, ctx
     }
 
     @State private var sort: Sort = .credits
@@ -977,6 +981,7 @@ private struct AgentsTable: View {
         switch sort {
         case .name: return 0
         case .active: return a.active ? 1 : 0
+        case .ext: return a.external ? 1 : 0
         case .tokens: return a.tokensPerHour
         case .credits: return a.creditsPerHour ?? -1
         case .cache: return a.cacheHit ?? -1
@@ -1018,6 +1023,7 @@ private struct AgentsTable: View {
         HStack(spacing: 0) {
             sortHead("name", .name, width: nil, align: .leading)
             sortHead("active", .active, width: Col.active, align: .center)
+            sortHead("ext", .ext, width: Col.ext, align: .center)
             sortHead("tokens/h", .tokens, width: Col.tokens)
             sortHead("credits/h", .credits, width: Col.credits)
             sortHead("cache", .cache, width: Col.cache)
@@ -1068,6 +1074,8 @@ private struct AgentsTable: View {
                 .tableCell(tk, width: nil, align: .leading)
             activeCell(a)
                 .tableCell(tk, width: Col.active, align: .center, divider: true)
+            externalCell(a)
+                .tableCell(tk, width: Col.ext, align: .center, divider: true)
             Text(ForecastWindow.compactTokens(a.tokensPerHour))
                 .tableCell(tk, width: Col.tokens, divider: true)
             Text(a.creditsPerHour.map { String(format: "%.2f", $0) } ?? "—")
@@ -1103,12 +1111,14 @@ private struct AgentsTable: View {
     }
 
     private func nameCell(_ a: AgentRow) -> some View {
-        HStack(spacing: 6) {
-            tag(a.source == .codex ? "Codex" : "Claude Code")
+        // Источник — цветом имени (настраивается в настройках дашборда),
+        // без отдельного бейджа; внешность — отдельная колонка ext.
+        let color = sourceColor(a.source)
+        return HStack(spacing: 6) {
             if let parts = projectParts(a.name) {
                 // Имя проекта как в списке сессий; ветка worktree приглушена.
                 Text(parts.project)
-                    .foregroundStyle(tk.t1)
+                    .foregroundStyle(color)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 if let branch = parts.branch, !branch.isEmpty {
@@ -1118,16 +1128,22 @@ private struct AgentsTable: View {
                         .truncationMode(.middle)
                 }
             } else {
-                dimmedPath(ForecastEN.tildePath(a.name))
+                Text(ForecastEN.tildePath(a.name))
+                    .foregroundStyle(color)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
             if (nameCounts[a.name] ?? 0) > 1 {
                 tag("#\(a.id.prefix(8))")
             }
-            if a.external { tag("external") }
         }
         .help(a.name)
+    }
+
+    /// Внешняя сессия (не из реестра Covey) — отдельной колонкой.
+    private func externalCell(_ a: AgentRow) -> some View {
+        Text(a.external ? "yes" : "—")
+            .foregroundStyle(a.external ? tk.t2 : tk.t3)
     }
 
     /// Rows share the worktree root, so everything up to and including
