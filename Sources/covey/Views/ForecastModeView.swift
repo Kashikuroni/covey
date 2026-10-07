@@ -1047,18 +1047,34 @@ private struct AgentsTable: View {
             if sort == key { ascending.toggle() }
             else { sort = key; ascending = (key == .name) }
         } label: {
-            HStack(spacing: 3) {
-                Text(title)
-                Image(systemName: ascending ? "chevron.up" : "chevron.down")
-                    .font(.system(size: 7, weight: .bold))
-                    .foregroundStyle(sort == key ? tk.accent : .clear)
+            // Шеврон — в оверлее у края, не в потоке: невидимый сортировочный
+            // индикатор не должен сдвигать заголовок относительно значений.
+            Group {
+                if align == .leading {
+                    HStack(spacing: 3) {
+                        Text(title)
+                        Image(systemName: ascending ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 7, weight: .bold))
+                            .foregroundStyle(sort == key ? tk.accent : .clear)
+                    }
+                    .padding(.horizontal, 10)
+                } else {
+                    Text(title)
+                        .padding(.leading, 10)
+                        .padding(.trailing, 16)
+                        .overlay(alignment: .trailing) {
+                            Image(systemName: ascending ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 7, weight: .bold))
+                                .foregroundStyle(sort == key ? tk.accent : .clear)
+                                .offset(x: -5)
+                        }
+                }
             }
             .font(.system(size: 9, weight: .semibold, design: .monospaced))
             .textCase(.uppercase)
             .foregroundStyle(sort == key ? tk.t1 : tk.t3)
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)   // заголовок не переносится
-            .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .frame(width: width, alignment: align)
             .frame(maxWidth: width == nil ? .infinity : nil, alignment: align)
