@@ -15,6 +15,7 @@ public actor ForecastAnalyticsMonitor {
     private let claudeWatcher: TranscriptWatcher?
     private let codexWatcher: CodexTranscriptWatcher?
     private let glmConfig: GLMForecastConfig
+    private let codexConfig: CodexForecastConfig
     private var factors: CalibrationFactors
     private var lastRawVerdicts: [String: GLMForecastVerdict] = [:]
     private var confirmedVerdicts: [String: GLMForecastVerdict] = [:]
@@ -25,12 +26,14 @@ public actor ForecastAnalyticsMonitor {
     public init(store: QuotaSampleStore, aggregator: TokenAggregator,
                 claudeWatcher: TranscriptWatcher?,
                 codexWatcher: CodexTranscriptWatcher?,
-                glmConfig: GLMForecastConfig) {
+                glmConfig: GLMForecastConfig,
+                codexConfig: CodexForecastConfig = CodexForecastConfig()) {
         self.store = store
         self.aggregator = aggregator
         self.claudeWatcher = claudeWatcher
         self.codexWatcher = codexWatcher
         self.glmConfig = glmConfig
+        self.codexConfig = codexConfig
         self.factors = CalibrationFactors(store.factors)
     }
 
@@ -103,6 +106,30 @@ public actor ForecastAnalyticsMonitor {
                                                        glmForecast: decorated, now: now)
         try store.save()
         return (decorated, analytics)
+    }
+
+    // MARK: - Codex rate-limit квоты (этап 2)
+
+    /// Полный ingest слитого снапшота: сэмплы всех видимых окон, прогноз,
+    /// одна атомарная запись. Сбой save пробрасывается — вызывающий хранит
+    /// последний хороший прогноз.
+    public func ingestCodexRateLimits(_ snapshot: CodexRateLimitsSnapshot,
+                                      now: Date) throws -> CodexForecast {
+        store.appendCodexRateLimits(snapshot, now: now)
+        let forecast = CodexForecastEngine.build(snapshot: snapshot, store: store,
+                                                 now: now, config: codexConfig)
+        try store.save()
+        return forecast
+    }
+
+    /// Только чтение: пересчёт прогноза от персистентной истории и свежего
+    /// слитого снапшота — stale и обратный отсчёт двигаются настенными
+    /// часами без мутаций и записи.
+    public func refreshCodexForecast(_ snapshot: CodexRateLimitsSnapshot?,
+                                     now: Date) -> CodexForecast? {
+        guard let snapshot else { return nil }
+        return CodexForecastEngine.build(snapshot: snapshot, store: store,
+                                         now: now, config: codexConfig)
     }
 
     // MARK: - производная история

@@ -92,7 +92,9 @@ let usageMonitor = MainActor.assumeIsolated {
                                                     aggregator: forecastAggregator,
                                                     claudeWatcher: claudeWatcher,
                                                     codexWatcher: codexWatcher,
-                                                    glmConfig: glmConfig)
+                                                    glmConfig: glmConfig,
+                                                    codexConfig: CodexForecastConfig(
+                                                        marginPercent: glmConfig.marginPercent))
     let usage = UsageMonitor(path: dir.appendingPathComponent("usage.json").path,
                              legacyPath: dir.appendingPathComponent("state.json").path,
                              forecastMonitor: analyticsMonitor,

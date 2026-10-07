@@ -65,6 +65,127 @@ final class ForecastAnalyticsMonitorTests: XCTestCase {
                             forecastSessions: { [] })
     }
 
+    // MARK: - Stage 2: quota ingestion
+
+    private let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+
+    private func rateSnapshot(primary: Double, secondary: Double? = nil) -> CodexRateLimitsSnapshot {
+        CodexRateLimitsSnapshot(buckets: ["codex": CodexRateLimitBucket(
+            id: "codex", name: nil,
+            primary: LabeledWindow(label: "5h", durationMinutes: 300,
+                                   window: UsageWindow(utilization: primary,
+                                                       resetUnix: 1_800_003_600)),
+            secondary: secondary.map {
+                LabeledWindow(label: "7d", durationMinutes: 10_080,
+                              window: UsageWindow(utilization: $0, resetUnix: 1_800_604_800))
+            })])
+    }
+
+    /// Прогон полного цикла через UsageMonitor: ingest → settle → снимок.
+    private func ingested(_ monitor: UsageMonitor,
+                          _ snapshot: CodexRateLimitsSnapshot, at: Date) async {
+        monitor.ingestRateLimits(snapshot)
+        await settleForecastTasks()
+        _ = at
+    }
+
+    /// Даём async-публикациям монитора доехать.
+    private func settleForecastTasks() async {
+        for _ in 0..<20 { await Task.yield() }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        for _ in 0..<10 { await Task.yield() }
+    }
+
+    func testCodexQuotaRestartContinuesWithoutRecalibration() async throws {
+        let storePath = base + "/quota.json"
+        let store = QuotaSampleStore(path: storePath)
+        let first = makeMonitor(store: store)
+        try first.setEnabled(.glm, enabled: false)
+        first.ingestRateLimits(rateSnapshot(primary: 20), now: t0)
+        await settleForecastTasks()
+        first.ingestRateLimits(rateSnapshot(primary: 25), now: t0.addingTimeInterval(60))
+        await settleForecastTasks()
+        XCTAssertNotNil(first.snapshot.codexForecast)
+
+        // Рестарт: новый монитор над сохранённым стором.
+        let reopened = QuotaSampleStore(path: storePath)
+        let second = makeMonitor(store: reopened)
+        second.ingestRateLimits(rateSnapshot(primary: 30), now: t0.addingTimeInterval(120))
+        await settleForecastTasks()
+        let window = second.snapshot.codexForecast?.windows.first { $0.windowKey == .primary }
+        XCTAssertEqual(window?.sampleCount, 3, "история продолжилась, пересчёта с нуля нет")
+        XCTAssertEqual(window?.usedPercent, 30)
+    }
+
+    func testSaveFailureLeavesPreviouslyPublishedForecastIntact() async throws {
+        let storePath = base + "/quota-save.json"
+        try FileManager.default.createDirectory(atPath: base + "/locked",
+                                                withIntermediateDirectories: true)
+        let store = QuotaSampleStore(path: storePath)
+        let monitor = makeMonitor(store: store)
+        monitor.ingestRateLimits(rateSnapshot(primary: 20), now: t0)
+        await settleForecastTasks()
+        let published = monitor.snapshot.codexForecast
+        XCTAssertNotNil(published)
+
+        // Ломаем сохранение: каталог стора — read-only.
+        try FileManager.default.setAttributes([.posixPermissions: 0o500],
+                                              ofItemAtPath: base)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755],
+                                                       ofItemAtPath: base) }
+        monitor.ingestRateLimits(rateSnapshot(primary: 40), now: t0.addingTimeInterval(60))
+        await settleForecastTasks()
+        XCTAssertEqual(monitor.snapshot.codexForecast, published,
+                       "сбой save не затирает последний хороший прогноз")
+    }
+
+    func testCodexPartialUpdateSamplesMergedSnapshot() async throws {
+        let store = QuotaSampleStore(path: base + "/partial.json")
+        let monitor = makeMonitor(store: store)
+        monitor.ingestRateLimits(rateSnapshot(primary: 20, secondary: 40), now: t0)
+        await settleForecastTasks()
+        monitor.ingestRateLimits(CodexRateLimitsSnapshot(buckets: ["codex":
+            CodexRateLimitBucket(id: "codex", name: nil,
+                primary: LabeledWindow(label: "5h", durationMinutes: 300,
+                                       window: UsageWindow(utilization: 25,
+                                                           resetUnix: 1_800_003_600)),
+                secondary: nil)]), now: t0.addingTimeInterval(60))
+        await settleForecastTasks()
+        func lastPercent(_ key: CodexForecastWindowKey) -> Double? {
+            store.codexQuotaSeries(bucketID: "codex", windowKey: key,
+                                   now: t0.addingTimeInterval(3600)).last?.usedPercent
+        }
+        _ = t0
+        XCTAssertEqual(lastPercent(.primary), 25)
+        XCTAssertEqual(lastPercent(.secondary), 40, "слот вне апдейта не перезаписан")
+    }
+
+    func testCodexForecastBecomesStaleWithoutNewSnapshot() async throws {
+        let store = QuotaSampleStore(path: base + "/stale.json")
+        let monitor = makeMonitor(store: store)
+        monitor.ingestRateLimits(rateSnapshot(primary: 20), now: t0)
+        await settleForecastTasks()
+        XCTAssertFalse(monitor.snapshot.codexForecast?.windows.first?.stale ?? true)
+
+        // +5 минут без новых событий: refreshAnalytics пересчитывает stale.
+        await monitor.refreshAnalytics(now: t0.addingTimeInterval(300))
+        XCTAssertTrue(monitor.snapshot.codexForecast?.windows.first?.stale ?? false,
+                      "stale двигается настенными часами, без нового события")
+        XCTAssertEqual(monitor.snapshot.codexForecast?.windows.first?.usedPercent, 20)
+    }
+
+    func testDisablingCodexInvalidatesPendingPublication() async throws {
+        let store = QuotaSampleStore(path: base + "/disable.json")
+        let monitor = makeMonitor(store: store)
+        monitor.ingestRateLimits(rateSnapshot(primary: 20), now: t0)
+        try monitor.setEnabled(.codex, enabled: false)
+        await settleForecastTasks()
+        XCTAssertNil(monitor.snapshot.codexForecast,
+                     "выключение инвалидирует незавершённую публикацию")
+        // История в сторе не стирается.
+        XCTAssertFalse(store.codexQuotaSamples.isEmpty)
+    }
+
     func testAnalyticsPollPublishesGPTWhenGLMIsDisabledAndUnauthed() async throws {
         let monitor = makeMonitor()
         try monitor.setEnabled(.glm, enabled: false)

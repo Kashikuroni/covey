@@ -22,6 +22,8 @@ public final class UsageMonitor {
     private var forecastMonitor: ForecastAnalyticsMonitor?
     private var forecastSessions: (() -> [ForecastSessionIdentity])?
     private var analyticsTask: Task<Void, Never>?
+    // Codex-прогноз: монотонный ID запроса — устаревший ответ не публикуется.
+    private var codexForecastRequest = 0
 
     public init(path: String? = nil, legacyPath: String? = nil,
                 fetchAccount: @escaping () async -> Account = UsageService.fetchAccount,
@@ -117,7 +119,10 @@ public final class UsageMonitor {
         generations[provider, default: 0] &+= 1
         snapshot = next
         onChange?(snapshot)
-        if provider == .codex, !enabled { stopCodex() }
+        if provider == .codex {
+            invalidateCodexForecastRequests()
+            if !enabled { stopCodex() }
+        }
         if enabled, running { Task { [weak self] in await self?.refresh(provider) } }
     }
 
@@ -162,13 +167,49 @@ public final class UsageMonitor {
         }
     }
 
-    public func ingestRateLimits(_ update: CodexRateLimitsSnapshot) {
+    public func ingestRateLimits(_ update: CodexRateLimitsSnapshot,
+                                 now: Date = Date()) {
         guard snapshot.codexUsageEnabled else { return }
-        mutate { $0.codexUsage = mergeCodex(into: $0.codexUsage, update: update) }
+        // Слитый снапшот — единственный источник для семплирования: sparse
+        // update не сэмплится (пустой слот обнулил бы историю).
+        let merged = mergeCodex(into: snapshot.codexUsage, update: update)
+        mutate { $0.codexUsage = merged }
+        guard let forecastMonitor else { return }
+        codexForecastRequest &+= 1
+        let request = codexForecastRequest
+        let generation = generations[.codex, default: 0]
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let forecast = try await forecastMonitor.ingestCodexRateLimits(
+                    merged, now: now)
+                self.publishCodexForecast(forecast, request: request,
+                                          generation: generation)
+            } catch {
+                UsageLog.note("codex-forecast", [("err", "ingest failed")])
+            }
+        }
+    }
+
+    /// Публикация только свежайшего запроса при включённом Codex и живой
+    /// генерации провайдера; вычисление прогноза при этом уже сохранено.
+    private func publishCodexForecast(_ forecast: CodexForecast,
+                                      request: Int, generation: UInt64) {
+        guard request == codexForecastRequest,
+              snapshot.codexUsageEnabled,
+              generations[.codex, default: 0] == generation else { return }
+        mutate { $0.codexForecast = forecast }
+    }
+
+    /// Инвалидация незавершённых публикаций (выключение/разлогин Codex);
+    /// персистентная история не стирается.
+    private func invalidateCodexForecastRequests() {
+        codexForecastRequest &+= 1
     }
 
     public func setCodexState(_ state: CodexServerState) {
         guard snapshot.codexUsageEnabled else { return }
+        if state == .stopped || state == .unauthed { invalidateCodexForecastRequests() }
         if state == .stopped { stopCodex() }
         mutate {
             $0.codexState = state
@@ -209,12 +250,18 @@ public final class UsageMonitor {
 
     /// Ручной/тестовый прогон независимого analytics-цикла. Сбой чтения
     /// не бросается наружу: последний хороший снимок остаётся в снапшоте.
-    public func refreshAnalytics() async {
+    /// Codex-прогноз пересчитывается тем же тиком (stale без новых событий).
+    public func refreshAnalytics(now: Date = Date()) async {
         guard let forecastMonitor else { return }
         let sessions = forecastSessions?() ?? []
         do {
-            let analytics = try await forecastMonitor.poll(now: Date(), sessions: sessions)
-            mutate { $0.forecastAnalytics = analytics }
+            let analytics = try await forecastMonitor.poll(now: now, sessions: sessions)
+            let codexForecast = await forecastMonitor.refreshCodexForecast(
+                snapshot.codexUsage, now: now)
+            mutate {
+                $0.forecastAnalytics = analytics
+                if let codexForecast { $0.codexForecast = codexForecast }
+            }
         } catch {
             UsageLog.note("analytics", [("err", "poll failed")])
         }
