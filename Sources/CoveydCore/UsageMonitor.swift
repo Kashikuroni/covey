@@ -121,7 +121,12 @@ public final class UsageMonitor {
         onChange?(snapshot)
         if provider == .codex {
             invalidateCodexForecastRequests()
-            if !enabled { stopCodex() }
+            if !enabled {
+                stopCodex()
+                // Прогноз выключенного провайдера не показываем и не
+                // пере-публикуем тиком; персистентная история квот целá.
+                mutate { $0.codexForecast = nil }
+            }
         }
         if enabled, running { Task { [weak self] in await self?.refresh(provider) } }
     }
@@ -210,6 +215,9 @@ public final class UsageMonitor {
     public func setCodexState(_ state: CodexServerState) {
         guard snapshot.codexUsageEnabled else { return }
         if state == .stopped || state == .unauthed { invalidateCodexForecastRequests() }
+        if state == .unauthed {
+            mutate { $0.codexForecast = nil }
+        }
         if state == .stopped { stopCodex() }
         mutate {
             $0.codexState = state
@@ -256,11 +264,19 @@ public final class UsageMonitor {
         let sessions = forecastSessions?() ?? []
         do {
             let analytics = try await forecastMonitor.poll(now: now, sessions: sessions)
-            let codexForecast = await forecastMonitor.refreshCodexForecast(
-                snapshot.codexUsage, now: now)
+            let codexForecast: CodexForecast? = snapshot.codexUsageEnabled
+                ? await forecastMonitor.refreshCodexForecast(
+                    snapshot.codexUsage, now: now)
+                : nil
             mutate {
                 $0.forecastAnalytics = analytics
-                if let codexForecast { $0.codexForecast = codexForecast }
+                // Публикация только при изменившемся контенте: updatedAt
+                // живёт при реальных изменениях, а не при каждом тике —
+                // иначе mutate-ноуп-гард обходится и usage.json переписывается
+                // каждую минуту (ревью I1).
+                if let codexForecast, codexForecast.windows != $0.codexForecast?.windows {
+                    $0.codexForecast = codexForecast
+                }
             }
         } catch {
             UsageLog.note("analytics", [("err", "poll failed")])

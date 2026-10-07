@@ -190,7 +190,7 @@ final class CodexForecastEngineTests: XCTestCase {
     // MARK: - недельное окно
 
     func testWeeklyWindowUsesEMABandAndDiscardsPreviousResetIntervals() {
-        // Длинная серия с устойчивым темпом 10%/час в ОДНОМ reset-сегменте.
+        // Длинная серия с устойчивым темпом (~100%/ч) в ОДНОМ reset-сегменте.
         var points: [(Int, Double)] = []
         for i in 0..<30 { points.append((i + 2, Double(100 - i * 10 / 6))) }
         feed(points, resetUnix: 1_800_604_800, slot: .secondary)

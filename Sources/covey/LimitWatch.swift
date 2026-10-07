@@ -160,7 +160,12 @@ func codexPredictiveAlerts(forecast: CodexForecast?,
               let resetAt = window.resetAt,
               let eta = etaMinutes(window), eta > 0 else { continue }
         let base = "codex:predict:\(escaped(window.bucketID)):\(window.windowKey.rawValue):\(resetAt):\(window.verdict.rawValue)"
+        let highestKey = "\(base):max"
         let label = window.label.isEmpty ? window.bucketID : window.label
+        // Лестница монотонна, как у GLM: уровень = максимум из уже отосланных;
+        // более мягкий уровень после жёсткого молчит (ETA вырос — темп упал).
+        let highest = marks[highestKey] ?? -1
+        func mark(_ level: Int64) { marks[highestKey] = level }
         switch window.verdict {
         case .overflow:
             let level: Int
@@ -168,9 +173,8 @@ func codexPredictiveAlerts(forecast: CodexForecast?,
             if eta < 15 { level = 2; suffix = " (критично)" }
             else if eta < 60 { level = 1; suffix = "" }
             else { level = 0; suffix = "" }
-            let markKey = "\(base):\(level)"
-            guard marks[markKey] == nil else { continue }
-            marks[markKey] = nowMs
+            guard Int64(level) > highest else { continue }
+            mark(Int64(level))
             let deficit = Int(max(0, -window.headroomPercent).rounded())
             let etaText = Date(timeIntervalSince1970: Double(window.exhaustionAt!) / 1000)
                 .formatted(date: .omitted, time: .shortened)
@@ -181,9 +185,9 @@ func codexPredictiveAlerts(forecast: CodexForecast?,
         case .tight, .fits:
             let imminent = config.imminentMinutes ?? 20
             guard imminent > 0, eta < imminent else { continue }
-            let markKey = "\(base):imminent"
-            guard marks[markKey] == nil else { continue }
-            marks[markKey] = nowMs
+            // imminent — верхняя ступень (9), как в GLM-маркерах.
+            guard highest < 9 else { continue }
+            mark(9)
             alerts.append(LimitAlert(
                 windowKey: "codex:\(window.windowKey.rawValue)",
                 title: "Codex \(label): исчерпание через \(Int(eta.rounded())) мин",

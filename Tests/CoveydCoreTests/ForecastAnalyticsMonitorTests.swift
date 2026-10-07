@@ -81,14 +81,6 @@ final class ForecastAnalyticsMonitorTests: XCTestCase {
             })])
     }
 
-    /// Прогон полного цикла через UsageMonitor: ingest → settle → снимок.
-    private func ingested(_ monitor: UsageMonitor,
-                          _ snapshot: CodexRateLimitsSnapshot, at: Date) async {
-        monitor.ingestRateLimits(snapshot)
-        await settleForecastTasks()
-        _ = at
-    }
-
     /// Даём async-публикациям монитора доехать.
     private func settleForecastTasks() async {
         for _ in 0..<20 { await Task.yield() }
@@ -246,6 +238,44 @@ final class ForecastAnalyticsMonitorTests: XCTestCase {
         XCTAssertEqual(session?.contextTokens, 3000, "контекст Codex-сессии доезжает")
         XCTAssertEqual(session?.contextDeltaPerTurn, 2900,
                        "рост — разница двух последних точек (3000 − 100)")
+    }
+
+    func testNoOpCodexRefreshDoesNotBumpRevision() async throws {
+        // Одинаковые окна не должны перезаписывать usage.json каждый тик:
+        // updatedAt живёт только при реальном изменении контента.
+        let monitor = makeMonitor()
+        monitor.ingestRateLimits(rateSnapshot(primary: 20), now: t0)
+        await settleForecastTasks()
+        // Прогрев: первая публикация пустой аналитики — легитимное изменение.
+        await monitor.refreshAnalytics(now: t0.addingTimeInterval(30))
+        let revision = monitor.snapshot.revision
+        await monitor.refreshAnalytics(now: t0.addingTimeInterval(60))
+        await monitor.refreshAnalytics(now: t0.addingTimeInterval(120))
+        XCTAssertEqual(monitor.snapshot.revision, revision,
+                       "тикс-пересчёт с теми же окнами — no-op")
+        XCTAssertNotNil(monitor.snapshot.codexForecast)
+    }
+
+    func testDisabledCodexStopsForecastPublication() async throws {
+        let monitor = makeMonitor()
+        monitor.ingestRateLimits(rateSnapshot(primary: 20), now: t0)
+        await settleForecastTasks()
+        XCTAssertNotNil(monitor.snapshot.codexForecast)
+        try monitor.setEnabled(.codex, enabled: false)
+        XCTAssertNil(monitor.snapshot.codexForecast, "выключение убирает прогноз")
+        await monitor.refreshAnalytics(now: t0.addingTimeInterval(60))
+        XCTAssertNil(monitor.snapshot.codexForecast,
+                     "тик не возрождает прогноз выключенного провайдера")
+    }
+
+    func testUnauthClearsForecastAndKeepsItCleared() async throws {
+        let monitor = makeMonitor()
+        monitor.ingestRateLimits(rateSnapshot(primary: 20), now: t0)
+        await settleForecastTasks()
+        monitor.setCodexState(.unauthed)
+        XCTAssertNil(monitor.snapshot.codexForecast, "разлогин убирает прогноз")
+        await monitor.refreshAnalytics(now: t0.addingTimeInterval(60))
+        XCTAssertNil(monitor.snapshot.codexForecast)
     }
 
     func testNoOpPollDoesNotBumpRevision() async throws {

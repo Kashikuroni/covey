@@ -53,6 +53,15 @@ final class CodexPredictiveLimitAlertsTests: XCTestCase {
         XCTAssertEqual(fifth.alerts.count, 0, "вершина лестницы достигнута")
     }
 
+    func testLadderIsMonotonicDownward() {
+        // После критического уровня более мягкий не досылаем: ETA вырос
+        // (темп упал) — level 1 после level 2 молчит.
+        let critical = fire([window(exhaustionInMin: 10)])
+        XCTAssertEqual(critical.alerts.count, 1, "сразу level 2")
+        let milder = fire([window(exhaustionInMin: 50)], notified: critical.notified)
+        XCTAssertEqual(milder.alerts.count, 0, "level 1 после level 2 не приходит")
+    }
+
     func testImminentAlertForTightAndFits() {
         let tight = fire([window(verdict: .tight, exhaustionInMin: 10)])
         XCTAssertEqual(tight.alerts.count, 1, "tight с ETA<20 — imminent")
