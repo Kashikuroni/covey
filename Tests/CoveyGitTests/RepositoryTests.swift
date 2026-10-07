@@ -333,6 +333,96 @@ final class RepositoryTests: XCTestCase {
         XCTAssertFalse(merged.contains("main"), "current branch excluded")
     }
 
+    // MARK: - pullBranch
+
+    /// Bare "origin" + a clone of it; the clone is the repo under test.
+    /// Returns (repo, origin, the dev tip OID pushed with upstream).
+    @discardableResult
+    private func makeClonedRepo(withUpstream originName: String = "origin") throws
+        -> (repo: String, origin: String, devTip: String) {
+        let origin = "\(NSTemporaryDirectory())covey-origin-\(UInt32.random(in: 0..<UInt32.max)).git"
+        let clone = "\(NSTemporaryDirectory())covey-clone-\(UInt32.random(in: 0..<UInt32.max))"
+        try FileManager.default.createDirectory(atPath: clone, withIntermediateDirectories: true)
+        try sh("git init -q --bare '\(origin)'")
+        try sh("git clone -q '\(origin)' '\(clone)'")
+        try sh("git -C '\(clone)' switch -q -c dev")
+        try "one".write(toFile: "\(clone)/f.txt", atomically: true, encoding: .utf8)
+        try sh("git -C '\(clone)' add f.txt && git -C '\(clone)' -c user.email=t@t -c user.name=t commit -q -m one")
+        try sh("git -C '\(clone)' push -q -u \(originName) dev")
+        try sh("git -C '\(clone)' switch -q -c main")
+        let tip = try XCTUnwrap(Repository(at: clone).localBranchOID("dev"))
+        return (clone, origin, tip)
+    }
+
+    /// Advances the bare origin's dev by one empty commit (commit-tree against
+    /// the bare repo's ref — no second clone needed).
+    private func advanceOriginDev(origin: String, parent: String) throws -> String {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", """
+            set -e
+            tree=$(git -C '\(origin)' rev-parse \(parent)^{tree})
+            new=$(git -C '\(origin)' -c user.email=t@t -c user.name=t commit-tree $tree -p \(parent) -m ahead)
+            git -C '\(origin)' update-ref refs/heads/dev $new
+            printf %s "$new"
+            """]
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = Pipe()
+        try p.run(); p.waitUntilExit()
+        guard p.terminationStatus == 0 else { throw GitError("commit-tree failed") }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func testPullBranchFastForwardsLocalToUpstreamWithoutCheckout() throws {
+        let (clone, origin, tip) = try makeClonedRepo()
+        defer { try? FileManager.default.removeItem(atPath: clone)
+                try? FileManager.default.removeItem(atPath: origin) }
+        let ahead = try advanceOriginDev(origin: origin, parent: tip)
+
+        let repo = Repository(at: clone)
+        XCTAssertTrue(repo.pullBranch("dev"), "the branch advanced")
+        XCTAssertEqual(try repo.localBranchOID("dev"), ahead)
+        XCTAssertEqual(repo.currentBranch(), "main", "no checkout happened")
+    }
+
+    func testPullBranchWithoutUpstreamReturnsFalse() throws {
+        XCTAssertTrue(try Repository(at: repo).localBranchOID("main") != nil)
+        XCTAssertFalse(Repository(at: repo).pullBranch("main"), "no branch.<b>.remote configured")
+        XCTAssertFalse(Repository(at: repo).pullBranch("ghost"))
+    }
+
+    func testPullBranchDivergedRefusesAndKeepsLocalTip() throws {
+        let (clone, origin, tip) = try makeClonedRepo()
+        defer { try? FileManager.default.removeItem(atPath: clone)
+                try? FileManager.default.removeItem(atPath: origin) }
+        _ = try advanceOriginDev(origin: origin, parent: tip)
+        // A local commit on top of dev: dev and origin/dev have diverged.
+        // Back on main afterwards, so the refusal below is purely non-ff —
+        // not the checked-out-branch rule.
+        try sh("git -C '\(clone)' switch -q dev")
+        try sh("git -C '\(clone)' -c user.email=t@t -c user.name=t commit --allow-empty -q -m local")
+        try sh("git -C '\(clone)' switch -q main")
+
+        let repo = Repository(at: clone)
+        let before = try repo.localBranchOID("dev")
+        XCTAssertFalse(repo.pullBranch("dev"), "non-fast-forward is refused")
+        XCTAssertEqual(try repo.localBranchOID("dev"), before, "local tip untouched")
+    }
+
+    func testPullBranchCheckedOutBranchIsRefused() throws {
+        let (clone, origin, tip) = try makeClonedRepo()
+        defer { try? FileManager.default.removeItem(atPath: clone)
+                try? FileManager.default.removeItem(atPath: origin) }
+        let ahead = try advanceOriginDev(origin: origin, parent: tip)
+        try sh("git -C '\(clone)' switch -q dev")
+
+        let repo = Repository(at: clone)
+        XCTAssertFalse(repo.pullBranch("dev"), "git refuses to fetch into a checked-out branch")
+        XCTAssertNotEqual(try repo.localBranchOID("dev"), ahead, "local tip untouched")
+    }
+
     func testSeedWorktreeIgnoredCopiesIgnoredSkipsHeavy() throws {
         // .gitignore selects the ignored paths; commit it so the tree is clean.
         try """

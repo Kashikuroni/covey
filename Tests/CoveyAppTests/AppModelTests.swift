@@ -149,6 +149,46 @@ final class AppModelTests: XCTestCase {
     }
 
     @MainActor
+    func testCreateProgressStageSurfacesInModel() async throws {
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        XCTAssertNil(model.createStage)
+        model.noteCreateProgress(.updatingBase(branch: "dev"))
+        XCTAssertEqual(model.createStage, "updating dev…")
+        model.noteCreateProgress(.seedingFiles)
+        XCTAssertEqual(model.createStage, "seeding files…")
+    }
+
+    @MainActor
+    func testCreateFullWorktreeClearsStageWhenDone() async throws {
+        let repo = "\(NSTemporaryDirectory())covey-app-wt-\(UInt32.random(in: 0..<UInt32.max))"
+        try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: repo) }
+        for cmd in ["git -C '\(repo)' init -q -b main",
+                    "git -C '\(repo)' -c user.email=t@t -c user.name=t commit --allow-empty -q -m init"] {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/bin/sh")
+            p.arguments = ["-c", cmd]
+            try p.run(); p.waitUntilExit()
+        }
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        model.noteCreateProgress(.creatingWorktree)
+        XCTAssertEqual(model.createStage, "creating worktree…")
+        let err = await model.createFull(name: "wt", dir: repo, agent: "/bin/cat",
+                                         terminal: false,
+                                         worktree: .new(branch: "feat", base: "main"),
+                                         model: nil, effort: nil)
+        XCTAssertNil(err)
+        XCTAssertNil(model.createStage, "the sheet's stage text clears once create resolves")
+        await model.kill("wt")
+    }
+
+    @MainActor
     func testKillRemovesSessionAndClearsSelection() async throws {
         let daemon = try TestDaemon()
         defer { daemon.stop() }

@@ -15,7 +15,11 @@ public enum CreateService {
         public var resumeCmd: String?
     }
 
-    public static func prepare(_ spec: CreateSpec) throws -> Prepared {
+    /// `progress` carries the create's slow steps to the requesting client;
+    /// the default swallows them (CLI/tests).
+    public static func prepare(_ spec: CreateSpec,
+                               progress: @escaping (CreateStage) -> Void = { _ in })
+        throws -> Prepared {
         // UUID only for a plain, non-terminal, non-resume claude launch.
         let uuid: String? = (!spec.terminal && spec.resume == nil && spec.agent == "claude")
             ? UUID().uuidString.lowercased() : nil
@@ -45,9 +49,13 @@ public enum CreateService {
         switch wt {
         case .new(let branch, let base):
             if let err = validateBranch(branch) { throw GitError(err) }
+            progress(.updatingBase(branch: base))
+            root.pullBranch(base)
+            progress(.creatingWorktree)
             try root.ensureGitignore(entry: ".worktrees/")
             let path = wtFor(branch)
             try root.addWorktree(at: path, newBranch: branch, base: base)
+            progress(.seedingFiles)
             root.seedIgnoredFiles(into: path)
             return Prepared(finalDir: path, argv: argv, label: label,
                             worktreeRepo: repo, resumeCmd: resumeCmd)
@@ -56,9 +64,11 @@ public enum CreateService {
                                           label: label, resumeCmd: resumeCmd) {
                 return p
             }
+            progress(.creatingWorktree)
             try root.ensureGitignore(entry: ".worktrees/")
             let path = wtFor(branch)
             try root.addWorktree(at: path, existingBranch: branch)
+            progress(.seedingFiles)
             root.seedIgnoredFiles(into: path)
             return Prepared(finalDir: path, argv: argv, label: label,
                             worktreeRepo: repo, resumeCmd: resumeCmd)
@@ -72,6 +82,8 @@ public enum CreateService {
                             worktreeRepo: nil, resumeCmd: resumeCmd)
         case .checkoutNew(let branch, let base):
             if let err = validateBranch(branch) { throw GitError(err) }
+            progress(.updatingBase(branch: base))
+            root.pullBranch(base)
             try root.createBranch(branch, from: base)
             return Prepared(finalDir: repo, argv: argv, label: label,
                             worktreeRepo: nil, resumeCmd: resumeCmd)

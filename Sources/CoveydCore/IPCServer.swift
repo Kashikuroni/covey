@@ -13,6 +13,10 @@ public final class IPCServer {
     private let traceMonitor: TraceMonitor?
     private let traceStore: TraceStore?
     private let server = DispatchQueue(label: "covey.ipc")
+    /// Form creates run here, off the serial `server` queue: their git IO
+    /// (base pull, worktree add, seeding) takes seconds and must not freeze
+    /// every other request. Creates still serialize against each other.
+    private let createQueue = DispatchQueue(label: "covey.create")
     private var sinks: [Int: ClientSink] = [:]
     private var subscribers: [String: Set<Int>] = [:]
     private var traceSubscribers: [String: Set<Int>] = [:]
@@ -211,41 +215,60 @@ public final class IPCServer {
             registry.clearLost(); reply(.ok)
 
         case let .create(dir, agent, argv, name, terminal, worktree, model, effort, resume, companionOf, env, providerId, hidden):
-            do {
-                // A companion's name is derived, never client-chosen.
-                let effectiveName = companionOf.map { "\($0)+sh" } ?? name
-                let s: Session
-                if let argv {   // explicit argv: the raw path (tests, compatibility)
-                    s = try registry.create(dir: dir, agent: agent, argv: argv,
-                                            name: effectiveName, companionOf: companionOf,
-                                            env: env, providerId: providerId,
-                                            hidden: hidden ?? false)
-                } else {
-                    let spec = CreateSpec(name: effectiveName, dir: expandTilde(dir), agent: agent,
-                                          terminal: terminal ?? false, worktree: worktree,
-                                          model: model, effort: effort, resume: resume,
-                                          hidden: hidden ?? false)
-                    // Git IO runs here, outside any registry lock.
-                    let prepared = try CreateService.prepare(spec)
-                    s = try registry.create(dir: prepared.finalDir, agent: prepared.label,
-                                            argv: prepared.argv, name: effectiveName,
-                                            worktreeRepo: prepared.worktreeRepo,
-                                            resumeCmd: prepared.resumeCmd,
-                                            companionOf: companionOf,
-                                            env: env, providerId: providerId,
-                                            hidden: hidden ?? false)
+            // A companion's name is derived, never client-chosen.
+            let effectiveName = companionOf.map { "\($0)+sh" } ?? name
+            if let argv {   // explicit argv: the raw path (tests, compatibility)
+                do {
+                    let s = try registry.create(dir: dir, agent: agent, argv: argv,
+                                                name: effectiveName, companionOf: companionOf,
+                                                env: env, providerId: providerId,
+                                                hidden: hidden ?? false)
+                    finishCreate(s)
+                    reply(.session(s))
+                } catch let e as RegistryError {
+                    reply(errorResult(e))
+                } catch {
+                    reply(.error(code: "createFailed", message: "\(error)"))
                 }
-                attachOutputFanout(for: s.name)
-                // The card's git line should not wait out the poll interval.
-                gitMonitor?.poke(name: s.name, dir: s.dir)
-                // A resumed session's transcript already exists — badge now.
-                modelMonitor?.poke(name: s.name, cwd: s.cwd, agent: s.agent,
-                                   created: s.created, resumeCmd: s.resumeCmd)
-                reply(.session(s))
-            } catch let e as RegistryError {
-                reply(errorResult(e))
-            } catch {
-                reply(.error(code: "createFailed", message: "\(error)"))
+            } else {
+                // The form create does slow git IO (base pull, worktree add,
+                // ignored-file seeding) that must not pin the serial IPC
+                // queue — everything else would freeze behind it. Creates
+                // still serialize against each other on their own queue.
+                let sinkID = sink.id
+                createQueue.async { [weak self] in
+                    guard let self else { return }
+                    func reply(_ r: ServerMessage.Result) {
+                        self.sink(sinkID)?.send(.response(id: id, result: r))
+                    }
+                    func progress(_ stage: CreateStage) {
+                        self.sink(sinkID)?.send(.event(.createProgress(stage: stage)))
+                    }
+                    do {
+                        let spec = CreateSpec(name: effectiveName, dir: expandTilde(dir),
+                                              agent: agent, terminal: terminal ?? false,
+                                              worktree: worktree, model: model,
+                                              effort: effort, resume: resume,
+                                              hidden: hidden ?? false)
+                        // Git IO runs here, outside any registry lock; the
+                        // stages stream to the requesting client only.
+                        let prepared = try CreateService.prepare(spec, progress: progress)
+                        progress(.startingAgent)
+                        let s = try registry.create(dir: prepared.finalDir, agent: prepared.label,
+                                                    argv: prepared.argv, name: effectiveName,
+                                                    worktreeRepo: prepared.worktreeRepo,
+                                                    resumeCmd: prepared.resumeCmd,
+                                                    companionOf: companionOf,
+                                                    env: env, providerId: providerId,
+                                                    hidden: hidden ?? false)
+                        self.finishCreate(s)
+                        reply(.session(s))
+                    } catch let e as RegistryError {
+                        reply(errorResult(e))
+                    } catch {
+                        reply(.error(code: "createFailed", message: "\(error)"))
+                    }
+                }
             }
 
         case let .kill(name, removeWorktree, deleteBranch):
@@ -460,5 +483,22 @@ public final class IPCServer {
         case .dirMissing(let d):
             return .error(code: "restartFailed", message: "directory missing: \(d)")
         }
+    }
+
+    /// Post-spawn wiring: output fanout plus immediate monitor pokes so the
+    /// card's git line and model badge don't wait out a poll interval. The
+    /// registry and monitors are internally synchronized; sinks/subscribers
+    /// are only ever touched on the server queue (attachOutputFanout hops).
+    private func finishCreate(_ s: Session) {
+        attachOutputFanout(for: s.name)
+        gitMonitor?.poke(name: s.name, dir: s.dir)
+        modelMonitor?.poke(name: s.name, cwd: s.cwd, agent: s.agent,
+                           created: s.created, resumeCmd: s.resumeCmd)
+    }
+
+    /// Sink lookup from the create queue: the dictionary itself is
+    /// server-queue-confined, so read it there; `send` is thread-safe.
+    private func sink(_ id: Int) -> ClientSink? {
+        server.sync { sinks[id] }
     }
 }

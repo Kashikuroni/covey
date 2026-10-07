@@ -903,6 +903,56 @@ final class IPCServerTests: XCTestCase {
         }
     }
 
+    // Worktree creates do their git IO off the serial IPC queue now; the
+    // requesting sink learns the stages, other sinks never see them.
+    func testWorktreeCreateEmitsProgressToRequestingSinkOnly() throws {
+        let repo = "\(NSTemporaryDirectory())covey-ipcprogress-\(UInt32.random(in: 0..<UInt32.max))"
+        try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: repo) }
+        for cmd in ["git -C '\(repo)' init -q -b main",
+                    "git -C '\(repo)' -c user.email=t@t -c user.name=t commit --allow-empty -q -m init"] {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/bin/sh")
+            p.arguments = ["-c", cmd]
+            try p.run(); p.waitUntilExit()
+        }
+        let registry = SessionRegistry()
+        let server = IPCServer(registry: registry,
+                               monitor: StatusMonitor(snapshot: { registry.snapshotScreens() }))
+        let sink = FakeSink(id: 1)
+        let bystander = FakeSink(id: 2)
+        server.register(sink)
+        server.register(bystander)
+        server.handle(Request(id: 1, op: .create(
+            dir: repo, agent: "sh", argv: nil, name: "wt",
+            terminal: nil, worktree: .new(branch: "feat", base: "main"),
+            model: nil, effort: nil, resume: nil, companionOf: nil,
+            env: nil, providerId: nil, hidden: nil)), from: sink)
+        waitUntil({ sink.captured.contains {
+            if case .response(1, .session) = $0 { return true }; return false
+        } }, "create response")
+        let stages = sink.captured.compactMap {
+            if case .event(.createProgress(let stage)) = $0 { return stage }
+            return nil
+        }
+        XCTAssertEqual(stages, [.updatingBase(branch: "main"), .creatingWorktree,
+                                .seedingFiles, .startingAgent],
+                       "stages stream in order while the create runs")
+        let lastStage = try XCTUnwrap(sink.captured.lastIndex {
+            if case .event(.createProgress) = $0 { return true }; return false
+        })
+        let reply = try XCTUnwrap(sink.captured.lastIndex {
+            if case .response(1, .session) = $0 { return true }; return false
+        })
+        XCTAssertGreaterThan(reply, lastStage,
+                             "the session reply lands after the last stage")
+        XCTAssertFalse(bystander.captured.contains {
+            if case .event(.createProgress) = $0 { return true }; return false
+        }, "progress is not broadcast — only the requester sees it")
+        server.handle(Request(id: 2, op: .kill(name: "wt", removeWorktree: nil,
+                                               deleteBranch: nil)), from: sink)
+    }
+
     // Issue #5 regression: the output fanout captured the create-time name, so
     // after a rename live output kept being published under the old one — the
     // client, attached to the new name, dropped it and the pane froze on the

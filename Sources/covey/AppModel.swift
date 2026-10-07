@@ -144,6 +144,10 @@ public final class AppModel {
             }
         }
     }
+    /// Stage of the in-flight session create ("updating dev…"), fed by
+    /// `createProgress` events; the create sheet shows it so a long worktree
+    /// create doesn't read as a hang. `createFull` clears it when it resolves.
+    public internal(set) var createStage: String?
     /// What the main window shows. Not persisted: covey starts in `.sessions`.
     /// Changed only by `AppModel+Review`.
     var windowMode: WindowMode = .sessions
@@ -724,6 +728,9 @@ public final class AppModel {
                 toast = "~/.claude/settings.json sets \(conflicts.joined(separator: ", ")); it overrides Covey. Remove those keys or they'll win."
             }
         }
+        // Stage events only flow while the request is in flight; whatever the
+        // loop last saw must not outlive this call (success or error).
+        defer { createStage = nil }
         do {
             let s = try await client.create(dir: dir, agent: agent, name: name,
                                             terminal: terminal ? true : nil,
@@ -1962,7 +1969,15 @@ public final class AppModel {
             capTrace()
         case let .traceStoreBytes(bytes):
             traceStoreBytes = bytes
+        case let .createProgress(stage):
+            noteCreateProgress(stage)
         }
+    }
+
+    /// Latest session-create stage as presentable text. Internal so tests can
+    /// drive it without a daemon round-trip; the event loop lands here too.
+    public func noteCreateProgress(_ stage: CreateStage) {
+        createStage = stage.label
     }
 
     /// Forget a dead pane's view plumbing; pane focus falls back to selected.

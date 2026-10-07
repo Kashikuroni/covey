@@ -172,4 +172,20 @@ final class ProtocolTests: XCTestCase {
             #"{"statusChanged":{"name":"s-1","status":"waiting"}}"#
         )
     }
+
+    func testCreateProgressEventRoundTripGoldenWireAndLabels() throws {
+        for stage in [CreateStage.updatingBase(branch: "dev"), .creatingWorktree,
+                      .seedingFiles, .startingAgent] {
+            try roundTrip(ServerMessage.event(.createProgress(stage: stage)))
+        }
+        // Pin the wire shape: a legacy daemon never emits this, but a new
+        // daemon + old GUI must not choke on it either — the shape is frozen.
+        let data = try encoder().encode(DaemonEvent.createProgress(stage: .updatingBase(branch: "dev")))
+        XCTAssertEqual(String(decoding: data, as: UTF8.self),
+                       #"{"createProgress":{"stage":{"updatingBase":{"branch":"dev"}}}}"#)
+        XCTAssertEqual(CreateStage.updatingBase(branch: "dev").label, "updating dev…")
+        XCTAssertEqual(CreateStage.creatingWorktree.label, "creating worktree…")
+        XCTAssertEqual(CreateStage.seedingFiles.label, "seeding files…")
+        XCTAssertEqual(CreateStage.startingAgent.label, "starting agent…")
+    }
 }

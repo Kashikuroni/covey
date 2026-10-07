@@ -81,4 +81,27 @@ public enum DaemonEvent: Codable, Equatable {
     // periodic total trace-store size for the header.
     case traceAppended(name: String, events: [TraceEvent])
     case traceStoreBytes(bytes: Int)
+    // Session-creation progress, sent only to the requesting sink while a
+    // worktree create runs (updatingBase → creatingWorktree → seedingFiles →
+    // startingAgent) so the sheet can show a stage instead of looking frozen.
+    case createProgress(stage: CreateStage)
+}
+
+/// One step of a session create worth telling the user about.
+public enum CreateStage: Codable, Equatable {
+    /// Fetching the base branch's upstream before forking the new branch.
+    case updatingBase(branch: String)
+    case creatingWorktree
+    case seedingFiles
+    case startingAgent
+
+    /// Short presentable form for the create sheet ("updating dev…").
+    public var label: String {
+        switch self {
+        case .updatingBase(let branch): return "updating \(branch)…"
+        case .creatingWorktree: return "creating worktree…"
+        case .seedingFiles: return "seeding files…"
+        case .startingAgent: return "starting agent…"
+        }
+    }
 }

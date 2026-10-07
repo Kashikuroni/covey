@@ -10,6 +10,27 @@ extension Repository {
         try git(["checkout", "-b", branch, base])
     }
 
+    /// Network budget for `pullBranch`: it runs best-effort inside session
+    /// creation, so a stalled remote must not hold the create hostage for
+    /// GitRunner's default five minutes.
+    public static let pullTimeout: TimeInterval = 30
+
+    /// Fast-forwards local `branch` to its configured upstream without
+    /// touching any checkout: one `git fetch <remote> <merge>:refs/heads/<b>`.
+    /// Git itself refuses a non-fast-forward and a ref checked out in any
+    /// worktree, so `false` guarantees nothing moved. `true` = fetch succeeded
+    /// (the ref now matches its upstream, possibly having already matched).
+    @discardableResult
+    public func pullBranch(_ branch: String) -> Bool {
+        guard let remote = try? git(["config", "--get", "branch.\(branch).remote"], readOnly: true),
+              let merge = try? git(["config", "--get", "branch.\(branch).merge"], readOnly: true),
+              !remote.isEmpty, !merge.isEmpty else { return false }
+        let fetch = try? GitRunner.execute(
+            in: path, ["fetch", remote, "\(merge):refs/heads/\(branch)"],
+            readOnly: false, timeout: Self.pullTimeout)
+        return fetch?.status == 0
+    }
+
     private func requireDeletable(_ branch: String, protected: [String]) throws {
         if protected.contains(branch) {
             throw GitError("branch '\(branch)' is protected")

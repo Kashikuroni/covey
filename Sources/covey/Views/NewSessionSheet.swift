@@ -25,6 +25,10 @@ struct NewSessionSheet: View {
     @State private var dirEntries: [String] = []
     @State private var dirSelected = 0
     @State private var error: String?
+    /// Between submit and the daemon's reply: the Create button becomes a
+    /// spinner and the model's create stage streams under it — a long
+    /// worktree create must not read as a frozen app.
+    @State private var creating = false
     /// Issue this session is being created for (from the issue browser's `s`);
     /// bound to the created session's name on submit.
     @State private var boundIssue: Int?
@@ -160,14 +164,26 @@ struct NewSessionSheet: View {
             if let error {
                 Text("! \(error)").font(.caption).foregroundStyle(.red)
             }
+            if creating, let stage = model.createStage {
+                Text(stage).font(.caption).foregroundStyle(.secondary)
+            }
             HStack {
                 Text("enter next · ⇧enter create · esc cancel")
                     .font(.caption2).foregroundStyle(.tertiary)
                 Spacer()
                 Button("Cancel") { model.modal = nil }
-                Button("Create") { submit() }
-                    .buttonStyle(.glassProminent)
-                    .disabled(dir.isEmpty || effectiveAgent.isEmpty)
+                Button { submit() } label: {
+                    if creating {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.mini)
+                            Text("Creating…")
+                        }
+                    } else {
+                        Text("Create")
+                    }
+                }
+                .buttonStyle(.glassProminent)
+                .disabled(creating || dir.isEmpty || effectiveAgent.isEmpty)
             }
         }
     }
@@ -416,6 +432,7 @@ struct NewSessionSheet: View {
     }
 
     private func submit() {
+        guard !creating else { return }
         error = nil
         let cleanDir = dir.count > 1 && dir.hasSuffix("/") ? String(dir.dropLast()) : dir
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
@@ -443,6 +460,8 @@ struct NewSessionSheet: View {
                     agent: effectiveAgent,
                     worktree: worktree)
         Task {
+            creating = true
+            defer { creating = false }
             if let err = await model.createFull(name: spec.name, dir: spec.dir,
                                                 agent: spec.agent, terminal: false,
                                                 worktree: spec.worktree, model: nil,
