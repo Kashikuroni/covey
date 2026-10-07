@@ -202,6 +202,12 @@ struct ForecastModeView: View {
                     if state.showsAnalytics, let analytics = model.forecastAnalytics {
                         analyticsArea(analytics, now: context.date)
                     }
+                    // Секция Codex независима от GLM: окна rate-limit видны,
+                    // даже когда GLM выключен или без ключа.
+                    if let codexForecast = model.codexForecast,
+                       !codexForecast.windows.isEmpty {
+                        codexForecastArea(codexForecast, now: context.date)
+                    }
                     settingsFooter
                 }
                 .padding(.bottom, 12)
@@ -234,6 +240,22 @@ struct ForecastModeView: View {
 
     private var knownModelsKey: String {
         knownModels.joined(separator: "\n")
+    }
+
+    // MARK: - Codex quota forecast
+
+    /// Сетка карточек по окнам прогноза Codex — по одному на видимый слот
+    /// каждого bucket-а.
+    private func codexForecastArea(_ forecast: CodexForecast, now: Date) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionTitle("Codex rate limits", hint: "observed burn forecast")
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
+                                GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                ForEach(codexForecastPresentations(forecast, now: now), id: \.id) { card in
+                    CodexForecastCard(card: card, tk: tk)
+                }
+            }
+        }
     }
 
     // MARK: - Forecast area
