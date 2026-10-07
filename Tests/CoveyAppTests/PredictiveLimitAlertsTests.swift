@@ -95,4 +95,39 @@ final class PredictiveLimitAlertsTests: XCTestCase {
                                        notified: m1, now: now)
         XCTAssertEqual(a2.count, 0)
     }
+
+    /// Маркеры провайдеров не подавляют друг друга: одинаковый reset не
+    /// схлопывает GLM- и Codex-ключи (префиксы glm:/codex:predict:).
+    func testCodexMarkerDoesNotSuppressGLMAlert() {
+        let config = GLMForecastConfigSection()
+        var five = GLMWindowForecast(verdict: .overflow, projected: 110, remaining: -10,
+                                     total: 100, resetAt: 1_800_003_600_000,
+                                     exhaustionAt: 1_800_001_800_000,
+                                     headroomPercent: -10, rateCreditsPerHour: 5,
+                                     agentMinutes: nil)
+        var f = GLMForecast()
+        five.exhaustionAt = 1_800_001_800_000
+        f.fiveHours = five
+        f.agents = [GLMAgentForecast(name: "a", id: "a", external: false, active: true,
+                                     isSidechainMarked: false, tokensPerHour: 10,
+                                     creditsPerHour: 0, sharePercent: 100,
+                                     budgetMinutes: nil)]
+        let codexMarker = "codex:predict:codex:primary:1800003600000:overflow:0"
+        let glm = predictiveAlerts(forecast: f, config: config,
+                                   notified: [codexMarker: 1], now: Date())
+        XCTAssertEqual(glm.alerts.count, 1,
+                       "codex-маркер не гасит GLM-алерт того же окна")
+        let codex = codexPredictiveAlerts(
+            forecast: CodexForecast(windows: [CodexWindowForecast(
+                bucketID: "codex", windowKey: .primary, label: "5h",
+                verdict: .overflow, usedPercent: 90, projectedPercent: 110,
+                projectedP50: nil, projectedP90: nil, headroomPercent: -10,
+                resetAt: 1_800_003_600_000,
+                exhaustionAt: Int64(Date().timeIntervalSince1970 * 1000) + 1_800_000,
+                ratePercentPerHour: 10, sampleCount: 2, stale: false)], updatedAt: 1),
+            config: config,
+            notified: glm.notified, now: Date())
+        XCTAssertEqual(codex.alerts.count, 1,
+                       "GLM-маркеры не гасят codex-алерт")
+    }
 }

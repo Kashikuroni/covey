@@ -61,6 +61,16 @@ final class UsageStore {
         }
         if next.codexUsageEnabled, case .active = next.codexState, let usage = next.codexUsage {
             notify(agent: "Codex", windows: usage.windows.map { ($0.label, $0.window) })
+            // Предиктивные алерты Codex (этап 2): пороги — общие с GLM
+            // (margin/imminent), прогноз не зависит от включённости GLM.
+            if next.codexForecast?.windows.isEmpty == false {
+                let (codexAlerts, codexMarks) = codexPredictiveAlerts(
+                    forecast: next.codexForecast, config: glmForecastConfig,
+                    notified: readMarkers(), now: Date())
+                if let alertSink { alertSink(codexAlerts) }
+                else { for a in codexAlerts { Notifier.post(a) } }
+                if codexMarks != readMarkers() { writeMarkers(codexMarks); onPersist() }
+            }
         }
         if next.glmUsageEnabled, next.glmUsageError == nil, let chip = glmChip(quota: next.glmQuota) {
             notify(agent: "GLM", windows: chip.windows.map { ($0.label, $0.window) })
