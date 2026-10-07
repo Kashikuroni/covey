@@ -68,6 +68,11 @@ func sessionPresentation(_ session: ForecastSessionUsage)
     return (source, credits, budget)
 }
 
+/// Команда для AgentIcon по источнику сессии (иконки как в панели сессий).
+func agentIconCommand(for source: ForecastUsageSource) -> String {
+    source == .codex ? "codex" : "claude"
+}
+
 /// Строка таблицы агентов из провайдер-нейтральной аналитики.
 struct AgentRow: Identifiable, Equatable {
     let id: String
@@ -1115,6 +1120,7 @@ private struct AgentsTable: View {
         // без отдельного бейджа; внешность — отдельная колонка ext.
         let color = sourceColor(a.source)
         return HStack(spacing: 6) {
+            AgentIcon(agent: agentIconCommand(for: a.source), tk: tk)
             if let parts = projectParts(a.name) {
                 // Имя проекта как в списке сессий; ветка worktree приглушена.
                 Text(parts.project)

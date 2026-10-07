@@ -133,6 +133,13 @@ final class ForecastAnalyticsPresentationTests: XCTestCase {
                        "uncached input и cached input считаются по своим ставкам")
     }
 
+    // MARK: - agent icon
+
+    func testSourceMapsToAgentIconCommand() {
+        XCTAssertEqual(agentIconCommand(for: .claudeCode), "claude")
+        XCTAssertEqual(agentIconCommand(for: .codex), "codex")
+    }
+
     // MARK: - adaptive layout
 
     func testAnalyticsRowsPairOnlyOnWideWindows() {
