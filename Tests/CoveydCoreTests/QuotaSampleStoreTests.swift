@@ -297,4 +297,134 @@ final class QuotaSampleStoreTests: XCTestCase {
                                            from: Data(contentsOf: URL(fileURLWithPath: path + ".bak")))
         XCTAssertEqual(bak.minute.last?.fiveUsed, 5, "бэкап остался хорошим состоянием")
     }
+
+    // MARK: - Codex quota samples (Stage 2)
+
+    private func date(ms: Int64) -> Date {
+        Date(timeIntervalSince1970: Double(ms) / 1000)
+    }
+
+    /// Двухбакетный снапшот: «codex» 5h+7d и «team» 5h (с префиксом имени).
+    private func twoBucketSnapshot(teamUsed: Double = 30) -> CodexRateLimitsSnapshot {
+        CodexRateLimitsSnapshot(buckets: [
+            "codex": CodexRateLimitBucket(
+                id: "codex", name: nil,
+                primary: LabeledWindow(label: "5h", durationMinutes: 300,
+                                       window: UsageWindow(utilization: 20, resetUnix: 1_800_000)),
+                secondary: LabeledWindow(label: "7d", durationMinutes: 10_080,
+                                         window: UsageWindow(utilization: 40, resetUnix: 1_900_000))),
+            "team": CodexRateLimitBucket(
+                id: "team", name: "Team",
+                primary: LabeledWindow(label: "5h", durationMinutes: 300,
+                                       window: UsageWindow(utilization: teamUsed, resetUnix: 1_850_000)),
+                secondary: LabeledWindow(label: "7d", durationMinutes: 10_080,
+                                         window: UsageWindow(utilization: 8, resetUnix: 1_950_000))),
+        ])
+    }
+
+    func testAppendExpandsEveryBucketAndSlotAndConvertsResetToMilliseconds() {
+        let store = QuotaSampleStore(path: nil)
+        store.appendCodexRateLimits(twoBucketSnapshot(), now: date(ms: 1_800_030_000))
+        XCTAssertEqual(store.codexQuotaSamples.count, 4)
+        let codex = store.codexQuotaSeries(bucketID: "codex", windowKey: .primary,
+                                           now: date(ms: 1_800_030_000))
+        XCTAssertEqual(codex.first?.resetAt, 1_800_000_000, "секунды → миллисекунды один раз")
+        XCTAssertEqual(codex.first?.label, "5h")
+        XCTAssertEqual(codex.first?.durationMinutes, 300)
+        let team = store.codexQuotaSeries(bucketID: "team", windowKey: .primary,
+                                          now: date(ms: 1_800_030_000))
+        XCTAssertEqual(team.first?.label, "Team 5h", "префикс имени — как в bucket.windows")
+        XCTAssertEqual(team.first?.usedPercent, 30)
+    }
+
+    func testResetSecondsConvertToMillisecondsExactlyOnce() throws {
+        let store = QuotaSampleStore(path: nil)
+        store.appendCodexRateLimits(
+            CodexRateLimitsSnapshot(primary: LabeledWindow(
+                label: "5h", window: UsageWindow(utilization: 10, resetUnix: 1_800_000)),
+                secondary: nil),
+            now: date(ms: 1_799_000_000))
+        XCTAssertEqual(store.codexQuotaSamples.count, 1)
+        XCTAssertEqual(try XCTUnwrap(store.codexQuotaSamples.first).resetAt, 1_800_000_000)
+    }
+
+    func testSameMinuteUpsertDoesNotDuplicateBucketSlot() throws {
+        let store = QuotaSampleStore(path: nil)
+        store.appendCodexRateLimits(twoBucketSnapshot(), now: date(ms: 60_001))
+        store.appendCodexRateLimits(twoBucketSnapshot(teamUsed: 12), now: date(ms: 60_999))
+        // Полный снапшот перезаписал ту же минуту — по-прежнему 4, fresh значения.
+        XCTAssertEqual(store.codexQuotaSamples.count, 4)
+        let team = store.codexQuotaSeries(bucketID: "team", windowKey: .primary,
+                                          now: date(ms: 60_999))
+        XCTAssertEqual(try XCTUnwrap(team.last).usedPercent, 12)
+    }
+
+    func testPartialUpdateUpsertsOnlyItsSlots() throws {
+        let store = QuotaSampleStore(path: nil)
+        store.appendCodexRateLimits(twoBucketSnapshot(), now: date(ms: 60_001))
+        let partial = CodexRateLimitsSnapshot(buckets: ["codex": CodexRateLimitBucket(
+            id: "codex", name: nil,
+            primary: LabeledWindow(label: "5h", durationMinutes: 300,
+                                   window: UsageWindow(utilization: 25, resetUnix: 1_800_000)),
+            secondary: nil)])
+        store.appendCodexRateLimits(partial, now: date(ms: 120_001))
+        XCTAssertEqual(store.codexQuotaSamples.count, 5,
+                       "3 старых слота + обновлённый primary; secondary codex перезаписан не был")
+        XCTAssertEqual(store.codexQuotaSeries(bucketID: "codex", windowKey: .primary,
+                                              now: date(ms: 120_001)).last?.usedPercent, 25)
+        XCTAssertEqual(store.codexQuotaSeries(bucketID: "codex", windowKey: .secondary,
+                                              now: date(ms: 120_001)).first?.usedPercent, 40)
+    }
+
+    func testCodexSamplesPruneAgainstWallClockNotLastSample() {
+        let store = QuotaSampleStore(path: nil)
+        store.appendCodexRateLimits(twoBucketSnapshot(), now: date(ms: 0))
+        // Через 9 дней прун по настенным часам должен убрать ВСЁ.
+        let late = date(ms: 9 * 24 * 3600 * 1000)
+        store.appendCodexRateLimits(twoBucketSnapshot(), now: late)
+        XCTAssertEqual(store.codexQuotaSamples.count, 4,
+                       "старые 4 выпали (8 дней), свежие 4 остались")
+    }
+
+    func testHiddenBucketsAndInvalidPercentAreOmitted() {
+        let store = QuotaSampleStore(path: nil)
+        var snapshot = twoBucketSnapshot()
+        snapshot.buckets["spark"] = CodexRateLimitBucket(
+            id: "codex_bengalfox", name: "GPT-5.3-Codex-Spark",
+            primary: LabeledWindow(label: "5h",
+                                   window: UsageWindow(utilization: 99, resetUnix: 1_800_000)),
+            secondary: nil)
+        snapshot.buckets["bad"] = CodexRateLimitBucket(
+            id: "bad", name: "Bad",
+            primary: LabeledWindow(label: "5h",
+                                   window: UsageWindow(utilization: -5, resetUnix: 1_800_000)),
+            secondary: nil)
+        store.appendCodexRateLimits(snapshot, now: date(ms: 1_800_030_000))
+        XCTAssertFalse(store.codexQuotaSamples.contains { $0.bucketID == "spark" })
+        XCTAssertFalse(store.codexQuotaSamples.contains { $0.bucketID == "bad" },
+                       "отрицательный процент не проходит")
+        XCTAssertTrue(store.codexQuotaSamples.contains { $0.bucketID == "codex" })
+    }
+
+    func testOverLimitPercentIsPreserved() {
+        let store = QuotaSampleStore(path: nil)
+        var snapshot = twoBucketSnapshot()
+        snapshot.buckets["codex"]?.primary = LabeledWindow(
+            label: "5h", durationMinutes: 300,
+            window: UsageWindow(utilization: 104, resetUnix: 1_800_000))
+        store.appendCodexRateLimits(snapshot, now: date(ms: 1_800_030_000))
+        XCTAssertEqual(store.codexQuotaSeries(bucketID: "codex", windowKey: .primary,
+                                              now: date(ms: 1_800_030_000)).first?.usedPercent, 104)
+    }
+
+    func testLegacyForecastFileDecodesCodexCollectionsAsEmpty() throws {
+        let legacy = #"{"minute":[],"hour":[],"factors":{}}"#
+        let path = NSTemporaryDirectory() + UUID().uuidString + ".json"
+        try legacy.write(toFile: path, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = QuotaSampleStore(path: path)
+        XCTAssertTrue(store.codexQuotaSamples.isEmpty,
+                      "до-фичевый файл декодируется без падения")
+    }
+
 }

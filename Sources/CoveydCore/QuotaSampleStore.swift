@@ -42,6 +42,27 @@ public struct CodexContextPoint: Codable, Equatable, Sendable {
     }
 }
 
+/// Одно наблюдение rate-limit окна Codex: минута, бакет/слот, известная
+/// длительность, процент и reset (уже в миллисекундах — конвертация секунд
+/// ровно один раз на входе).
+public struct CodexQuotaSample: Codable, Equatable, Sendable {
+    public var t: Int64                 // Unix ms, минутное ведро
+    public var bucketID: String
+    public var windowKey: CodexForecastWindowKey
+    public var label: String
+    public var durationMinutes: Int?
+    public var usedPercent: Double
+    public var resetAt: Int64?          // Unix ms
+
+    public init(t: Int64, bucketID: String, windowKey: CodexForecastWindowKey,
+                label: String, durationMinutes: Int?, usedPercent: Double,
+                resetAt: Int64?) {
+        self.t = t; self.bucketID = bucketID; self.windowKey = windowKey
+        self.label = label; self.durationMinutes = durationMinutes
+        self.usedPercent = usedPercent; self.resetAt = resetAt
+    }
+}
+
 public struct CodexUsageCursor: Codable, Equatable, Sendable {
     public var offset: UInt64
     public var model: String?
@@ -85,6 +106,7 @@ struct ForecastFile: Codable {
     var lastContext: [String: LastContextRecord]?     // контекст сессий, 14 дней
     var codexCursors: [String: CodexUsageCursor]?
     var sessionMetadata: [String: ForecastSessionMetadata]?
+    var codexQuotaSamples: [CodexQuotaSample]?
     var factors = PersistedFactors()
 }
 
@@ -140,6 +162,8 @@ public final class QuotaSampleStore {
 
     /// Пауза длиннее двух пропущенных опросов (опрос ~1/мин) — разрыв.
     private static let gapThresholdMs: Int64 = 3 * 60_000
+    /// Retention истории квот Codex — 8 дней (спека этапа 2).
+    private static let codexQuotaRetentionMs: Int64 = 8 * 24 * 3600 * 1000
 
     private func upsert5Min(_ sample: QuotaSample) {
         let bucket = sample.t - sample.t % 300_000
@@ -166,6 +190,72 @@ public final class QuotaSampleStore {
     public var offsets: [String: UInt64] { file.offsets }
     public func setOffset(_ path: String, _ value: UInt64) { file.offsets[path] = value }
     public var codexCursors: [String: CodexUsageCursor] { file.codexCursors ?? [:] }
+    // MARK: - Codex rate-limit история (этап 2)
+
+    public var codexQuotaSamples: [CodexQuotaSample] { file.codexQuotaSamples ?? [] }
+
+    /// Разворачивает слитый снапшот в сэмплы (бакет по ID, primary затем
+    /// secondary), апсертит по (минута, bucketID, windowKey) и прунит против
+    /// настенных часов `now` — рестарт/бэкойлл не продлевает историю.
+    public func appendCodexRateLimits(_ snapshot: CodexRateLimitsSnapshot, now: Date) {
+        let nowMs = Int64(now.timeIntervalSince1970 * 1000)
+        let minute = nowMs - nowMs % 60_000
+        var samples = file.codexQuotaSamples ?? []
+        for (id, bucket) in snapshot.buckets.sorted(by: { $0.key < $1.key }) {
+            guard !bucket.windows.isEmpty else { continue }   // spark и скрытые
+            for slot in [(bucket.primary, CodexForecastWindowKey.primary),
+                         (bucket.secondary, CodexForecastWindowKey.secondary)] {
+                guard let window = slot.0,
+                      validCodexPercent(window.window.utilization) else { continue }
+                // Тот же префикс, что у CodexRateLimitBucket.windows.
+                let label: String
+                if id == "codex" {
+                    label = window.label
+                } else if let name = bucket.name, !name.isEmpty {
+                    label = "\(name) \(window.label)"
+                } else {
+                    label = "\(id) \(window.label)"
+                }
+                let sample = CodexQuotaSample(
+                    t: minute, bucketID: id, windowKey: slot.1,
+                    label: label, durationMinutes: window.durationMinutes,
+                    usedPercent: window.window.utilization,
+                    resetAt: window.window.resetUnix.flatMap(Self.resetSecondsToMs))
+                if let i = samples.lastIndex(where: {
+                    $0.t == minute && $0.bucketID == id && $0.windowKey == slot.1
+                }) {
+                    samples[i] = sample     // тот же poll/ретрай — перезаписать
+                } else {
+                    samples.append(sample)
+                }
+            }
+        }
+        let cutoff = nowMs - Self.codexQuotaRetentionMs
+        samples.removeAll { $0.t < cutoff }
+        samples.sort { ($0.t, $0.bucketID, $0.windowKey.rawValue) <
+                       ($1.t, $1.bucketID, $1.windowKey.rawValue) }
+        file.codexQuotaSamples = samples
+    }
+
+    /// История одного окна, отсортированная по времени.
+    public func codexQuotaSeries(bucketID: String, windowKey: CodexForecastWindowKey,
+                                 now: Date) -> [CodexQuotaSample] {
+        let cutoff = Int64(now.timeIntervalSince1970 * 1000) - Self.codexQuotaRetentionMs
+        return codexQuotaSamples.filter {
+            $0.bucketID == bucketID && $0.windowKey == windowKey && $0.t >= cutoff
+        }.sorted { $0.t < $1.t }
+    }
+
+    /// Конвертация upstream-секунд в миллисекунды с защитой от переполнения.
+    public static func resetSecondsToMs(_ seconds: Int64) -> Int64? {
+        let (multiplied, overflow) = seconds.multipliedReportingOverflow(by: 1_000)
+        return overflow ? nil : multiplied
+    }
+
+    /// Конечный неотрицательный процент; 104% законен и проходит.
+    private func validCodexPercent(_ value: Double) -> Bool {
+        value.isFinite && value >= 0
+    }
     public func setCodexCursor(_ cursor: CodexUsageCursor, for path: String) {
         var cursors = codexCursors
         cursors[path] = cursor
