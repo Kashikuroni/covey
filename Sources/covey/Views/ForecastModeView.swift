@@ -291,13 +291,14 @@ struct ForecastModeView: View {
     }
 
     /// Аналитика: столбцы/теплокарта, таблицы, spend, журнал — из
-    /// провайдер-нейтрального `forecastAnalytics`. Пары карточек встают
-    /// в строку только на широком окне: на ноутбуке таблицы друг под
-    /// другом, иначе колонки сжимаются в вертикальные пилюли.
+    /// провайдер-нейтрального `forecastAnalytics`. Графики всегда парой —
+    /// на ноутбуке им места хватает; адаптив нужен только таблицам:
+    /// на узком окне каждая на всю ширину, иначе колонки сжимаются
+    /// в вертикальные пилюли.
     private func analyticsArea(_ analytics: ForecastAnalytics, now: Date) -> some View {
         let paired = analyticsUsesPairedRows(analyticsWidth)
         return VStack(alignment: .leading, spacing: 10) {
-            adaptiveRow(paired: paired) {
+            HStack(alignment: .top, spacing: 10) {
                 if !analytics.modelDaily.isEmpty {
                     ModelBarsCard(daily: analytics.modelDaily, tk: tk, settings: settings) {
                         model.showDashboardSettings = true
@@ -307,6 +308,7 @@ struct ForecastModeView: View {
                     HeatmapCard(hourly: analytics.hourly, tk: tk)
                 }
             }
+            .fixedSize(horizontal: false, vertical: true)
             adaptiveRow(paired: paired) {
                 agentsCard(analytics)
                 modelsCard(analytics)
