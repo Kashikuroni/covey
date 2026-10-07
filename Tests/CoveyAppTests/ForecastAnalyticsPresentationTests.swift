@@ -132,4 +132,13 @@ final class ForecastAnalyticsPresentationTests: XCTestCase {
         XCTAssertEqual(s.total ?? 0, 0.000106, accuracy: 1e-9,
                        "uncached input и cached input считаются по своим ставкам")
     }
+
+    // MARK: - adaptive layout
+
+    func testAnalyticsRowsPairOnlyOnWideWindows() {
+        XCTAssertTrue(analyticsUsesPairedRows(1900), "большой внешний экран — пары в строку")
+        XCTAssertTrue(analyticsUsesPairedRows(CGFloat(1600)), "граница включена")
+        XCTAssertFalse(analyticsUsesPairedRows(1400), "ноутбук — карточки друг под другом")
+        XCTAssertFalse(analyticsUsesPairedRows(900))
+    }
 }

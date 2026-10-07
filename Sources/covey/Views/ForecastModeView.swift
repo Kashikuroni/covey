@@ -14,6 +14,16 @@ func isGLMModelName(_ model: String) -> Bool {
     return m.contains("glm") || m.contains("zai")
 }
 
+/// Начиная с какой ширины окна карточки аналитики встают парами в строку.
+/// Ниже — «ноутбучная» раскладка: каждая карточка на всю ширину, таблицы
+/// не сжимаются в вертикальные пилюли.
+let pairedAnalyticsRowMinWidth: CGFloat = 1600
+
+/// Широкая раскладка: пары карточек в строку; узкая — стек по одной.
+func analyticsUsesPairedRows(_ width: CGFloat) -> Bool {
+    width >= pairedAnalyticsRowMinWidth
+}
+
 /// Какие секции страницы Forecast показывать: GLM-часть (окна/onboarding/off/
 /// ожидание) и аналитика независимы — GPT-данные живут без GLM.
 struct ForecastContentState: Equatable {
@@ -171,6 +181,8 @@ enum ForecastEN {
 /// `TopBar` and is deliberately untouched.
 struct ForecastModeView: View {
     let model: AppModel
+    /// Ширина вьюпорта: решает, пары карточек в строку или стек.
+    @State private var analyticsWidth: CGFloat = 0
 
     private var settings: DashboardSettings { model.dashboardSettings }
     private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
@@ -222,6 +234,10 @@ struct ForecastModeView: View {
         }
         .font(.system(size: 12))
         .foregroundStyle(tk.t1)
+        // Ширина вьюпорта решает: пары карточек в строку или стек.
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+            analyticsWidth = width
+        }
     }
 
     /// Все модели, встреченные в текущих метриках (таблица, дневные вёдра,
@@ -275,10 +291,13 @@ struct ForecastModeView: View {
     }
 
     /// Аналитика: столбцы/теплокарта, таблицы, spend, журнал — из
-    /// провайдер-нейтрального `forecastAnalytics`.
+    /// провайдер-нейтрального `forecastAnalytics`. Пары карточек встают
+    /// в строку только на широком окне: на ноутбуке таблицы друг под
+    /// другом, иначе колонки сжимаются в вертикальные пилюли.
     private func analyticsArea(_ analytics: ForecastAnalytics, now: Date) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 10) {
+        let paired = analyticsUsesPairedRows(analyticsWidth)
+        return VStack(alignment: .leading, spacing: 10) {
+            adaptiveRow(paired: paired) {
                 if !analytics.modelDaily.isEmpty {
                     ModelBarsCard(daily: analytics.modelDaily, tk: tk, settings: settings) {
                         model.showDashboardSettings = true
@@ -288,12 +307,10 @@ struct ForecastModeView: View {
                     HeatmapCard(hourly: analytics.hourly, tk: tk)
                 }
             }
-            .fixedSize(horizontal: false, vertical: true)
-            HStack(alignment: .top, spacing: 10) {
+            adaptiveRow(paired: paired) {
                 agentsCard(analytics)
                 modelsCard(analytics)
             }
-            .fixedSize(horizontal: false, vertical: true)
             SpendCard(analytics: analytics, settings: settings, tk: tk)
             if !analytics.sessionCosts.isEmpty {
                 SessionCostsCard(entries: analytics.sessionCosts,
@@ -302,6 +319,20 @@ struct ForecastModeView: View {
                                  } ?? nil,
                                  tk: tk, projectParts: agentProjectParts, settings: settings)
             }
+        }
+    }
+
+    /// Строка из двух карточек на широком окне; на узком — те же карточки
+    /// друг под другом (высота по содержимому в обоих случаях).
+    @ViewBuilder
+    private func adaptiveRow<Content: View>(paired: Bool,
+                                            @ViewBuilder content: () -> Content) -> some View {
+        if paired {
+            HStack(alignment: .top, spacing: 10) { content() }
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            VStack(alignment: .leading, spacing: 10) { content() }
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
