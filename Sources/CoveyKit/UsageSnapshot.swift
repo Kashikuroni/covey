@@ -27,6 +27,8 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
     public var glmUsageEnabled = true
     public var glmForecast: GLMForecast?
     public var forecastAnalytics: ForecastAnalytics?
+    /// Прогноз Codex rate-limit окон (этап 2).
+    public var codexForecast: CodexForecast?
     public init() {}
 
     /// Every field is optional on decode so a snapshot written before a
@@ -51,6 +53,7 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
         forecastAnalytics = try c.decodeIfPresent(ForecastAnalytics.self,
                                                   forKey: .forecastAnalytics)
             ?? glmForecast.flatMap(ForecastAnalytics.init(legacy:))
+        codexForecast = try c.decodeIfPresent(CodexForecast.self, forKey: .codexForecast)
     }
 }
 

@@ -19,6 +19,18 @@ final class UsageIPCTests: XCTestCase {
                 ForecastSessionUsage(id: "codex:s1", name: "app", source: .codex,
                                      external: true, active: true, tokensPerHour: 12_000)
             ])
+        snapshot.codexForecast = CodexForecast(windows: [
+            CodexWindowForecast(bucketID: "codex", windowKey: .primary, label: "5h",
+                                verdict: .fits, usedPercent: 42, projectedPercent: 60,
+                                projectedP50: 58, projectedP90: 66, headroomPercent: 40,
+                                resetAt: 1_800_000_000, exhaustionAt: 1_799_000_000,
+                                ratePercentPerHour: 3, sampleCount: 4, stale: false),
+            CodexWindowForecast(bucketID: "team", windowKey: .secondary, label: "7d",
+                                verdict: .tight, usedPercent: 96, projectedPercent: 99,
+                                projectedP50: nil, projectedP90: nil, headroomPercent: 1,
+                                resetAt: nil, exhaustionAt: nil,
+                                ratePercentPerHour: 0.5, sampleCount: 2, stale: true),
+        ], updatedAt: 1_800_000_000)
         let message = ServerMessage.event(.usageChanged(snapshot: snapshot))
         XCTAssertEqual(try JSONDecoder().decode(ServerMessage.self,
                        from: JSONEncoder().encode(message)), message)

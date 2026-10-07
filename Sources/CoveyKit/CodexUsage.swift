@@ -3,11 +3,14 @@ import Foundation
 /// One labeled usage window (Codex primary/secondary), reusing the Claude
 /// `UsageWindow` so the chip renderer stays shared.
 public struct LabeledWindow: Codable, Equatable, Sendable {
-    public init(label: String, window: UsageWindow) {
+    public init(label: String, durationMinutes: Int? = nil, window: UsageWindow) {
         self.label = label
+        self.durationMinutes = durationMinutes
         self.window = window
     }
     public var label: String
+    /// Известная upstream'у длина окна в минутах; nil — не прислана.
+    public var durationMinutes: Int?
     public var window: UsageWindow
 }
 
@@ -53,6 +56,7 @@ public struct CodexRateLimitBucket: Codable, Equatable, Sendable {
             guard let labeled else { return nil }
             guard let windowPrefix else { return labeled }
             return LabeledWindow(label: "\(windowPrefix) \(labeled.label)",
+                                 durationMinutes: labeled.durationMinutes,
                                  window: labeled.window)
         }
     }
@@ -126,7 +130,7 @@ private func parseWindow(_ dict: [String: Any], fallbackLabel: String) -> Labele
     let mins = num(dict, ["windowDurationMins", "window_duration_mins"]).flatMap { usageInteger($0, as: Int.self) }
     let reset = num(dict, ["resetsAt", "resets_at"]).flatMap { usageInteger($0, as: Int64.self) }
     let label = mins.map(codexWindowLabel(minutes:)) ?? fallbackLabel
-    return LabeledWindow(label: label,
+    return LabeledWindow(label: label, durationMinutes: mins,
                          window: UsageWindow(utilization: used, resetUnix: reset))
 }
 
@@ -162,7 +166,9 @@ public func parseCodexRateLimits(_ json: [String: Any]) -> CodexRateLimitsSnapsh
 }
 
 /// Partial `updated` merges into the last full snapshot: a nil slot in the
-/// update keeps the base slot (missing fields are not zeroed).
+/// update keeps the base slot, and a present slot merges SUBFIELD-wise —
+/// utilization (and any present subfield) comes from the update, while the
+/// duration/label/reset the sparse update omits keep the base's values.
 public func mergeCodex(into base: CodexRateLimitsSnapshot?,
                 update: CodexRateLimitsSnapshot) -> CodexRateLimitsSnapshot {
     guard let base else { return update }
@@ -175,8 +181,25 @@ public func mergeCodex(into base: CodexRateLimitsSnapshot?,
         buckets[id] = CodexRateLimitBucket(
             id: id,
             name: updateBucket.name ?? baseBucket.name,
-            primary: updateBucket.primary ?? baseBucket.primary,
-            secondary: updateBucket.secondary ?? baseBucket.secondary)
+            primary: mergedSlot(updateBucket.primary, base: baseBucket.primary),
+            secondary: mergedSlot(updateBucket.secondary, base: baseBucket.secondary))
     }
     return CodexRateLimitsSnapshot(buckets: buckets)
+}
+
+/// Подполевая склейка слота. Появившийся в апдейте слот заменяет базу
+/// целиком; для существующего утилизация берётся из апдейта, а отсутствующие
+/// там подляны (label без duration — fallback парсера «primary»/«secondary»,
+/// сама duration, reset) сохраняют базовые значения.
+private func mergedSlot(_ update: LabeledWindow?, base: LabeledWindow?) -> LabeledWindow? {
+    guard let update else { return base }
+    guard let base else { return update }
+    let unlabeled = update.label == CodexForecastWindowKey.primary.rawValue
+        || update.label == CodexForecastWindowKey.secondary.rawValue
+    return LabeledWindow(
+        label: unlabeled ? base.label : update.label,
+        durationMinutes: update.durationMinutes ?? base.durationMinutes,
+        window: UsageWindow(
+            utilization: update.window.utilization,
+            resetUnix: update.window.resetUnix ?? base.window.resetUnix))
 }

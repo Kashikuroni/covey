@@ -117,15 +117,23 @@ public struct PersistedUsage: Codable, Equatable {
 public struct PersistedCodexRateLimitBucket: Codable, Equatable {
     public var name: String?
     public var primaryLabel: String?
+    public var primaryDurationMinutes: Int?
     public var primary: PersistedUsageWindow?
     public var secondaryLabel: String?
+    public var secondaryDurationMinutes: Int?
     public var secondary: PersistedUsageWindow?
     public init(name: String? = nil,
-                primaryLabel: String? = nil, primary: PersistedUsageWindow? = nil,
-                secondaryLabel: String? = nil, secondary: PersistedUsageWindow? = nil) {
+                primaryLabel: String? = nil, primaryDurationMinutes: Int? = nil,
+                primary: PersistedUsageWindow? = nil,
+                secondaryLabel: String? = nil, secondaryDurationMinutes: Int? = nil,
+                secondary: PersistedUsageWindow? = nil) {
         self.name = name
-        self.primaryLabel = primaryLabel; self.primary = primary
-        self.secondaryLabel = secondaryLabel; self.secondary = secondary
+        self.primaryLabel = primaryLabel
+        self.primaryDurationMinutes = primaryDurationMinutes
+        self.primary = primary
+        self.secondaryLabel = secondaryLabel
+        self.secondaryDurationMinutes = secondaryDurationMinutes
+        self.secondary = secondary
     }
 }
 
@@ -133,15 +141,23 @@ public struct PersistedCodexRateLimitBucket: Codable, Equatable {
 /// fields stay readable while `buckets` preserves the current multi-limit API.
 public struct PersistedCodexUsage: Codable, Equatable {
     public var primaryLabel: String?
+    public var primaryDurationMinutes: Int?
     public var primary: PersistedUsageWindow?
     public var secondaryLabel: String?
+    public var secondaryDurationMinutes: Int?
     public var secondary: PersistedUsageWindow?
     public var buckets: [String: PersistedCodexRateLimitBucket]?
-    public init(primaryLabel: String? = nil, primary: PersistedUsageWindow? = nil,
-                secondaryLabel: String? = nil, secondary: PersistedUsageWindow? = nil,
+    public init(primaryLabel: String? = nil, primaryDurationMinutes: Int? = nil,
+                primary: PersistedUsageWindow? = nil,
+                secondaryLabel: String? = nil, secondaryDurationMinutes: Int? = nil,
+                secondary: PersistedUsageWindow? = nil,
                 buckets: [String: PersistedCodexRateLimitBucket]? = nil) {
-        self.primaryLabel = primaryLabel; self.primary = primary
-        self.secondaryLabel = secondaryLabel; self.secondary = secondary
+        self.primaryLabel = primaryLabel
+        self.primaryDurationMinutes = primaryDurationMinutes
+        self.primary = primary
+        self.secondaryLabel = secondaryLabel
+        self.secondaryDurationMinutes = secondaryDurationMinutes
+        self.secondary = secondary
         self.buckets = buckets
     }
 }

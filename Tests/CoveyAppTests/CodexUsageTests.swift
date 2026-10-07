@@ -36,9 +36,9 @@ final class CodexUsageTests: XCTestCase {
             "secondary": ["used_percent": 40.0, "window_duration_mins": 10080, "resets_at": 1_600_000],
         ]]
         let snap = parseCodexRateLimits(json)
-        XCTAssertEqual(snap?.primary, LabeledWindow(label: "5h",
+        XCTAssertEqual(snap?.primary, LabeledWindow(label: "5h", durationMinutes: 300,
             window: UsageWindow(utilization: 12, resetUnix: 1_008_000)))
-        XCTAssertEqual(snap?.secondary, LabeledWindow(label: "7d",
+        XCTAssertEqual(snap?.secondary, LabeledWindow(label: "7d", durationMinutes: 10_080,
             window: UsageWindow(utilization: 40, resetUnix: 1_600_000)))
         XCTAssertEqual(snap?.windows.count, 2)
     }

@@ -26,6 +26,24 @@ final class UsagePersistenceTests: XCTestCase {
         XCTAssertEqual(PersistedCodexUsage(snap).live, snap)
     }
 
+    func testPersistedCodexUsagePreservesDurations() {
+        var snap = CodexRateLimitsSnapshot(
+            primary: LabeledWindow(label: "5h", durationMinutes: 300,
+                                   window: UsageWindow(utilization: 8, resetUnix: 1)),
+            secondary: LabeledWindow(label: "7d", durationMinutes: 10_080,
+                                     window: UsageWindow(utilization: 22, resetUnix: 2)))
+        snap.buckets["team"] = CodexRateLimitBucket(
+            id: "team", name: "Team",
+            primary: LabeledWindow(label: "5h",
+                                   durationMinutes: 300,
+                                   window: UsageWindow(utilization: 3, resetUnix: 5)),
+            secondary: nil)
+        let restored = PersistedCodexUsage(snap).live
+        XCTAssertEqual(restored.primary?.durationMinutes, 300, "легаси-поля несут duration")
+        XCTAssertEqual(restored.secondary?.durationMinutes, 10_080)
+        XCTAssertEqual(restored.buckets["team"]?.primary?.durationMinutes, 300)
+    }
+
     func testPersistedCodexUsageRoundTripsEveryBucket() {
         let snap = CodexRateLimitsSnapshot(buckets: [
             "codex": CodexRateLimitBucket(
