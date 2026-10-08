@@ -139,11 +139,15 @@ struct TerminalPaneView: View {
             .gesture(
                 DragGesture(coordinateSpace: .named(Self.splitSpace))
                     .onChanged { value in
-                        let usable = max(0, (vertical ? companion.minX : companion.minY)
-                                       - Tokens.gutter)
-                        guard usable > 0 else { return }
+                        // companion доходит до края окна, так что его max —
+                        // вся сторона сплита; база «agent-область» делала драг
+                        // обратной связью (шов убегал к клампу и висел)
+                        let full = vertical ? companion.maxX : companion.maxY
+                        guard full > Tokens.gutter else { return }
                         let pos = vertical ? value.location.x : value.location.y
-                        model.setCompanionRatio(pos / usable)
+                        model.setCompanionRatio(
+                            PanelLayout.companionDragRatio(cursor: pos, available: full,
+                                                           gutter: Tokens.gutter))
                     }
             )
     }

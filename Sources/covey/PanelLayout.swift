@@ -99,6 +99,20 @@ struct PanelLayout: Equatable {
         return min(max(clamped, minFirst), maxFirst)
     }
 
+    /// Ratio для драга companion-деляты. В отличие от древесной раскладки,
+    /// gutter здесь вычтен из ПЕРВОЙ ветки (`agentArea = firstBranchSize −
+    /// gutter`), поэтому точная инверсия — «курсор + gutter» поверх всей
+    /// разделяемой стороны: линия шва встаёт под курсор, кламп 0.15–0.85
+    /// срабатывает ровно на шве, без мёртвой зоны. База «текущая agent-область»
+    /// делала драг положительной обратной связью: шов убегал к клампу от малого
+    /// движения, а затем не отвечал, пока курсор не возвращался к `0.85 × area`.
+    static func companionDragRatio(cursor: CGFloat, available: CGFloat,
+                                   gutter: CGFloat) -> Double {
+        let usable = max(0, available - gutter)
+        guard usable > 0 else { return 0 }
+        return Double(max(0, cursor + gutter) / usable)
+    }
+
     /// Делята дерева: путь узла (index-path) для записи ratio драгом.
     struct SplitDivider: Equatable {
         let path: [Int]

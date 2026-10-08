@@ -187,6 +187,43 @@ final class SplitFrameTests: XCTestCase {
         XCTAssertEqual(f.companion!.height, 500)
     }
 
+    /// Делята companion-зоны обязана вести шов ровно за курсором при любом
+    /// стартовом ratio: база драга — вся разделяемая сторона (size − gutter),
+    /// та же, на которую умножает `firstBranchSize`. База «ширина agent-области»
+    /// превращала драг в обратную связь: ratio = cursor/area при area ≈ 0.6
+    /// usable давало кламп 0.85 за одно касание («уменьшился сильнее, чем
+    /// двинули»), а дальше — мёртвая зона до 0.85 × area («граница не
+    /// реагирует»).
+    func testCompanionDividerDragTracksTheCursorFromAnyStartingRatio() {
+        for axis in [PaneAxis.vertical, PaneAxis.horizontal] {
+            let full: CGFloat = axis == .vertical ? size.width : size.height
+            // курсоры внутри неклампированного диапазона шва данной оси
+            // (пол 120pt на ветку: шов ∈ [112, usable−128])
+            let cursors: [CGFloat] = axis == .vertical ? [300, 600, 820] : [130, 300, 360]
+            for cursor in cursors {
+                var seams: Set<CGFloat> = []
+                for start in [0.15, 0.6, 0.85] {
+                    let ratio = PanelLayout.companionDragRatio(cursor: cursor,
+                                                               available: full, gutter: gutter)
+                    let f = PanelLayout.splitFrames(tree: nil, soloAgent: "a",
+                                                    companionShell: "sh", companionAxis: axis,
+                                                    companionRatio: ratio, size: size,
+                                                    gutter: gutter)
+                    // линия шва (край agent-области) под курсором; ручка 8pt
+                    // накрывает его целиком — как у древесных делят
+                    let seam = axis == .vertical
+                        ? f.agentArea!.maxX
+                        : f.agentArea!.maxY
+                    XCTAssertEqual(seam, CGFloat(cursor), accuracy: 0.5,
+                                   "\(axis): шов встаёт под курсор (старт \(start))")
+                    seams.insert(seam)
+                }
+                XCTAssertEqual(seams.count, 1,
+                               "\(axis): драг не зависит от стартового ratio")
+            }
+        }
+    }
+
     /// Ручка делителя обязана стоять В ШВЕ между панелями при ЛЮБОМ ratio.
     /// Она рисовалась по середине узла: при 0.5 совпадало, после первого же
     /// драга уезжала от шва — и «ресайз перестаёт работать».
