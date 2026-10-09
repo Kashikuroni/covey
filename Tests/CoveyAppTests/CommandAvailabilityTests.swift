@@ -4,6 +4,7 @@ import XCTest
 final class CommandAvailabilityTests: XCTestCase {
     func testAlwaysAvailableCommands() {
         for command in [AppCommand.newSession, .recentSessions, .toggleTheme,
+                        .toggleForecastSource,
                         .focusSessionList, .addProject, .settings] {
             XCTAssertEqual(CommandRules.availability(for: command, context: .init()), .enabled)
         }
@@ -114,8 +115,8 @@ final class CommandAvailabilityTests: XCTestCase {
     func testReviewModeKeepsTheToggleAndAppCommands() {
         let context = CommandContext(reviewOpen: true)
         XCTAssertEqual(CommandRules.availableInReview, [
-            .toggleReview, .toggleForecast, .toggleTheme, .showProviders,
-            .settings, .searchLogs,
+            .toggleReview, .toggleForecast, .toggleForecastSource, .toggleTheme,
+            .showProviders, .settings, .searchLogs,
         ])
         for command in CommandRules.availableInReview {
             XCTAssertEqual(CommandRules.availability(for: command, context: context), .enabled, "\(command)")

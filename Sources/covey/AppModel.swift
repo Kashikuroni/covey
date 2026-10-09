@@ -175,6 +175,9 @@ public final class AppModel {
     public private(set) var splitPct: Int = 38
     public private(set) var usagePlacement: UsagePlacement = .right
     public private(set) var menuBarLimitsEnabled = false
+    /// Какой источник показывает верхний блок окон Forecast — GLM
+    /// (Claude Code) или Codex (GPT). Персистится; циклится ⌘⇧F.
+    private(set) var forecastSource: ForecastSource = .claudeCode
     public private(set) var recents: [RecentSession] = []
     // Usage/limits state lives in UsageStore; these forwarding properties keep
     // the facade views and tests already read.
@@ -413,6 +416,7 @@ public final class AppModel {
         splitPct = persisted.splitPct ?? 38
         usagePlacement = persisted.usagePlacement.flatMap(UsagePlacement.init(rawValue:)) ?? .right
         menuBarLimitsEnabled = persisted.menuBarLimitsEnabled ?? false
+        forecastSource = persisted.forecastSource.flatMap(ForecastSource.init(rawValue:)) ?? .claudeCode
         recents = persisted.recents
         order = persisted.order
         projectOrder = persisted.projectOrder
@@ -879,6 +883,14 @@ public final class AppModel {
         persist()
     }
 
+    /// Пикер в шапке блока Forecast и зацикленный ⌘⇧F сходятся здесь:
+    /// выбор сразу персистится.
+    func setForecastSource(_ source: ForecastSource) {
+        guard source != forecastSource else { return }
+        forecastSource = source
+        persist()
+    }
+
     public func setSplitPct(_ pct: Int) {
         let clamped = min(PanelLayout.maxSessionSplitPercent,
                           max(PanelLayout.minSessionSplitPercent, pct))
@@ -1321,6 +1333,9 @@ public final class AppModel {
             } else {
                 enterForecast()
             }
+        case .toggleForecastSource:
+            // ⌘⇧F: зацикленный переключатель источника верхнего блока окон.
+            setForecastSource(forecastSource == .claudeCode ? .codex : .claudeCode)
         case .focusSessionList:
             focusZone(.session)
         case .focusAgent:
@@ -1897,6 +1912,7 @@ public final class AppModel {
         persisted.splitPct = splitPct
         persisted.usagePlacement = usagePlacement.rawValue
         persisted.menuBarLimitsEnabled = menuBarLimitsEnabled
+        persisted.forecastSource = forecastSource.rawValue
         persisted.recents = recents
         persisted.order = order
         persisted.projectOrder = projectOrder

@@ -24,31 +24,49 @@ func analyticsUsesPairedRows(_ width: CGFloat) -> Bool {
     width >= pairedAnalyticsRowMinWidth
 }
 
+/// Источник данных верхнего блока окон Forecast: показательные графики
+/// 5h/7d либо GLM (Claude Code), либо Codex (GPT). Циклится ⌘⇧F.
+enum ForecastSource: String, Equatable {
+    case claudeCode, codex
+}
+
 /// Какие секции страницы Forecast показывать: GLM-часть (окна/onboarding/off/
-/// ожидание) и аналитика независимы — GPT-данные живут без GLM.
+/// ожидание) и аналитика независимы — GPT-данные живут без GLM. Источник
+/// `.codex` полностью вытесняет GLM-секции: вместо них окна Codex (или
+/// карточка ожидания), дублирование секции Codex внизу исключается.
 struct ForecastContentState: Equatable {
     var showsGLMWindows = false
     var showsGLMOnboarding = false
     var showsGLMOff = false
     var showsGLMWaiting = false
+    var showsCodexWindows = false
+    var showsCodexWaiting = false
     var showsAnalytics = false
     var showsGPTModels = false
 }
 
-func forecastContentState(glmEnabled: Bool, glmAPIKeyMissing: Bool = false,
+func forecastContentState(source: ForecastSource = .claudeCode,
+                          glmEnabled: Bool, glmAPIKeyMissing: Bool = false,
                           glmForecast: GLMForecast?,
+                          codexForecast: CodexForecast? = nil,
                           analytics: ForecastAnalytics?) -> ForecastContentState {
     var state = ForecastContentState()
-    if !glmEnabled {
-        state.showsGLMOff = true
-    } else if glmAPIKeyMissing {
-        state.showsGLMOnboarding = true
-    }
-    if glmEnabled, let forecast = glmForecast,
-        forecast.fiveHours != nil || forecast.weekly != nil {
-        state.showsGLMWindows = true
-    } else if glmEnabled, !glmAPIKeyMissing {
-        state.showsGLMWaiting = true
+    if source == .codex {
+        let windows = codexForecast?.windows ?? []
+        state.showsCodexWindows = !windows.isEmpty
+        state.showsCodexWaiting = windows.isEmpty
+    } else {
+        if !glmEnabled {
+            state.showsGLMOff = true
+        } else if glmAPIKeyMissing {
+            state.showsGLMOnboarding = true
+        }
+        if glmEnabled, let forecast = glmForecast,
+            forecast.fiveHours != nil || forecast.weekly != nil {
+            state.showsGLMWindows = true
+        } else if glmEnabled, !glmAPIKeyMissing {
+            state.showsGLMWaiting = true
+        }
     }
     let analytics = analytics ?? ForecastAnalytics()
     state.showsAnalytics = !(analytics.models.isEmpty && analytics.modelDaily.isEmpty
@@ -56,6 +74,65 @@ func forecastContentState(glmEnabled: Bool, glmAPIKeyMissing: Bool = false,
         && analytics.sessions.isEmpty && analytics.sessionCosts.isEmpty)
     state.showsGPTModels = analytics.sessions.contains { $0.source == .codex }
     return state
+}
+
+/// Единицы показательных графиков: кредиты GLM-окон или проценты Codex.
+enum ForecastChartUnit {
+    case credits, percent
+
+    /// Значение оси/стата: «12.3k cr» либо «42%».
+    func value(_ v: Double) -> String {
+        switch self {
+        case .credits: return ForecastEN.credits(v) + " cr"
+        case .percent: return "\(Int(v.rounded()))%"
+        }
+    }
+
+    var rateSuffix: String { self == .credits ? "cr/h" : "%/h" }
+}
+
+// MARK: - Codex source: pair + adapter to the GLM chart units
+
+/// Пара 5h/7d для верхнего блока: слоты дефолтного bucket-а (конвенция
+/// `CodexUsage`: «codex», иначе первый по id). Прочие bucket-ы (например
+/// gpt-reserved) в показательные графики не попадают.
+func codexWindowPair(_ forecast: CodexForecast?)
+    -> (primary: CodexWindowForecast?, secondary: CodexWindowForecast?) {
+    guard let windows = forecast?.windows, !windows.isEmpty else {
+        return (nil, nil)
+    }
+    let defaultID = windows.contains { $0.bucketID == "codex" }
+        ? "codex" : windows.map(\.bucketID).min() ?? "codex"
+    func slot(_ key: CodexForecastWindowKey) -> CodexWindowForecast? {
+        windows.first { $0.bucketID == defaultID && $0.windowKey == key }
+    }
+    return (slot(.primary), slot(.secondary))
+}
+
+/// Вердикты Codex и GLM совпадают один в один — переиспользуем чип и цвета.
+func codexGLMVerdict(_ verdict: CodexForecastVerdict) -> GLMForecastVerdict {
+    GLMForecastVerdict(rawValue: verdict.rawValue) ?? .calibrating
+}
+
+/// Окно Codex в единицах GLM-графика: потолок — 100%, used — проценты,
+/// rate — %/ч. Формы графика (факт/проекция/ETA/reset) совпадают.
+func codexChartWindow(_ window: CodexWindowForecast) -> GLMWindowForecast {
+    GLMWindowForecast(verdict: codexGLMVerdict(window.verdict),
+                      projected: window.projectedPercent,
+                      remaining: 100 - window.usedPercent,
+                      total: 100,
+                      resetAt: window.resetAt,
+                      exhaustionAt: window.exhaustionAt,
+                      headroomPercent: window.headroomPercent,
+                      rateCreditsPerHour: window.ratePercentPerHour,
+                      agentMinutes: nil,
+                      projectedP50: window.projectedP50,
+                      projectedP90: window.projectedP90)
+}
+
+/// История окна → точки графика (used = проценты).
+func codexSeriesPoints(_ window: CodexWindowForecast?) -> [GLMSeriesPoint]? {
+    window?.series?.map { GLMSeriesPoint(t: $0.t, used: $0.usedPercent) }
 }
 
 /// Строка таблицы сессий: source-бейдж и опциональные квота-поля (для GPT
@@ -200,9 +277,11 @@ struct ForecastModeView: View {
                     // дашборда — шторкой из топбара. GLM-секция и аналитика
                     // независимы: GPT-данные показываются без GLM.
                     let state = forecastContentState(
+                        source: model.forecastSource,
                         glmEnabled: model.glmUsageEnabled,
                         glmAPIKeyMissing: model.glmAPIKeyStatus == .missing && model.glmQuota == nil,
                         glmForecast: model.glmForecast,
+                        codexForecast: model.codexForecast,
                         analytics: model.forecastAnalytics)
                     if state.showsGLMOff {
                         forecastOff
@@ -216,14 +295,17 @@ struct ForecastModeView: View {
                     if state.showsGLMWaiting {
                         emptyCard("No forecast yet — it appears after the first GLM poll")
                     }
+                    // Источник Codex: те же показательные графики 5h/7d, но в
+                    // процентах — пара из дефолтного bucket-а; селект источника
+                    // живёт в топбаре, ⌘⇧F циклит.
+                    if state.showsCodexWindows {
+                        codexWindowCards(now: context.date)
+                    }
+                    if state.showsCodexWaiting {
+                        emptyCard("No Codex forecast yet — it appears after the first Codex poll")
+                    }
                     if state.showsAnalytics, let analytics = model.forecastAnalytics {
                         analyticsArea(analytics, now: context.date)
-                    }
-                    // Секция Codex независима от GLM: окна rate-limit видны,
-                    // даже когда GLM выключен или без ключа.
-                    if let codexForecast = model.codexForecast,
-                       !codexForecast.windows.isEmpty {
-                        codexForecastArea(codexForecast, now: context.date)
                     }
                     settingsFooter
                 }
@@ -265,18 +347,22 @@ struct ForecastModeView: View {
 
     // MARK: - Codex quota forecast
 
-    /// Сетка карточек по окнам прогноза Codex — по одному на видимый слот
-    /// каждого bucket-а.
-    private func codexForecastArea(_ forecast: CodexForecast, now: Date) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("Codex rate limits", hint: "observed burn forecast")
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
-                                GridItem(.flexible(), spacing: 10)], spacing: 10) {
-                ForEach(codexForecastPresentations(forecast, now: now), id: \.id) { card in
-                    CodexForecastCard(card: card, tk: tk)
-                }
-            }
+    /// Показательные графики источника Codex: та же пара windowCard, но в
+    /// процентах и по данным Codex (primary/secondary дефолтного bucket-а).
+    private func codexWindowCards(now: Date) -> some View {
+        let pair = codexWindowPair(model.codexForecast)
+        return HStack(alignment: .top, spacing: 10) {
+            codexWindowCard("5h", window: pair.primary, sliding: true, now: now)
+            codexWindowCard("7d", window: pair.secondary, sliding: false, now: now)
         }
+    }
+
+    private func codexWindowCard(_ label: String, window: CodexWindowForecast?,
+                                 sliding: Bool, now: Date) -> some View {
+        windowCard(label, window: window.map(codexChartWindow),
+                   series: codexSeriesPoints(window) ?? [],
+                   hours: sliding ? 5 : 24 * 7,
+                   sliding: sliding, now: now, unit: .percent)
     }
 
     // MARK: - Forecast area
@@ -381,6 +467,7 @@ struct ForecastModeView: View {
     private func windowCard(_ label: String, window: GLMWindowForecast?,
                             series: [GLMSeriesPoint], hours: Double,
                             sliding: Bool, now: Date,
+                            unit: ForecastChartUnit = .credits,
                             extraStats: [(String, Double?)] = []) -> some View {
         card {
             VStack(alignment: .leading, spacing: 8) {
@@ -408,8 +495,9 @@ struct ForecastModeView: View {
                                 .foregroundStyle(tk.t3)
                         }
                     }
-                    windowChart(label, window: window, series: series, hours: hours, now: now)
-                    statsRow(window, label: label, extraStats: extraStats)
+                    windowChart(label, window: window, series: series, hours: hours,
+                                now: now, unit: unit)
+                    statsRow(window, label: label, unit: unit, extraStats: extraStats)
                 } else {
                     Text("no data").font(.caption).foregroundStyle(tk.t3)
                 }
@@ -418,21 +506,23 @@ struct ForecastModeView: View {
     }
 
     private func statsRow(_ w: GLMWindowForecast, label: String,
+                          unit: ForecastChartUnit = .credits,
                           extraStats: [(String, Double?)] = []) -> some View {
         HStack(spacing: 18) {
-            baseStats(w, label: label)
+            baseStats(w, label: label, unit: unit)
             extraStatViews(extraStats)
             etaStat(w)
             Spacer(minLength: 0)
         }
     }
 
-    private func baseStats(_ w: GLMWindowForecast, label: String) -> some View {
+    private func baseStats(_ w: GLMWindowForecast, label: String,
+                           unit: ForecastChartUnit = .credits) -> some View {
         let rateName = label == "7d" ? "rate · 24h avg" : "rate"
-        let rateValue = String(format: "%.1f", w.rateCreditsPerHour) + " cr/h"
-        let projected = "\(ForecastEN.credits(w.projected)) cr"
-        let remaining = "\(ForecastEN.credits(w.remaining)) cr"
-        let total = "\(ForecastEN.credits(w.total)) cr"
+        let rateValue = String(format: "%.1f", w.rateCreditsPerHour) + " " + unit.rateSuffix
+        let projected = unit.value(w.projected)
+        let remaining = unit.value(w.remaining)
+        let total = unit.value(w.total)
         return HStack(spacing: 18) {
             stat("projected", projected)
             stat("remaining", remaining)
@@ -506,7 +596,8 @@ struct ForecastModeView: View {
     /// reset, a hairline at the window total, Y hints and time labels. The
     /// projection turns err past the total, with an ETA tick at the crossing.
     private func windowChart(_ name: String, window: GLMWindowForecast,
-                             series: [GLMSeriesPoint], hours: Double, now: Date) -> some View {
+                             series: [GLMSeriesPoint], hours: Double, now: Date,
+                             unit: ForecastChartUnit = .credits) -> some View {
         let trimmed = ForecastWindow.trimmed(series, resetAt: window.resetAt,
                                              now: now, hours: hours)
         // Домен — весь период [начало, сброс], не от первой точки данных.
@@ -549,8 +640,7 @@ struct ForecastModeView: View {
                             p.addLine(to: CGPoint(x: x1, y: y(value)))
                         }
                         context.stroke(line, with: .color(value == 0 ? tk.bd3 : tk.bd2), lineWidth: 1)
-                        label(value == total ? "\(ForecastEN.credits(total)) cr"
-                                             : ForecastEN.credits(value),
+                        label(unit.value(value),
                               at: CGPoint(x: x1 + 6, y: y(value)),
                               anchor: .leading, color: tk.t3)
                     }

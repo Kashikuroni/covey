@@ -327,6 +327,9 @@ public struct PersistedState: Codable, Equatable {
     /// Review graph: a hovered or selected file shows its links (Settings →
     /// Review); nil = on.
     public var linksOnFocus: Bool?
+    /// Which source drives the Forecast window's top windows block:
+    /// "claudeCode" (GLM) or "codex" (GPT); nil = claudeCode.
+    public var forecastSource: String?
 
     public init(
         theme: String? = nil, provider: String? = nil, splitPct: Int? = nil,
@@ -354,7 +357,8 @@ public struct PersistedState: Codable, Equatable {
         codexUsage: PersistedCodexUsage? = nil,
         codexPlan: String? = nil,
         workspaceViews: [PersistedWorkspaceView]? = nil,
-        viewOfSession: [String: String]? = nil
+        viewOfSession: [String: String]? = nil,
+        forecastSource: String? = nil
     ) {
         self.theme = theme; self.provider = provider
         self.splitPct = splitPct; self.recents = recents
@@ -384,5 +388,6 @@ public struct PersistedState: Codable, Equatable {
         self.codexPlan = codexPlan
         self.workspaceViews = workspaceViews
         self.viewOfSession = viewOfSession
+        self.forecastSource = forecastSource
     }
 }

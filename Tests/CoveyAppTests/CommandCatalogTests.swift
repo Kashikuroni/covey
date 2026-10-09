@@ -56,6 +56,14 @@ final class CommandCatalogTests: XCTestCase {
         }
     }
 
+    func testForecastSourceShortcutCyclesWithCommandShiftF() throws {
+        let shortcut = try XCTUnwrap(
+            CommandCatalog.descriptor(for: .toggleForecastSource).shortcut)
+        XCTAssertEqual(shortcut.key, "f")
+        XCTAssertEqual(shortcut.modifiers, [.command, .shift])
+        XCTAssertEqual(shortcut.display, "⌘⇧F")
+    }
+
     func testIssueSixTerminalAndLimitsShortcuts() throws {
         let expected: [(AppCommand, Character, EventModifiers, String)] = [
             (.splitTerminalVertically, "d", .command, "⌘D"),
