@@ -13,7 +13,7 @@ enum AppCommand: String, CaseIterable, Hashable {
     case toggleViewTerminal, openTerminalBelow
     case toggleReview, toggleSessionsPanel, toggleInspector, toggleAgentTrace
     case toggleStatusBar, toggleTopBar, toggleTheme
-    case showProviders, toggleForecast, focusSessionList, focusAgent, focusIssues
+    case showProviders, toggleForecast, toggleForecastSource, focusSessionList, focusAgent, focusIssues
     case focusTerminalSplit, focusTrace, showKeyboardHelp
     case addProject, removeProject, renameProject, settings, searchLogs
 }
@@ -199,6 +199,10 @@ enum CommandCatalog {
         descriptor(.toggleForecast, "Forecast", .view,
                    ["usage limits", "forecast", "прогноз лимитов", "лимиты", "детали лимитов"],
                    .init(key: "l", modifiers: command, display: "⌘L")),
+        descriptor(.toggleForecastSource, "Toggle Forecast Source", .view,
+                   ["forecast source", "claude code", "codex", "gpt", "glm",
+                    "источник прогноза", "переключить источник"],
+                   .init(key: "f", modifiers: commandShift, display: "⌘⇧F")),
         descriptor(.focusSessionList, "Focus Session List", .view,
                    ["focus sessions", "фокус на сессии", "перейти к списку сессий"],
                    .init(key: "1", modifiers: .control, display: "⌃1")),

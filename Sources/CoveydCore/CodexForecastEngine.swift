@@ -139,7 +139,12 @@ public enum CodexForecastEngine {
             headroomPercent: headroom,
             resetAt: resetAt, exhaustionAt: exhaustionAt,
             ratePercentPerHour: rate,
-            sampleCount: segment.count, stale: stale)
+            sampleCount: segment.count, stale: stale,
+            // История активного сегмента едет с окном: UI строит по ней
+            // график факта, как у GLM.
+            series: segment.isEmpty ? nil : segment.map {
+                CodexSeriesPoint(t: $0.t, usedPercent: $0.usedPercent)
+            })
     }
 
     // MARK: - сегменты и интервалы

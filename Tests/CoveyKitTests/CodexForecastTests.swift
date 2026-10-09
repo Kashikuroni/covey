@@ -24,6 +24,33 @@ final class CodexForecastTests: XCTestCase {
         XCTAssertEqual(decoded, forecast)
     }
 
+    func testWindowSeriesRoundTripsThroughCodable() throws {
+        var forecast = CodexWindowForecast(bucketID: "codex", windowKey: .primary,
+            label: "5h", verdict: .fits, usedPercent: 42, projectedPercent: 60,
+            projectedP50: nil, projectedP90: nil, headroomPercent: 40,
+            resetAt: 1_800_000_000, exhaustionAt: nil, ratePercentPerHour: 3,
+            sampleCount: 2, stale: false)
+        forecast.series = [CodexSeriesPoint(t: 1_000, usedPercent: 4),
+                           CodexSeriesPoint(t: 2_000, usedPercent: 9)]
+        let decoded = try JSONDecoder().decode(
+            CodexWindowForecast.self, from: JSONEncoder().encode(forecast))
+        XCTAssertEqual(decoded.series, forecast.series)
+    }
+
+    func testLegacyWindowWithoutSeriesDecodesToNil() throws {
+        // До-фичевый JSON: ключа series нет — окно декодируется, series nil.
+        let json = """
+        {"bucketID":"codex","windowKey":"primary","label":"5h","verdict":"fits",
+         "usedPercent":42,"projectedPercent":60,"projectedP50":null,"projectedP90":null,
+         "headroomPercent":40,"resetAt":1800000000,"exhaustionAt":null,
+         "ratePercentPerHour":3,"sampleCount":2,"stale":false}
+        """
+        let legacy = Data(json.utf8)
+        let decoded = try JSONDecoder().decode(CodexWindowForecast.self, from: legacy)
+        XCTAssertEqual(decoded.usedPercent, 42)
+        XCTAssertNil(decoded.series)
+    }
+
     func testCodexForecastDecodesWindowsWhenKeyAbsent() throws {
         let data = Data(#"{"updatedAt":123}"#.utf8)
         let decoded = try JSONDecoder().decode(CodexForecast.self, from: data)

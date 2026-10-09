@@ -125,6 +125,7 @@ struct CoveyApp: App {
                 Divider()
                 CatalogCommandToggle(.toggleForecast, model: model,
                                      isOn: model?.windowMode == .forecast)
+                CatalogCommandButton(.toggleForecastSource, model: model)
                 Divider()
                 CatalogCommandButton(.focusSessionList, model: model)
                 CatalogCommandButton(.focusAgent, model: model)
