@@ -25,6 +25,23 @@ enum ForecastText {
         return f
     }()
 
+    /// «вт, 7 окт, 04:31» — ETA исчерпания за пределами сегодняшнего дня:
+    /// на 7d голое время ни о чём не говорит, нужен день недели и дата.
+    static let etaDateTime: DateFormatter = {
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("EEEdMMMHmm")
+        return f
+    }()
+
+    /// Подпись ETA исчерпания: сегодня — только «HH:mm» (5h-окно всегда
+    /// внутри сегодняшнего дня), другой день — «день недели, дата, время».
+    static func exhausts(_ eta: Date, now: Date) -> String {
+        if Calendar.current.isDate(eta, inSameDayAs: now) {
+            return "exhausts ~" + time.string(from: eta)
+        }
+        return "exhausts ~" + etaDateTime.string(from: eta)
+    }
+
     /// Прогноз окна GLM по метке чипа: «5h» → fiveHours, «7d» → weekly. Чужие
     /// метки (Claude/Codex) и отсутствующий прогноз строки не дают.
     static func glmWindowForecast(_ label: String, forecast: GLMForecast?) -> GLMWindowForecast? {
