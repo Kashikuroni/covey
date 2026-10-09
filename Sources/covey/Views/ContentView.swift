@@ -181,7 +181,8 @@ struct ContentView: View {
                                 isEscape: event.keyCode == 53,
                                 command: flags.contains(.command),
                                 control: flags.contains(.control),
-                                option: flags.contains(.option)),
+                                option: flags.contains(.option),
+                                shift: flags.contains(.shift)),
             isRepeat: event.isARepeat,
             isCommandW: isCommandW(event),
             fieldEditorFocused: (responder as? NSTextView)?.isFieldEditor == true,
@@ -189,7 +190,8 @@ struct ContentView: View {
             paletteOpen: model.commandPalettePresented,
             sheetOpen: model.modal != nil,
             appOverlayOpen: model.inputMode != .normal,
-            reviewModalOpen: review.sendDraft != nil || review.keysOverlayOpen)
+            reviewModalOpen: review.sendDraft != nil || review.keysOverlayOpen
+                || review.commitSheetOpen)
         switch ReviewModeKeys.decide(input) {
         case .pass:
             return event

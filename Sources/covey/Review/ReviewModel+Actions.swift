@@ -33,6 +33,11 @@ extension ReviewModel {
         case .focusCard: focusCard()
         case .showKeys: keysOverlayOpen = true
         case .toggleLinks: linkSettings.toggleShowLinks()
+        case .stageFocused: await toggleStagedFocused()
+        case .unstageFocused:
+            guard selectedPath != nil else { return }
+            await setStaged(selectedPath!, false)
+        case .stageAllFiles: await stageAllChanges()
         case .escape: await escape()
         case .closeReview: break   // the main window leaves Review itself
         }
