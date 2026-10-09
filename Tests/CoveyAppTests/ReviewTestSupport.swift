@@ -55,6 +55,7 @@ final class FakeReviewGit: ReviewGitReading, @unchecked Sendable {
     private var _diffCalls = 0
     private var changesGates: [String: CallGate] = [:]
     private var diffGates: [Bool: CallGate] = [:]
+    private var _fingerprintGates: [CallGate] = []
 
     var changesCalls: Int { lock.withLock { _changesCalls } }
     var fingerprintCalls: Int { lock.withLock { _fingerprintCalls } }
@@ -66,6 +67,13 @@ final class FakeReviewGit: ReviewGitReading, @unchecked Sendable {
     func holdNextChanges(base: String) -> CallGate {
         let gate = CallGate()
         lock.withLock { changesGates[base] = gate }
+        return gate
+    }
+
+    /// The next `fingerprint` call parks until the gate is released.
+    func holdNextFingerprint() -> CallGate {
+        let gate = CallGate()
+        lock.withLock { _fingerprintGates.append(gate) }
         return gate
     }
 
@@ -95,10 +103,12 @@ final class FakeReviewGit: ReviewGitReading, @unchecked Sendable {
     }
 
     func fingerprint(worktree: String, comparison: GitComparison, paths: [String]) async throws -> String {
-        lock.withLock {
+        let gate: CallGate? = lock.withLock {
             _fingerprintCalls += 1
             _fingerprintWorktrees.append(worktree)
+            return _fingerprintGates.isEmpty ? nil : _fingerprintGates.removeFirst()
         }
+        if let gate { try await gate.hold() }
         if let fingerprintError { throw fingerprintError }
         return fingerprintValue ?? state?.fingerprint ?? ""
     }

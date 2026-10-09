@@ -147,4 +147,37 @@ final class ReviewModelOpsFlowTests: XCTestCase {
         await model.escape()
         XCTAssertFalse(model.commitSheetOpen)
     }
+
+    func testCommitDuringFreshnessCheckDoesNotDoubleCommit() async {   // review fix 1
+        let (model, git) = await makeModel([changed("a.swift")])
+        model.indexState = ["a.swift": true]
+        let gate = git.holdNextFingerprint()      // parks the first commit in ensureFresh
+        let first = Task { await model.commit(summary: "one", body: "") }
+        await gate.waitUntilArrived()
+
+        // The fix's observable: the busy flag is hoisted above the freshness
+        // await, so a second click mid-check sees committing == true and bails.
+        XCTAssertTrue(model.committing)
+        await model.commit(summary: "two", body: "")
+        XCTAssertEqual(git.commitCalls.count, 0)
+
+        gate.release()
+        for _ in 0..<200 {                                          // let the parked task drain
+            if !git.commitCalls.isEmpty { break }
+            await Task.yield()
+        }
+        await first
+        XCTAssertEqual(git.commitCalls.count, 1)
+        XCTAssertEqual(git.commitCalls.first?.summary, "one")
+    }
+
+    func testStagedPathMissingFromComparisonStillCounts() async {      // review fix 2
+        let (model, _) = await makeModel([changed("a.swift")])
+        // "reverted.txt" is staged but its worktree content matches the base,
+        // so the base↔worktree comparison does not list it. Git commits it.
+        model.indexState = ["reverted.txt": true]
+
+        XCTAssertTrue(model.hasStaged)
+        XCTAssertEqual(model.stagedPaths, ["reverted.txt"])
+    }
 }

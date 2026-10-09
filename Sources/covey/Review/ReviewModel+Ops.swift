@@ -5,7 +5,10 @@ import CoveyGit
 /// stage/unstage, commit, push — always via ReviewGitReading (→ CoveyGit).
 extension ReviewModel {
     var stagedPaths: [String] {
-        files.filter { indexState[$0.path] == true }.map(\.path).sorted()
+        // Git is the source of truth: a staged path can drop out of the
+        // base↔worktree comparison (reverted in the worktree) and git would
+        // still commit it — derive from the index mirror, not the file list.
+        indexState.filter { $0.value }.map(\.key).sorted()
     }
 
     var hasStaged: Bool { !stagedPaths.isEmpty }
@@ -102,9 +105,11 @@ extension ReviewModel {
 
     func commit(summary: String, body: String) async {
         guard canCommit(summary) else { return }
-        guard await ensureFresh(), hasStaged else { return }   // tree may have moved; re-derive
+        // Hoisted above the freshness await: a second click while ensureFresh
+        // is suspended must see committing == true and bail (no double hook).
         committing = true
         defer { committing = false }
+        guard await ensureFresh(), hasStaged else { return }   // tree may have moved; re-derive
         do {
             _ = try await git.commit(worktree: worktree, summary: summary,
                                      body: body, amend: false)
