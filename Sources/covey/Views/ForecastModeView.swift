@@ -497,7 +497,8 @@ struct ForecastModeView: View {
                     }
                     windowChart(label, window: window, series: series, hours: hours,
                                 now: now, unit: unit)
-                    statsRow(window, label: label, unit: unit, extraStats: extraStats)
+                    statsRow(window, label: label, now: now, unit: unit,
+                             extraStats: extraStats)
                 } else {
                     Text("no data").font(.caption).foregroundStyle(tk.t3)
                 }
@@ -505,13 +506,13 @@ struct ForecastModeView: View {
         }
     }
 
-    private func statsRow(_ w: GLMWindowForecast, label: String,
+    private func statsRow(_ w: GLMWindowForecast, label: String, now: Date,
                           unit: ForecastChartUnit = .credits,
                           extraStats: [(String, Double?)] = []) -> some View {
         HStack(spacing: 18) {
             baseStats(w, label: label, unit: unit)
             extraStatViews(extraStats)
-            etaStat(w)
+            etaStat(w, now: now)
             Spacer(minLength: 0)
         }
     }
@@ -532,9 +533,9 @@ struct ForecastModeView: View {
     }
 
     @ViewBuilder
-    private func etaStat(_ w: GLMWindowForecast) -> some View {
+    private func etaStat(_ w: GLMWindowForecast, now: Date) -> some View {
         if w.verdict == .overflow, let eta = w.exhaustionAt.flatMap(msToDate) {
-            stat("exhaustion eta", "exhausts ~\(ForecastText.time.string(from: eta))", color: tk.err)
+            stat("exhaustion eta", ForecastText.exhausts(eta, now: now), color: tk.err)
         }
     }
 
