@@ -11,8 +11,10 @@ public struct Repository: Hashable, Sendable {
 
     /// `git -C path args…`, trimmed stdout, throws on non-zero exit.
     @discardableResult
-    func git(_ args: [String], readOnly: Bool = false) throws -> String {
-        try GitRunner.run(in: path, args, readOnly: readOnly)
+    func git(_ args: [String], readOnly: Bool = false,
+             additionalEnvironment: [String: String] = [:]) throws -> String {
+        try GitRunner.run(in: path, args, readOnly: readOnly,
+                          additionalEnvironment: additionalEnvironment)
     }
 
     static func sameDirectory(_ lhs: String, _ rhs: String) -> Bool {
