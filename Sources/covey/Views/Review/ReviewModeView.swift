@@ -40,6 +40,7 @@ struct ReviewModeView: View {
         // window's content (and with it the hidden terminals) wider.
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
         .overlay { if model.sendDraft != nil { ReviewSendSheet(model: model, tk: tk) } }
+        .overlay { if model.commitSheetOpen { ReviewCommitSheet(model: model, tk: tk) } }
         .overlay {
             if model.keysOverlayOpen {
                 ReviewKeysOverlay(tk: tk) { model.keysOverlayOpen = false }

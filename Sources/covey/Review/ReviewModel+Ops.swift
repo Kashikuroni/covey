@@ -90,14 +90,18 @@ extension ReviewModel {
         commitSheetOpen = true
     }
 
+    /// Sheet-side enablement for the Commit button.
+    func canCommit(_ summary: String) -> Bool {
+        hasStaged && !committing && !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     func cancelCommit() {
         commitSheetOpen = false
         commitError = nil
     }
 
     func commit(summary: String, body: String) async {
-        guard hasStaged, !committing,
-              !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard canCommit(summary) else { return }
         guard await ensureFresh(), hasStaged else { return }   // tree may have moved; re-derive
         committing = true
         defer { committing = false }

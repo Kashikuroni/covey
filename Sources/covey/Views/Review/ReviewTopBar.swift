@@ -42,6 +42,17 @@ struct ReviewTopBar<Leading: View>: View {
             ReviewButton(title: model.unsentCount > 0 ? "Send review · \(model.unsentCount)" : "Send review",
                          prominent: model.unsentCount > 0, tk: tk) { model.beginSend() }
                 .disabled(model.unsentCount == 0)
+            ReviewButton(title: commitButtonTitle(committing: model.committing), tk: tk) {
+                model.beginCommit()
+            }
+            .disabled(!model.hasStaged)
+            ReviewButton(title: pushButtonTitle(upstream: model.upstream, branch: model.branchLabel,
+                                                pushing: model.pushing,
+                                                upstreamPending: model.pushUpstreamPending),
+                         prominent: model.upstream == nil, tk: tk) {
+                Task { await model.push() }
+            }
+            .disabled(model.pushing)
             divider
             HStack(spacing: 10) {
                 Text("\(model.reviewedCount) / \(model.files.count)")
