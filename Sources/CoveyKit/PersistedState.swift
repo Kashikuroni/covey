@@ -226,6 +226,7 @@ public func splitMigrationChoice(
 /// One persisted workspace view (Workspace Views). `id`/`agentTree` are always
 /// present; every other field is optional so older / partial payloads decode.
 public struct PersistedWorkspaceView: Codable, Equatable {
+    public var documents: PersistedDocumentZone?
     public var id: String
     public var agentTree: PersistedPaneNode
     /// Hidden shell session name; nil when the zone is closed or its shell is
@@ -243,7 +244,9 @@ public struct PersistedWorkspaceView: Codable, Equatable {
 
     public init(id: String, agentTree: PersistedPaneNode, terminalShell: String? = nil,
                 terminalOpen: Bool? = nil, terminalAxis: String? = nil,
-                inspector: String? = nil, agentAreaRatio: Double? = nil) {
+                inspector: String? = nil, agentAreaRatio: Double? = nil,
+                documents: PersistedDocumentZone? = nil) {
+        self.documents = documents
         self.id = id
         self.agentTree = agentTree
         self.terminalShell = terminalShell
@@ -258,6 +261,8 @@ public struct PersistedWorkspaceView: Codable, Equatable {
 /// are omitted from JSON when nil (Swift synthesizes `encodeIfPresent`); empty
 /// collections round-trip as `[]`/`{}`.
 public struct PersistedState: Codable, Equatable {
+    public var documentExclusions: DocumentExclusionConfiguration?
+    public var documentRecents: [PersistedDocumentRecents]?
     // wired this slice
     public var theme: String?
     /// Active Claude Code provider id ("anthropic" | …); nil = anthropic.
