@@ -113,6 +113,81 @@ final class FakeReviewGit: ReviewGitReading, @unchecked Sendable {
         if let diffError { throw diffError }
         return (fullFile ? fullDiffs[file.path] : nil) ?? diffs[file.path] ?? .empty
     }
+
+    // MARK: Ops surface (scripted answers + recorded calls)
+
+    var indexEntries: [IndexEntry] = []
+    var upstream: UpstreamInfo?
+    var commitError: Error?
+    var pushError: Error?
+    var commitOID = "feed0001"
+
+    private let opsLock = NSLock()
+    private var _stageCalls: [[String]] = []
+    private var _unstageCalls: [[String]] = []
+    private var _stageAllCalls = 0
+    private var _unstageAllCalls = 0
+    private var _commitCalls: [(summary: String, body: String, amend: Bool)] = []
+    private var _pushCalls: [(remote: String, setUpstream: Bool)] = []
+    private var _fetchCalls: [String] = []
+
+    var stageCalls: [[String]] { opsLock.withLock { _stageCalls } }
+    var unstageCalls: [[String]] { opsLock.withLock { _unstageCalls } }
+    var stageAllCalls: Int { opsLock.withLock { _stageAllCalls } }
+    var unstageAllCalls: Int { opsLock.withLock { _unstageAllCalls } }
+    var commitCalls: [(summary: String, body: String, amend: Bool)] { opsLock.withLock { _commitCalls } }
+    var pushCalls: [(remote: String, setUpstream: Bool)] { opsLock.withLock { _pushCalls } }
+    var fetchCalls: [String] { opsLock.withLock { _fetchCalls } }
+
+    func indexStatus(worktree: String) async throws -> [IndexEntry] { indexEntries }
+
+    func upstreamInfo(worktree: String) async -> UpstreamInfo? { upstream }
+
+    func stage(worktree: String, paths: [String]) async throws {
+        opsLock.withLock { _stageCalls.append(paths) }
+        for path in paths {
+            indexEntries.removeAll { $0.path == path }
+            indexEntries.append(IndexEntry(path: path, staged: true, isUntracked: false))
+        }
+    }
+
+    func stageAll(worktree: String) async throws {
+        opsLock.withLock { _stageAllCalls += 1 }
+        indexEntries = indexEntries.map {
+            IndexEntry(path: $0.path, staged: true, isUntracked: $0.isUntracked)
+        }
+    }
+
+    func unstage(worktree: String, paths: [String]) async throws {
+        opsLock.withLock { _unstageCalls.append(paths) }
+        for path in paths {
+            indexEntries.removeAll { $0.path == path }
+            indexEntries.append(IndexEntry(path: path, staged: false, isUntracked: false))
+        }
+    }
+
+    func unstageAll(worktree: String) async throws {
+        opsLock.withLock { _unstageAllCalls += 1 }
+        indexEntries = indexEntries.map {
+            IndexEntry(path: $0.path, staged: false, isUntracked: $0.isUntracked)
+        }
+    }
+
+    func commit(worktree: String, summary: String, body: String, amend: Bool) async throws -> String {
+        opsLock.withLock { _commitCalls.append((summary, body, amend)) }
+        if let commitError { throw commitError }
+        return commitOID
+    }
+
+    func push(worktree: String, remote: String, setUpstream: Bool) async throws {
+        opsLock.withLock { _pushCalls.append((remote, setUpstream)) }
+        if let pushError { throw pushError }
+        if !setUpstream { upstream?.ahead = 0 }
+    }
+
+    func fetch(worktree: String, remote: String) async throws {
+        opsLock.withLock { _fetchCalls.append(remote) }
+    }
 }
 
 /// Scripted link graphs: every build answers `graph` as it is when the

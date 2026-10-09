@@ -11,6 +11,17 @@ protocol ReviewGitReading: Sendable {
     func fingerprint(worktree: String, comparison: GitComparison, paths: [String]) async throws -> String
     func diff(worktree: String, comparison: GitComparison, mergeBase: String,
               file: ChangedFile, fullFile: Bool) async throws -> FileDiff
+
+    // Ops surface — the only writes, all via CoveyGit (umbrella invariant 1).
+    func indexStatus(worktree: String) async throws -> [IndexEntry]
+    func upstreamInfo(worktree: String) async -> UpstreamInfo?
+    func stage(worktree: String, paths: [String]) async throws
+    func stageAll(worktree: String) async throws
+    func unstage(worktree: String, paths: [String]) async throws
+    func unstageAll(worktree: String) async throws
+    func commit(worktree: String, summary: String, body: String, amend: Bool) async throws -> String
+    func push(worktree: String, remote: String, setUpstream: Bool) async throws
+    func fetch(worktree: String, remote: String) async throws
 }
 
 struct ReviewGitService: ReviewGitReading {
@@ -44,6 +55,46 @@ struct ReviewGitService: ReviewGitReading {
         try await offMainThrowing {
             try Repository(at: worktree).diff(of: file, in: comparison, mergeBase: mergeBase, fullFile: fullFile)
         }
+    }
+
+    func indexStatus(worktree: String) async throws -> [IndexEntry] {
+        try await offMainThrowing { try Repository(at: worktree).indexStatus() }
+    }
+
+    func upstreamInfo(worktree: String) async -> UpstreamInfo? {
+        await offMain { try? Repository(at: worktree).upstreamInfo() ?? nil }
+    }
+
+    func stage(worktree: String, paths: [String]) async throws {
+        try await offMainThrowing { try Repository(at: worktree).stage(paths: paths) }
+    }
+
+    func stageAll(worktree: String) async throws {
+        try await offMainThrowing { try Repository(at: worktree).stageAll() }
+    }
+
+    func unstage(worktree: String, paths: [String]) async throws {
+        try await offMainThrowing { try Repository(at: worktree).unstage(paths: paths) }
+    }
+
+    func unstageAll(worktree: String) async throws {
+        try await offMainThrowing { try Repository(at: worktree).unstageAll() }
+    }
+
+    func commit(worktree: String, summary: String, body: String, amend: Bool) async throws -> String {
+        try await offMainThrowing {
+            try Repository(at: worktree).commit(summary: summary, body: body, amend: amend)
+        }
+    }
+
+    func push(worktree: String, remote: String, setUpstream: Bool) async throws {
+        try await offMainThrowing {
+            try Repository(at: worktree).push(remote: remote, setUpstream: setUpstream)
+        }
+    }
+
+    func fetch(worktree: String, remote: String) async throws {
+        try await offMainThrowing { try Repository(at: worktree).fetch(remote: remote) }
     }
 }
 
