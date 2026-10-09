@@ -13,6 +13,17 @@ public enum CodexForecastWindowKey: String, Codable, Equatable, Sendable {
     case primary, secondary
 }
 
+/// Точка истории Codex-окна: минутное ведро расхода в процентах. Ездит в
+/// IPC внутри окна — на ней строится график факта в Forecast.
+public struct CodexSeriesPoint: Codable, Equatable, Sendable {
+    public var t: Int64                 // Unix ms, минутное ведро
+    public var usedPercent: Double
+
+    public init(t: Int64, usedPercent: Double) {
+        self.t = t; self.usedPercent = usedPercent
+    }
+}
+
 public struct CodexWindowForecast: Codable, Equatable, Sendable, Comparable {
     public var bucketID: String
     public var windowKey: CodexForecastWindowKey
@@ -28,6 +39,9 @@ public struct CodexWindowForecast: Codable, Equatable, Sendable, Comparable {
     public var ratePercentPerHour: Double
     public var sampleCount: Int
     public var stale: Bool
+    /// Хранимая история окна (активный reset-сегмент); nil в старых
+    /// снапшотах — UI в этом случае рисует карточку без графика.
+    public var series: [CodexSeriesPoint]?
 
     /// Канонический порядок: по upstream bucketID, затем primary перед
     /// secondary — единый для стора, IPC и UI.
@@ -42,7 +56,8 @@ public struct CodexWindowForecast: Codable, Equatable, Sendable, Comparable {
                 usedPercent: Double, projectedPercent: Double,
                 projectedP50: Double?, projectedP90: Double?,
                 headroomPercent: Double, resetAt: Int64?, exhaustionAt: Int64?,
-                ratePercentPerHour: Double, sampleCount: Int, stale: Bool) {
+                ratePercentPerHour: Double, sampleCount: Int, stale: Bool,
+                series: [CodexSeriesPoint]? = nil) {
         self.bucketID = bucketID; self.windowKey = windowKey; self.label = label
         self.verdict = verdict; self.usedPercent = usedPercent
         self.projectedPercent = projectedPercent
@@ -51,6 +66,7 @@ public struct CodexWindowForecast: Codable, Equatable, Sendable, Comparable {
         self.resetAt = resetAt; self.exhaustionAt = exhaustionAt
         self.ratePercentPerHour = ratePercentPerHour
         self.sampleCount = sampleCount; self.stale = stale
+        self.series = series
     }
 }
 

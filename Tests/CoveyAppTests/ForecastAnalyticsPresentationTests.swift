@@ -57,6 +57,109 @@ final class ForecastAnalyticsPresentationTests: XCTestCase {
         XCTAssertTrue(state.showsAnalytics)
     }
 
+    // MARK: - top-block source (Claude Code (GLM) / Codex (GPT))
+
+    private func codexWindow(_ bucket: String, _ key: CodexForecastWindowKey,
+                             used: Double = 10) -> CodexWindowForecast {
+        CodexWindowForecast(bucketID: bucket, windowKey: key,
+                            label: key == .primary ? "5h" : "7d",
+                            verdict: .fits, usedPercent: used,
+                            projectedPercent: used * 2,
+                            projectedP50: nil, projectedP90: nil,
+                            headroomPercent: 100 - used,
+                            resetAt: 1_800_000_000, exhaustionAt: nil,
+                            ratePercentPerHour: 2, sampleCount: 5, stale: false)
+    }
+
+    /// По умолчанию — пара дефолтного bucket-а; gpt-reserved не входит.
+    private var codexForecast: CodexForecast {
+        CodexForecast(windows: [codexWindow("codex", .primary),
+                                codexWindow("codex", .secondary),
+                                codexWindow("gpt-reserved-7d", .secondary)],
+                      updatedAt: 0)
+    }
+
+    func testCodexWindowPairTakesDefaultBucketSlots() {
+        let pair = codexWindowPair(codexForecast)
+        XCTAssertEqual(pair.primary?.bucketID, "codex")
+        XCTAssertEqual(pair.primary?.windowKey, .primary)
+        XCTAssertEqual(pair.secondary?.bucketID, "codex")
+        XCTAssertEqual(pair.secondary?.windowKey, .secondary)
+    }
+
+    func testCodexWindowPairHandlesMissingSlotsAndEmptyForecast() {
+        XCTAssertNil(codexWindowPair(nil).primary)
+        let onlySecondary = CodexForecast(
+            windows: [codexWindow("codex", .secondary)], updatedAt: 0)
+        let pair = codexWindowPair(onlySecondary)
+        XCTAssertNil(pair.primary)
+        XCTAssertNotNil(pair.secondary)
+    }
+
+    func testCodexChartWindowMapsToPercentUnits() {
+        let glm = codexChartWindow(codexWindow("codex", .primary, used: 40))
+        XCTAssertEqual(glm.total, 100, "потолок Codex-окна — 100%")
+        XCTAssertEqual(glm.verdict, .fits)
+        XCTAssertEqual(glm.projected, 80, accuracy: 1e-9)
+        XCTAssertEqual(glm.remaining, 60, accuracy: 1e-9)
+        XCTAssertEqual(glm.rateCreditsPerHour, 2, accuracy: 1e-9, "rate — %/ч")
+        XCTAssertEqual(glm.resetAt, 1_800_000_000)
+    }
+
+    func testCodexVerdictsMapOneToOne() {
+        for verdict in [CodexForecastVerdict.fits, .tight, .overflow,
+                        .underuse, .idle, .calibrating] {
+            XCTAssertEqual(codexGLMVerdict(verdict).rawValue, verdict.rawValue)
+        }
+    }
+
+    func testCodexSeriesPointsMapToChartUnits() throws {
+        var window = codexWindow("codex", .primary)
+        window.series = [CodexSeriesPoint(t: 1_000, usedPercent: 10),
+                         CodexSeriesPoint(t: 2_000, usedPercent: 25)]
+        let points = try XCTUnwrap(codexSeriesPoints(window))
+        XCTAssertEqual(points.count, 2)
+        XCTAssertEqual(points[1].used, 25, accuracy: 1e-9)
+        XCTAssertNil(codexSeriesPoints(nil))
+    }
+
+    func testCodexSourceReplacesGLMSectionsWithCodexWindows() {
+        var glm = GLMForecast()
+        glm.fiveHours = GLMWindowForecast(verdict: .fits, projected: 1, remaining: 1,
+                                          total: 10, resetAt: nil, exhaustionAt: nil,
+                                          headroomPercent: 90,
+                                          rateCreditsPerHour: 1, agentMinutes: nil)
+        let state = forecastContentState(source: .codex, glmEnabled: true,
+                                         glmForecast: glm,
+                                         codexForecast: codexForecast,
+                                         analytics: analyticsWithGPT)
+        XCTAssertTrue(state.showsCodexWindows)
+        XCTAssertFalse(state.showsGLMWindows, "Codex-источник вытесняет GLM-окна")
+        XCTAssertFalse(state.showsGLMOff)
+        XCTAssertFalse(state.showsGLMOnboarding)
+        XCTAssertFalse(state.showsGLMWaiting)
+        XCTAssertTrue(state.showsAnalytics)
+    }
+
+    func testCodexSourceWithoutForecastShowsWaitingCard() {
+        let state = forecastContentState(source: .codex, glmEnabled: false,
+                                         glmForecast: nil, codexForecast: nil,
+                                         analytics: ForecastAnalytics())
+        XCTAssertTrue(state.showsCodexWaiting)
+        XCTAssertFalse(state.showsCodexWindows)
+        XCTAssertFalse(state.showsGLMOff, "GLM-баннеры не мешают Codex-виду")
+        XCTAssertFalse(state.showsGLMOnboarding)
+    }
+
+    func testClaudeSourceKeepsGLMGatingUnchanged() {
+        let state = forecastContentState(source: .claudeCode, glmEnabled: false,
+                                         glmForecast: nil, codexForecast: codexForecast,
+                                         analytics: ForecastAnalytics())
+        XCTAssertTrue(state.showsGLMOff)
+        XCTAssertFalse(state.showsCodexWindows)
+        XCTAssertFalse(state.showsCodexWaiting, "Codex-данные не всплывают в GLM-виде")
+    }
+
     // MARK: - session rows
 
     private var gptSession: ForecastSessionUsage {

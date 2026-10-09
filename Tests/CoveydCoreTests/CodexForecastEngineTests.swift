@@ -98,6 +98,19 @@ final class CodexForecastEngineTests: XCTestCase {
         XCTAssertFalse(w.stale)
     }
 
+    func testPublishesResetSegmentSeriesForEachSlot() throws {
+        feed([(5, 10), (4, 20), (3, 30)])
+        let forecast = build(snapshot(primary: 30))
+        let primary = try XCTUnwrap(forecast.windows.first {
+            $0.bucketID == "codex" && $0.windowKey == .primary })
+        let series = try XCTUnwrap(primary.series, "движок публикует историю окна")
+        XCTAssertEqual(series.map(\.usedPercent), [10, 20, 30],
+                       "series — фактические проценты в хронологическом порядке")
+        XCTAssertEqual(series.map(\.t), series.map(\.t).sorted())
+        XCTAssertTrue(series.allSatisfy { (0...104).contains($0.usedPercent) })
+        XCTAssertEqual(series.last?.usedPercent, primary.usedPercent)
+    }
+
     func testOverLimitUsageOverflowsWithoutPastETA() {
         feed([(5, 104), (4, 105)])
         let w = window(build(snapshot(primary: 105)))

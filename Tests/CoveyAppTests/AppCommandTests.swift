@@ -158,4 +158,34 @@ final class AppCommandTests: XCTestCase {
         XCTAssertEqual(model.windowMode, .sessions)
     }
 
+    @MainActor
+    func testForecastSourceToggleCycles() async throws {
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+
+        XCTAssertEqual(model.forecastSource, .claudeCode)
+        model.perform(.toggleForecastSource)
+        XCTAssertEqual(model.forecastSource, .codex)
+        model.perform(.toggleForecastSource)
+        XCTAssertEqual(model.forecastSource, .claudeCode)
+    }
+
+    @MainActor
+    func testForecastSourcePersistsAcrossRestart() async throws {
+        let daemon = try TestDaemon()
+        defer { daemon.stop() }
+
+        let (model, _) = try makeModel(daemon)
+        await model.start()
+        model.perform(.toggleForecastSource)
+        XCTAssertEqual(model.persisted.forecastSource, "codex")
+
+        // A fresh model over the same state file restores the source.
+        let (reloaded, _) = try makeModel(daemon, seed: model.persisted)
+        await reloaded.start()
+        XCTAssertEqual(reloaded.forecastSource, .codex)
+    }
+
 }
