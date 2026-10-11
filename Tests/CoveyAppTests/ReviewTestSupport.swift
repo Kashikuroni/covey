@@ -198,6 +198,67 @@ final class FakeReviewGit: ReviewGitReading, @unchecked Sendable {
     func fetch(worktree: String, remote: String) async throws {
         opsLock.withLock { _fetchCalls.append(remote) }
     }
+
+    // MARK: Management surface (phase 2, scripted answers + recorded calls)
+
+    var worktreeEntries: [WorktreeListEntry] = []
+    var mergedInto: [String] = []
+    var lastCommitStamps: [String: Int64] = [:]
+    var aheadBehindByBranch: [String: (ahead: Int, behind: Int)] = [:]
+    var summaries: [String: WorkingTreeSummary] = [:]
+    var opsError: Error?
+
+    private var _worktreeAddCalls: [(path: String, newBranch: String, base: String)] = []
+    private var _removeCalls: [String] = []
+    private var _promoteCalls: [(path: String, branch: String)] = []
+    private var _checkoutCalls: [(worktree: String, branch: String)] = []
+    private var _branchDeleteCalls: [(branch: String, protected: [String])] = []
+    private var _updateFromBaseCalls: [(worktree: String, base: String)] = []
+
+    var worktreeAddCalls: [(path: String, newBranch: String, base: String)] {
+        opsLock.withLock { _worktreeAddCalls }
+    }
+    var removeCalls: [String] { opsLock.withLock { _removeCalls } }
+    var promoteCalls: [(path: String, branch: String)] { opsLock.withLock { _promoteCalls } }
+    var checkoutCalls: [(worktree: String, branch: String)] { opsLock.withLock { _checkoutCalls } }
+    var branchDeleteCalls: [(branch: String, protected: [String])] {
+        opsLock.withLock { _branchDeleteCalls }
+    }
+    var updateFromBaseCalls: [(worktree: String, base: String)] {
+        opsLock.withLock { _updateFromBaseCalls }
+    }
+
+    func worktreeList(root: String) async throws -> [WorktreeListEntry] { worktreeEntries }
+    func mergedBranches(root: String, into base: String) async throws -> [String] { mergedInto }
+    func lastCommit(worktree: String) async -> Int64? { lastCommitStamps[worktree] }
+    func aheadBehind(root: String, branch: String, base: String) async -> (ahead: Int, behind: Int) {
+        aheadBehindByBranch[branch] ?? (0, 0)
+    }
+    func summary(worktree: String) async -> WorkingTreeSummary? { summaries[worktree] }
+    func addWorktree(root: String, path: String, newBranch: String, base: String) async throws {
+        opsLock.withLock { _worktreeAddCalls.append((path, newBranch, base)) }
+        if let opsError { throw opsError }
+    }
+    func removeWorktree(path: String) async throws {
+        opsLock.withLock { _removeCalls.append(path) }
+        if let opsError { throw opsError }
+    }
+    func promoteWorktree(path: String, branch: String) async throws {
+        opsLock.withLock { _promoteCalls.append((path, branch)) }
+        if let opsError { throw opsError }
+    }
+    func checkout(worktree: String, branch: String) async throws {
+        opsLock.withLock { _checkoutCalls.append((worktree, branch)) }
+        if let opsError { throw opsError }
+    }
+    func deleteBranch(worktree: String, branch: String, protected: [String]) async throws {
+        opsLock.withLock { _branchDeleteCalls.append((branch, protected)) }
+        if let opsError { throw opsError }
+    }
+    func updateFromBase(worktree: String, base: String) async throws {
+        opsLock.withLock { _updateFromBaseCalls.append((worktree, base)) }
+        if let opsError { throw opsError }
+    }
 }
 
 /// Scripted link graphs: every build answers `graph` as it is when the

@@ -22,6 +22,19 @@ protocol ReviewGitReading: Sendable {
     func commit(worktree: String, summary: String, body: String, amend: Bool) async throws -> String
     func push(worktree: String, remote: String, setUpstream: Bool) async throws
     func fetch(worktree: String, remote: String) async throws
+
+    // Management surface (phase 2) — reads repo-wide, writes via CoveyGit.
+    func worktreeList(root: String) async throws -> [WorktreeListEntry]
+    func mergedBranches(root: String, into base: String) async throws -> [String]
+    func lastCommit(worktree: String) async -> Int64?
+    func aheadBehind(root: String, branch: String, base: String) async -> (ahead: Int, behind: Int)
+    func summary(worktree: String) async -> WorkingTreeSummary?
+    func addWorktree(root: String, path: String, newBranch: String, base: String) async throws
+    func removeWorktree(path: String) async throws
+    func promoteWorktree(path: String, branch: String) async throws
+    func checkout(worktree: String, branch: String) async throws
+    func deleteBranch(worktree: String, branch: String, protected: [String]) async throws
+    func updateFromBase(worktree: String, base: String) async throws
 }
 
 struct ReviewGitService: ReviewGitReading {
@@ -95,6 +108,54 @@ struct ReviewGitService: ReviewGitReading {
 
     func fetch(worktree: String, remote: String) async throws {
         try await offMainThrowing { try Repository(at: worktree).fetch(remote: remote) }
+    }
+
+    func worktreeList(root: String) async throws -> [WorktreeListEntry] {
+        try await offMainThrowing { try Repository(at: root).listWorktrees() }
+    }
+
+    func mergedBranches(root: String, into base: String) async throws -> [String] {
+        try await offMainThrowing { try Repository(at: root).mergedBranches(into: base) }
+    }
+
+    func lastCommit(worktree: String) async -> Int64? {
+        await offMain { try? Repository(at: worktree).lastCommitTimestamp() ?? nil }
+    }
+
+    func aheadBehind(root: String, branch: String, base: String) async -> (ahead: Int, behind: Int) {
+        await offMain { (try? Repository(at: root).aheadBehind(branch: branch, base: base)) ?? (0, 0) }
+    }
+
+    func summary(worktree: String) async -> WorkingTreeSummary? {
+        await offMain { Repository(at: worktree).workingTreeSummary() }
+    }
+
+    func addWorktree(root: String, path: String, newBranch: String, base: String) async throws {
+        try await offMainThrowing {
+            try Repository(at: root).addWorktree(at: path, newBranch: newBranch, base: base)
+        }
+    }
+
+    func removeWorktree(path: String) async throws {
+        try await offMainThrowing { try Repository(at: path).removeWorktree(at: path) }
+    }
+
+    func promoteWorktree(path: String, branch: String) async throws {
+        try await offMainThrowing { try Repository(at: path).promoteWorktree(at: path, branch: branch) }
+    }
+
+    func checkout(worktree: String, branch: String) async throws {
+        try await offMainThrowing { try Repository(at: worktree).checkout(branch) }
+    }
+
+    func deleteBranch(worktree: String, branch: String, protected: [String]) async throws {
+        try await offMainThrowing {
+            try Repository(at: worktree).deleteBranch(branch, protected: protected)
+        }
+    }
+
+    func updateFromBase(worktree: String, base: String) async throws {
+        try await offMainThrowing { try Repository(at: worktree).updateFromBase(base: base) }
     }
 }
 
