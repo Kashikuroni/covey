@@ -38,6 +38,11 @@ targets:
     platform: macOS
     sources:
       - path: Sources/covey
+        excludes:
+          - Resources/Documents
+      - path: Sources/covey/Resources/Documents
+        type: folder
+        buildPhase: resources
       - path: App/Assets.xcassets
     dependencies:
       - package: covey

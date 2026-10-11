@@ -130,4 +130,9 @@ extension AppModel {
     }
     func setDocumentSourceMode(_ source: Bool, viewID: ViewID) { mutateForView(viewID) { $0.documents?.sourceMode = source } }
     func documentRecentPaths(root: String) -> [String] { documentRecents.first(where:{ $0.root == root })?.paths ?? [] }
+    func recordDocumentRecent(path: String, root: String) {
+        if let index = documentRecents.firstIndex(where:{ $0.root == root }) { documentRecents[index].opened(path) }
+        else { var recent = PersistedDocumentRecents(root:root,paths:[]); recent.opened(path); documentRecents.append(recent) }
+        persistWorkspaceViews()
+    }
 }

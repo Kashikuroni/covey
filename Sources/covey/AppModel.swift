@@ -72,6 +72,7 @@ public final class AppModel {
     var documentReaders: [ViewID: DocumentReaderModel] = [:]
     var documentPicker: DocumentPickerModel?
     var documentRecents: [PersistedDocumentRecents] = []
+    var documentFindRequest = UUID()
     @ObservationIgnored var documentCatalog: any DocumentCatalogScanning = ProjectDocumentCatalog()
     @ObservationIgnored var resolveDocumentContext: (Session) async -> DocumentRootResolution = { await DocumentRootResolver.resolve(session:$0) }
     @ObservationIgnored var documentScanTask: Task<Void, Never>?
