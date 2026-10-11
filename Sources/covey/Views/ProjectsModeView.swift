@@ -31,6 +31,7 @@ struct ProjectsModeView: View {
     private var tk: Tokens { Tokens(Theme(raw: model.themeRaw)) }
     @State private var selectedProjectID: String?
     @State private var selectedTaskID: String?
+    @State private var showAnalytics = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -63,10 +64,14 @@ struct ProjectsModeView: View {
         }
         .listStyle(.sidebar)
         .overlay(alignment: .bottom) {
-            Button("Add Project") { model.addProjectPrompt() }
-                .padding(8)
-                .frame(maxWidth: .infinity)
-                .background(tk.surf2)
+            HStack {
+                Button("Add Project") { model.addProjectPrompt() }
+                Spacer()
+                Toggle("Analytics", isOn: $showAnalytics)
+                    .toggleStyle(.button)
+            }
+            .padding(8)
+            .background(tk.surf2)
         }
     }
 
@@ -95,7 +100,9 @@ struct ProjectsModeView: View {
     }
 
     @ViewBuilder private var detailColumn: some View {
-        if let v = tasks.first(where: { $0.task.id == selectedTaskID }) {
+        if showAnalytics {
+            PMAnalyticsView(model: model, projectID: selectedProjectID)
+        } else if let v = tasks.first(where: { $0.task.id == selectedTaskID }) {
             TaskEditorView(model: model, taskView: v)
         } else {
             Text("Select a task").foregroundStyle(tk.t3)
