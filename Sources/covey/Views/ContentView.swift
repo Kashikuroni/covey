@@ -191,7 +191,7 @@ struct ContentView: View {
             sheetOpen: model.modal != nil,
             appOverlayOpen: model.inputMode != .normal,
             reviewModalOpen: review.sendDraft != nil || review.keysOverlayOpen
-                || review.commitSheetOpen)
+                || review.commitSheetOpen || (model.reviewRepo?.cleanupSheetOpen ?? false))
         switch ReviewModeKeys.decide(input) {
         case .pass:
             return event

@@ -42,6 +42,11 @@ struct ReviewModeView: View {
         .overlay { if model.sendDraft != nil { ReviewSendSheet(model: model, tk: tk) } }
         .overlay { if model.commitSheetOpen { ReviewCommitSheet(model: model, tk: tk) } }
         .overlay {
+            if let repo = app.reviewRepo, repo.cleanupSheetOpen {
+                ReviewCleanupSheet(repo: repo, tk: tk)
+            }
+        }
+        .overlay {
             if model.keysOverlayOpen {
                 ReviewKeysOverlay(tk: tk) { model.keysOverlayOpen = false }
             }
