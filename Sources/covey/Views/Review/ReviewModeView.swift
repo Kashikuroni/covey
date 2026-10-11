@@ -29,7 +29,7 @@ struct ReviewModeView: View {
     var body: some View {
         VStack(spacing: 0) {
             ReviewTopBar(model: model, tk: tk) {
-                ReviewWorktreePicker(app: app, review: model, tk: tk)
+                ReviewWorktreePicker(app: app, review: model, repo: app.reviewRepo, tk: tk)
             }
             if let banner = model.banner {
                 ReviewBanner(text: banner, tk: tk) { Task { await model.retry() } }

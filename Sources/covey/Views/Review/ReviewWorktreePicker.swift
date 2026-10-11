@@ -5,33 +5,60 @@ import CoveyKit
 /// one is ⌥⌘R for it (`AppModel.pickReviewWorktree`): its session becomes the
 /// selection, and the review is the live one if it is for that worktree,
 /// else a new one (the old one is flushed). The send target picker is separate.
+/// The branch button beside it opens the management popover (phase 2).
 struct ReviewWorktreePicker: View {
     let app: AppModel
     let review: ReviewModel
+    let repo: ReviewRepoModel?
     let tk: Tokens
     @State private var choices: [ReviewWorktreeChoice] = []
 
     var body: some View {
-        Menu {
-            if choices.isEmpty { Text("No agent sessions in a Git worktree") }
-            ForEach(choices) { choice in
-                Toggle(isOn: Binding(get: { choice.worktree == review.worktree },
-                                     set: { _ in pick(choice) })) {
-                    Text("\(choice.title) · \(collapseHome(choice.worktree))")
+        HStack(spacing: 4) {
+            Menu {
+                if choices.isEmpty { Text("No agent sessions in a Git worktree") }
+                ForEach(choices) { choice in
+                    Toggle(isOn: Binding(get: { choice.worktree == review.worktree },
+                                         set: { _ in pick(choice) })) {
+                        Text("\(choice.title) · \(collapseHome(choice.worktree))")
+                    }
                 }
+            } label: {
+                Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(tk.t1)
             }
-        } label: {
-            Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(tk.t1)
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("The worktree under review")
+            if let repo = app.reviewRepo {
+                manageButton(repo)
+            }
         }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .help("The worktree under review")
         // Sessions come and go, and move between directories.
         .task(id: app.visibleSessions.map(\.dir)) {
             let fresh = await app.reviewWorktreeChoices()
             // A newer session list restarted the task: its answer wins.
             guard !Task.isCancelled else { return }
             choices = fresh
+        }
+    }
+
+    private func manageButton(_ repo: ReviewRepoModel) -> some View {
+        Button {
+            repo.popoverOpen = true
+            Task { await repo.reload() }
+        } label: {
+            Image(systemName: "arrow.triangle.branch")
+                .font(.system(size: 10))
+                .foregroundStyle(tk.t3)
+                .frame(width: 18, height: 18)
+                .background(tk.surf2, in: RoundedRectangle(cornerRadius: Tokens.rSm))
+        }
+        .buttonStyle(.plain)
+        .help("Worktrees, branches and pull requests")
+        .popover(isPresented: Binding(get: { repo.popoverOpen },
+                                      set: { repo.popoverOpen = $0 }),
+                 arrowEdge: .bottom) {
+            ReviewRepoPopover(repo: repo, app: app, tk: tk)
         }
     }
 
