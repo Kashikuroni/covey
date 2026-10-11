@@ -13,7 +13,7 @@ enum AppCommand: String, CaseIterable, Hashable {
     case toggleViewTerminal, openTerminalBelow
     case toggleReview, toggleSessionsPanel, toggleInspector, toggleAgentTrace
     case toggleStatusBar, toggleTopBar, toggleTheme
-    case showProviders, toggleForecast, toggleProjects, focusSessionList, focusAgent, focusIssues
+    case showProviders, toggleForecast, toggleProjects, focusSessionList, focusAgent, focusIssues, focusTasks
     case focusTerminalSplit, focusTrace, showKeyboardHelp
     case addProject, removeProject, renameProject, settings, searchLogs
 }
@@ -211,6 +211,8 @@ enum CommandCatalog {
         descriptor(.focusIssues, "Focus Issues", .view,
                    ["focus issues", "фокус на задачи", "перейти к issues"],
                    .init(key: "3", modifiers: .control, display: "⌃3")),
+        descriptor(.focusTasks, "Focus Tasks", .view,
+                   ["tasks drawer", "pm tasks", "шторка задач", "фокус на задачи проекта"]),
         descriptor(.focusTerminalSplit, "Focus Terminal Split", .view,
                    ["focus shell split", "фокус на сплит терминала", "перейти к shell"],
                    .init(key: "4", modifiers: .control, display: "⌃4")),

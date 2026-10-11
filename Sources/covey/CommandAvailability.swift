@@ -182,7 +182,7 @@ enum CommandRules {
             return context.hasSelectedSession
                 ? .enabled : .disabled(reason: "No session selected")
 
-        case .focusIssues, .focusTrace:
+        case .focusIssues, .focusTrace, .focusTasks:
             return context.inspectorShown
                 ? .enabled : .disabled(reason: "Inspector is hidden")
         }

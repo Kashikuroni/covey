@@ -264,8 +264,8 @@ public final class AppModel {
         if let active = activeView { return active.inspector.isShown }
         return selectedProjectRoot != nil
     }
-    /// The right drawer shows either GitHub Issues or the selected agent's trace.
-    public enum InspectorMode: String, Equatable { case issues, trace }
+    /// The right drawer shows GitHub Issues, the selected agent's trace, or PM tasks.
+    public enum InspectorMode: String, Equatable { case issues, trace, tasks }
     public var inspectorMode: InspectorMode { activeView?.inspector.mode ?? .issues }
     /// Agent trace for the selected session (streamed from the daemon).
     public private(set) var traceEvents: [TraceEvent] = []
@@ -546,6 +546,12 @@ public final class AppModel {
     public func setInspectorMode(_ mode: InspectorMode) {
         mutateActiveView { $0.inspector = .shown(mode: mode) }
         if mode == .trace { Task { await subscribeTrace() } }
+    }
+
+    /// Показать шторку задач (Tasks) в инспекторе.
+    public func activateTasks() {
+        setInspectorMode(.tasks)
+        Task { await pm.reloadAllTasks() }
     }
 
     /// (Re)subscribe the selected session's trace: replace the buffer with the
@@ -1338,6 +1344,10 @@ public final class AppModel {
             focusZone(.agent)
         case .focusIssues:
             focusZone(.issues)
+        case .focusTasks:
+            if !showInspector { setShowInspector(true) }
+            activateTasks()
+            setFocus(.inspector)
         case .focusTerminalSplit:
             focusZone(.terminalSplit)
         case .focusTrace:
@@ -1711,7 +1721,7 @@ public final class AppModel {
         if let successor { focusPane(successor) }
     }
 
-    private func selectedSession() -> Session? {
+    func selectedSession() -> Session? {
         sessions.first { $0.name == selected }
     }
 
