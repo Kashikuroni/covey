@@ -80,10 +80,12 @@ public struct PMBinding: Codable, Equatable, Sendable, Identifiable {
 }
 
 /// Строка tasks.list: задача + производная активность + открытые привязки.
-public struct PMTaskView: Codable, Equatable, Sendable {
+public struct PMTaskView: Codable, Equatable, Sendable, Identifiable {
     public var task: PMTask
     public var activity: PMActivity
     public var openBindings: [PMBinding]
+    /// Идентичность строки — идентичность задачи.
+    public var id: String { task.id }
     public init(task: PMTask, activity: PMActivity, openBindings: [PMBinding]) {
         self.task = task; self.activity = activity; self.openBindings = openBindings
     }

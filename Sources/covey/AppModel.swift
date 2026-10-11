@@ -1262,6 +1262,8 @@ public final class AppModel {
             activateIssues()
         case .toggleReview:
             Task { await toggleReview() }
+        case .toggleProjects:
+            windowMode = windowMode == .projects ? .sessions : .projects
         case .promoteWorktree:
             modal = selected.map(Modal.promote)
         case .deleteSessionBranch:
@@ -1744,6 +1746,11 @@ public final class AppModel {
             syncProjectsFromPM()
             await selectProject(root)
         }
+    }
+
+    /// Projects-режим: открыть существующий диалог выбора папки проекта.
+    func addProjectPrompt() {
+        modal = .addProject
     }
 
     public func removeProject(_ root: String) {

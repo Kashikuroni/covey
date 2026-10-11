@@ -58,8 +58,8 @@ enum CommandRules {
         case .newSession, .recentSessions, .filterSessions,
              .toggleSessionsPanel, .toggleInspector, .toggleAgentTrace,
              .toggleStatusBar, .toggleTopBar, .toggleTheme,
-             .showProviders, .toggleForecast, .focusSessionList, .showKeyboardHelp,
-             .addProject, .settings, .searchLogs:
+             .showProviders, .toggleForecast, .toggleProjects, .focusSessionList,
+             .showKeyboardHelp, .addProject, .settings, .searchLogs:
             return .enabled
 
         case .selectPreviousSession, .selectNextSession:

@@ -7,7 +7,7 @@ import CoveyKit
 /// docs/design_handoff_forecast_window) — the sessions workspace stays
 /// mounted underneath, hidden, exactly as under Review.
 enum WindowMode: Equatable {
-    case sessions, review, forecast
+    case sessions, review, forecast, projects
 }
 
 /// Who a review is for: the worktree toplevel, the project whose sessions
