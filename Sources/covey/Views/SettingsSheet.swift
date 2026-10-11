@@ -124,11 +124,11 @@ struct SettingsSheet: View {
         .onAppear { keyboardFocused = true }
         .task {
             await model.refreshProviderKeyStatuses(credentialProfiles)
-            if let session = model.sessions.first(where: { $0.name == model.selected }) {
-                let resolved = await DocumentRootResolver.resolve(session:session)
-                documentContext = resolved.context
-                if let catalog = try? await ProjectDocumentCatalog().scan(context:resolved.context,configuration:draft.values.documentExclusions) { detectedDocumentPresets = catalog.detected }
+            if let context = model.activeView?.documents?.context { documentContext = context }
+            else if let session = model.sessions.first(where: { $0.name == model.focusedAgentPane }) {
+                documentContext = await DocumentRootResolver.resolve(session:session).context
             }
+            if let documentContext, let catalog = try? await ProjectDocumentCatalog().scan(context:documentContext,configuration:draft.values.documentExclusions) { detectedDocumentPresets = catalog.detected }
         }
         .onKeyPress(phases: .down) { press in handle(press) }
         .sheet(isPresented: $showingKeySheet) {

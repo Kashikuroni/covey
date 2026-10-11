@@ -85,6 +85,7 @@ struct ContentView: View {
             Group {
                 switch modal {
                 case .settings: SettingsSheet(model: model)
+                case .documentPicker: DocumentPickerView(model:model)
                 case .newSession: NewSessionSheet(model: model)
                 case .recent: RecentSheet(model: model)
                 case .kill(let name): KillSheet(model: model, name: name)

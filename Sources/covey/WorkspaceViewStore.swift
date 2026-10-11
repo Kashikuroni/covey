@@ -50,6 +50,7 @@ extension AppModel {
         let r = v.removeLeaf(name)
         viewOfSession[name] = nil
         if r.emptied {
+            discardDocumentState(viewID:id)
             views[id] = nil
             return (nil, v.terminal?.shellSession)
         }
@@ -80,6 +81,7 @@ extension AppModel {
     func renameSessionInView(_ old: String, to new: String) {
         guard let id = viewOfSession[old] else { return }
         mutateForView(id, persist: false) { $0.renameLeaf(old, to: new) }
+        if documentReaders[id]?.context.sourceSession == old { documentReaders[id]?.context.sourceSession = new }
         viewOfSession[old] = nil
         viewOfSession[new] = id
     }
@@ -99,6 +101,7 @@ extension AppModel {
     /// Copy the view maps into the persisted struct (id-sorted for stable JSON).
     /// Does not write to disk.
     func snapshotWorkspaceViews() {
+        persisted.documentRecents = documentRecents
         persisted.workspaceViews = views.values.sorted { $0.id < $1.id }.map(\.persisted)
         persisted.viewOfSession = viewOfSession
     }
@@ -175,6 +178,7 @@ extension AppModel {
                 emptied = emptied || v.removeLeaf(dead).emptied
             }
             if emptied {
+                discardDocumentState(viewID:id)
                 if let shell = v.terminal?.shellSession { Task { await kill(shell) } }
                 views[id] = nil
                 continue

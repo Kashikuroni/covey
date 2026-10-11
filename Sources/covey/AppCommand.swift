@@ -16,6 +16,7 @@ enum AppCommand: String, CaseIterable, Hashable {
     case showProviders, toggleForecast, toggleForecastSource, focusSessionList, focusAgent, focusIssues
     case focusTerminalSplit, focusTrace, showKeyboardHelp
     case addProject, removeProject, renameProject, settings, searchLogs
+    case openProjectDocument, closeDocumentView, focusDocuments
 }
 
 extension AppCommand {
@@ -91,6 +92,9 @@ enum CommandCatalog {
     }
 
     static let all: [CommandDescriptor] = [
+        descriptor(.openProjectDocument,"Open Project Document",.view,["document","markdown","spec","plan","документ"]),
+        descriptor(.closeDocumentView,"Close Document View",.view,["close document","закрыть документ"]),
+        descriptor(.focusDocuments,"Focus Documents",.view,["focus document","фокус документ"]),
         descriptor(.newSession, "New Session", .session,
                    ["new", "create", "новая сессия", "создать сессию"],
                    .init(key: "n", modifiers: command, display: "⌘N")),

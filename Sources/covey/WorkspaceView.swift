@@ -47,6 +47,7 @@ struct WorkspaceView: Identifiable, Equatable {
     /// Width share of the agent zone vs. the terminal column (0.15…0.85).
     /// nil = never sized for a terminal; the renderer falls back to a default.
     var agentAreaRatio: Double?
+    var documents: PersistedDocumentZone? = nil
 
     static func single(_ session: String, id: ViewID) -> WorkspaceView {
         WorkspaceView(id: id, agentTree: .agent(session: session),
@@ -59,6 +60,7 @@ struct WorkspaceView: Identifiable, Equatable {
     /// Rewrites a leaf name (session rename). No-op if `old` is absent.
     mutating func renameLeaf(_ old: String, to new: String) {
         agentTree = agentTree.replacing(session: old, with: new)
+        if documents?.context.sourceSession == old { documents?.context.sourceSession = new }
     }
 
     /// Removes a leaf and collapses its node. Returns the focus successor (nil
@@ -87,7 +89,8 @@ extension WorkspaceView {
                   agentTree: PaneNode(persisted: p.agentTree),
                   terminal: terminal,
                   inspector: InspectorZone(persistedString: p.inspector),
-                  agentAreaRatio: p.agentAreaRatio)
+                  agentAreaRatio: p.agentAreaRatio,
+                  documents: p.documents)
     }
 
     var persisted: PersistedWorkspaceView {
@@ -98,6 +101,7 @@ extension WorkspaceView {
             terminalOpen: terminal != nil ? true : nil,
             terminalAxis: terminal?.axis == .horizontal ? PaneAxis.horizontal.rawValue : nil,
             inspector: inspector.persistedString,
-            agentAreaRatio: agentAreaRatio)
+            agentAreaRatio: agentAreaRatio,
+            documents: documents)
     }
 }

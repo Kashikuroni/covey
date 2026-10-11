@@ -46,9 +46,10 @@ public final class AppModel {
         case addProject
         case logSearch
         case splitPicker(PaneAxis)
+        case documentPicker
     }
 
-    public enum Focus { case sessions, terminal, inspector }
+    public enum Focus { case sessions, terminal, inspector, documents }
 
     public enum TerminalCommand: Equatable {
         case focus, blur, scrollPage(up: Bool), scrollToBottom
@@ -68,6 +69,14 @@ public final class AppModel {
     /// `selected` (`WorkspaceViewStore`).
     var views: [ViewID: WorkspaceView] = [:]
     var viewOfSession: [String: ViewID] = [:]
+    var documentReaders: [ViewID: DocumentReaderModel] = [:]
+    var documentPicker: DocumentPickerModel?
+    var documentRecents: [PersistedDocumentRecents] = []
+    @ObservationIgnored var documentCatalog: any DocumentCatalogScanning = ProjectDocumentCatalog()
+    @ObservationIgnored var resolveDocumentContext: (Session) async -> DocumentRootResolution = { await DocumentRootResolver.resolve(session:$0) }
+    @ObservationIgnored var documentScanTask: Task<Void, Never>?
+    @ObservationIgnored var documentCatalogToken: DocumentCatalogWatchToken?
+    @ObservationIgnored var documentPersistTasks: [ViewID: Task<Void, Never>] = [:]
     /// Test seam for deterministic view ids.
     @ObservationIgnored var newViewID: () -> ViewID = { UUID().uuidString }
     /// Последняя фокусная agent-панель: цель замены кликом по сайдбару, пока
@@ -111,6 +120,7 @@ public final class AppModel {
     let dashboardSettings = DashboardSettings()
     public var modal: Modal? {
         didSet {
+            if oldValue == .documentPicker, modal != .documentPicker { dismissDocumentPickerState() }
             // A sheet lives in its own key window; its dismissal reshuffles
             // the main window's first responder. If the terminal zone owns
             // the keyboard, hand it back — after the dismissal settles.
@@ -349,7 +359,7 @@ public final class AppModel {
     }
 
     /// Route a view command to the focused pane's terminal (fallback: selected).
-    private func sendTerminalCommand(_ cmd: TerminalCommand) {
+    func sendTerminalCommand(_ cmd: TerminalCommand) {
         let target = focusedPane ?? selected
         if let target { deliverTerminalCommand(cmd, to: target) }
     }
@@ -406,7 +416,10 @@ public final class AppModel {
             glmForecastConfig: CoveyConfig.load().glmForecast ?? GLMForecastConfigSection())
         issueBrowser.toast = { [weak self] msg in self?.showToast(msg) }
         reviewLinks.changed = { [weak self] in self?.persist() }
-        documentExclusionSettings.changed = { [weak self] _ in self?.persist() }
+        documentExclusionSettings.changed = { [weak self] keys in
+            self?.persist()
+            self?.documentExclusionsDidChange(keys)
+        }
         issueBrowser.fetchBranches = { [weak self] dir in
             await self?.gitInfo(dir).branches ?? []
         }
@@ -415,6 +428,7 @@ public final class AppModel {
     public func start() async {
         persisted = store.load()
         documentExclusionSettings.apply(persisted.documentExclusions ?? .init(),notify:false)
+        documentRecents = persisted.documentRecents ?? []
         themeRaw = persisted.theme ?? "dark"
         splitPct = persisted.splitPct ?? 38
         usagePlacement = persisted.usagePlacement.flatMap(UsagePlacement.init(rawValue:)) ?? .right
@@ -505,6 +519,7 @@ public final class AppModel {
         lastFocusedAgent = name
         historyMode = false
         await syncPaneAttachments()
+        await syncDocumentActivity()
         if inspectorMode == .trace { await subscribeTrace() }
     }
 
@@ -514,6 +529,7 @@ public final class AppModel {
         attachedNames = []
         outputBuffers = [:]
         selected = nil
+        for reader in documentReaders.values { reader.stop() }
         focusedPane = nil
         lastFocusedAgent = nil
         historyMode = false
@@ -603,6 +619,7 @@ public final class AppModel {
     }
 
     public func focusPane(_ name: String) {
+        let previousView = activeViewID
         focusedPane = name
         if name == activeShell {
             // Инвариант: фокус на колонке не меняет selected.
@@ -614,6 +631,7 @@ public final class AppModel {
             setFocus(.terminal)
         }
         deliverTerminalCommand(.focus, to: name)
+        if previousView != activeViewID { Task { await syncDocumentActivity() } }
     }
 
     public func create(dir: String, agent: String) async {
@@ -1218,7 +1236,8 @@ public final class AppModel {
             canCloseFocusedPane: focusedPane == activeShell
                 || (visibleSplitTree?.contains(session: focusedPane ?? "") ?? false),
             reviewOpen: windowMode == .review,
-            hasActiveReview: review != nil)
+            hasActiveReview: review != nil,
+            hasDocumentZone: activeView?.documents != nil)
     }
 
     func perform(_ command: AppCommand) {
@@ -1227,6 +1246,9 @@ public final class AppModel {
         inputMode = .normal
 
         switch command {
+        case .openProjectDocument: Task { await openDocumentPicker() }
+        case .closeDocumentView: if let id = activeViewID { closeDocuments(viewID:id) }
+        case .focusDocuments: setFocus(.documents)
         case .newSession:
             newSessionPrefillDir = nil
             modal = .newSession
@@ -1648,6 +1670,7 @@ public final class AppModel {
         }
         let currentID: String
         switch focus {
+        case .documents: currentID = "documents"
         case .sessions: currentID = "sessions"
         case .inspector: currentID = "inspector"
         case .terminal: currentID = "pane:\(focusedPane ?? selected ?? "")"
@@ -1706,6 +1729,7 @@ public final class AppModel {
     /// agent-панель сплита — вернуть сессию в свою отдельную View; единственная
     /// панель — no-op (спека «Разбор сплита»).
     func closeFocusedPane() {
+        if focus == .documents, let id = activeViewID { closeDocuments(viewID:id); return }
         if let shell = activeShell, focusedPane == shell {
             closeActiveTerminal()
             return
@@ -1930,6 +1954,7 @@ public final class AppModel {
         persisted.showLinks = reviewLinks.showLinks
         persisted.linksOnFocus = reviewLinks.linksOnFocus
         persisted.documentExclusions = documentExclusionSettings.configuration
+        persisted.documentRecents = documentRecents
         persisted.projectNames = projectNames
         persisted.projects = projects
         snapshotWorkspaceViews()
