@@ -14,7 +14,7 @@ struct DocumentFileLoader: DocumentFileLoading {
     static let maxPreviewBytes = 4 * 1024 * 1024
     static func isMarkdown(_ path: String) -> Bool { ["md","markdown"].contains((path as NSString).pathExtension.lowercased()) }
     func load(path: String, context: DocumentContext) async throws -> DocumentFileSnapshot {
-        try await Task.detached {
+        let worker = Task.detached { () throws -> DocumentFileSnapshot in
             let url = try DocumentLinkResolver.fileURL(path:path,context:context)
             let fd = Darwin.open(url.path,O_RDONLY | O_NONBLOCK | O_NOFOLLOW)
             guard fd >= 0 else { throw DocumentAccessError.unavailable }
@@ -35,6 +35,7 @@ struct DocumentFileLoader: DocumentFileLoading {
             if bytes.count > Self.maxPreviewBytes { return .tooLarge(path:path,byteCount:bytes.count) }
             guard !bytes.contains(0), let text = String(data:bytes,encoding:.utf8) else { return .binary(path:path,byteCount:bytes.count) }
             return .text(path:path,text:text,isMarkdown:Self.isMarkdown(path),byteCount:bytes.count)
-        }.value
+        }
+        return try await withTaskCancellationHandler(operation:{ try await worker.value },onCancel:{ worker.cancel() })
     }
 }
