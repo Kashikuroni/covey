@@ -117,6 +117,30 @@ final class PMModel {
         await reloadTasks(projectID: projectID)
     }
 
+    // MARK: - реестр проектов (обёртки для AppModel)
+
+    func registerProject(rootPath: String) async {
+        guard let gateway else { return }
+        _ = try? await gateway.register(rootPath: rootPath)
+        await reloadProjectsOnly()
+    }
+
+    func archiveProjectRoot(rootPath: String) async {
+        guard let gateway,
+              let project = projects.first(where: { $0.rootPath == rootPath }) else { return }
+        try? await gateway.archive(id: project.id, archived: true,
+                                   expectedRevision: project.revision)
+        await reloadProjectsOnly()
+    }
+
+    func renameProjectRoot(rootPath: String, to name: String) async {
+        guard let gateway,
+              let project = projects.first(where: { $0.rootPath == rootPath }) else { return }
+        try? await gateway.rename(id: project.id, to: name,
+                                  expectedRevision: project.revision)
+        await reloadProjectsOnly()
+    }
+
     func loadAnalytics(projectID: String?, taskID: String? = nil) async {
         guard let gateway else { return }
         analytics = try? await gateway.analytics(projectID: projectID, taskID: taskID,

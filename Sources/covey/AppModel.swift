@@ -291,6 +291,8 @@ public final class AppModel {
     public private(set) var newSessionPrefillName: String?
     /// The issue browser's state machine (gh access injected here).
     public let issueBrowser: IssueBrowserModel
+    /// PM Foundation: модель проектов/задач (источник правды — демон, pm.db).
+    let pm = PMModel()
     /// Bumped when Create GitHub Issue activates the composer title field.
     public private(set) var issueFocusTick = 0
     public private(set) var sbWidth = 360
@@ -415,7 +417,7 @@ public final class AppModel {
         menuBarLimitsEnabled = persisted.menuBarLimitsEnabled ?? false
         recents = persisted.recents
         order = persisted.order
-        projectOrder = persisted.projectOrder
+        projectOrder = persisted.projectOrder ?? []
         showSessions = persisted.showSessions ?? true
         showFooter = persisted.showFooter ?? true
         showHeader = persisted.showHeader ?? true
@@ -423,7 +425,7 @@ public final class AppModel {
         vimMode = persisted.vimMode ?? true
         reviewLinks.showLinks = persisted.showLinks ?? false
         reviewLinks.linksOnFocus = persisted.linksOnFocus ?? true
-        projectNames = persisted.projectNames
+        projectNames = persisted.projectNames ?? [:]
         projects = persisted.projects ?? []
         do {
             let (list, statuses, lost, models) = try await client.list()
@@ -432,6 +434,11 @@ public final class AppModel {
             modelByName = models
             connected = true
             toast = nil
+            // PM: реестр проектов теперь в демоне — грузим оттуда и зеркалим
+            // в локальные структуры сайдбара (группировка сессий не меняется).
+            pm.install(gateway: IPCPMGateway(client: client))
+            await pm.bootstrap()
+            syncProjectsFromPM()
             // Legacy: the oldest `splitAxes` payload keeps one companion shell;
             // the workspace-view migration then folds it into a view.
             var legacyShell: String?
@@ -1518,8 +1525,11 @@ public final class AppModel {
     }
 
     public func setProjectName(dir: String, name: String) {
-        if name.isEmpty { projectNames[dir] = nil } else { projectNames[dir] = name }
-        persist()
+        let target = name.isEmpty ? pmProjectDefaultName(dir) : name
+        Task {
+            await pm.renameProjectRoot(rootPath: dir, to: target)
+            syncProjectsFromPM()
+        }
     }
 
     public func displayName(forDir dir: String) -> String {
@@ -1729,19 +1739,31 @@ public final class AppModel {
 
     public func addProject(_ dir: String) {
         let root = projectRoot(dir)
-        if !projects.contains(root) {
-            projects.append(root)
-            persist()
+        Task {
+            await pm.registerProject(rootPath: root)
+            syncProjectsFromPM()
+            await selectProject(root)
         }
-        Task { await selectProject(root) }
     }
 
     public func removeProject(_ root: String) {
         guard projects.contains(root) else { toast = "project not registered"; return }
-        projects.removeAll { $0 == root }
-        if selectedProjectRoot == root { selectedProjectRoot = nil }
-        persist()
-        toast = "project removed"
+        Task {
+            await pm.archiveProjectRoot(rootPath: root)
+            syncProjectsFromPM()
+            if selectedProjectRoot == root { selectedProjectRoot = nil }
+            toast = "project removed"
+        }
+    }
+
+    /// Зеркалирует демон-реестр (pm.projects) в локальные структуры сайдбара.
+    func syncProjectsFromPM() {
+        let active = pm.projects
+            .filter { $0.archivedAt == nil }
+            .sorted { $0.sortOrder < $1.sortOrder }
+        projects = active.map(\.rootPath)
+        projectNames = Dictionary(uniqueKeysWithValues: active.map { ($0.rootPath, $0.name) })
+        projectOrder = active.map(\.rootPath)
     }
 
     public func activateIssues() {
@@ -1909,8 +1931,17 @@ public final class AppModel {
         persisted.linksOnFocus = reviewLinks.linksOnFocus
         persisted.projectNames = projectNames
         persisted.projects = projects
+        Self.pmSanitize(&persisted)
         snapshotWorkspaceViews()
         store.save(persisted)
+    }
+
+    /// PM: реестр проектов переехал в демон (pm.db) — state.json не пишет эти
+    /// поля с Этапа 0. Декодирование старых файлов остаётся (spec §10).
+    static func pmSanitize(_ state: inout PersistedState) {
+        state.projects = nil
+        state.projectNames = nil
+        state.projectOrder = nil
     }
 
     private func apply(_ event: DaemonEvent) {
@@ -1974,14 +2005,16 @@ public final class AppModel {
         case let .createProgress(stage):
             noteCreateProgress(stage)
         case let .pm(envelope):
-            // PM Foundation: до подключения PMModel (следующий слайс) события
-            // буферизуются — GUI остаётся собираемым и не теряет конверты.
-            pmEventBuffer.append(envelope)
+            // PM Foundation: событие — сигнал; PMModel применяет activity из
+            // конверта, остальное перечитывает одним запросом (ТЗ §22.6).
+            pm.apply(envelope)
+            if envelope.type != "project.changed" {
+                Task { await pm.reloadAllTasks() }
+            } else {
+                syncProjectsFromPM()
+            }
         }
     }
-
-    /// Буфер PM-событий демона; PMModel (Task 11+) заберёт применение на себя.
-    var pmEventBuffer: [PMEventEnvelope] = []
 
     /// Latest session-create stage as presentable text. Internal so tests can
     /// drive it without a daemon round-trip; the event loop lands here too.

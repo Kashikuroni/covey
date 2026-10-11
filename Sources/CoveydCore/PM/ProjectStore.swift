@@ -94,7 +94,7 @@ public final class ProjectStore {
         var imported = 0
         for root in roots {
             if try byRoot(root) != nil { continue }
-            let name = state.projectNames[root] ?? pmProjectDefaultName(root)
+            let name = state.projectNames?[root] ?? pmProjectDefaultName(root)
             let sortOrder = order.firstIndex(of: root).map(Int64.init) ?? Int64(roots.count)
             let id = UUID().uuidString
             try db.run("""
