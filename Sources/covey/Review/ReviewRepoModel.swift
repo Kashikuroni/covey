@@ -115,7 +115,7 @@ final class ReviewRepoModel {
     }
 
     private func noteRowError(_ key: String, _ error: Error) {
-        let text = String(describing: error)
+        let text = refusalText(error)
         rowErrors[key] = text
         EventLog.note("error", text)
     }
@@ -209,7 +209,7 @@ final class ReviewRepoModel {
             await reload()
             return nil
         } catch {
-            return String(describing: error)
+            return refusalText(error)
         }
     }
 
@@ -267,7 +267,7 @@ final class ReviewRepoModel {
                 cleanupRows[index].done = true
                 EventLog.note("cleanup", "removed \(cleanupRows[index].path)")
             } catch {
-                cleanupRows[index].error = String(describing: error)
+                cleanupRows[index].error = refusalText(error)
             }
         }
         await reload()

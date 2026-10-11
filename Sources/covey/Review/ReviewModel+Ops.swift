@@ -55,8 +55,8 @@ extension ReviewModel {
             if staged { try await git.stage(worktree: worktree, paths: [path]) }
             else { try await git.unstage(worktree: worktree, paths: [path]) }
         } catch {
-            banner = String(describing: error)
-            toast(String(describing: error))
+            banner = refusalText(error)
+            toast(refusalText(error))
             return
         }
         await refreshIndex()
@@ -70,8 +70,8 @@ extension ReviewModel {
     func stageAllChanges() async {
         do { try await git.stageAll(worktree: worktree) }
         catch {
-            banner = String(describing: error)
-            toast(String(describing: error))
+            banner = refusalText(error)
+            toast(refusalText(error))
             return
         }
         await refreshIndex()
@@ -80,8 +80,8 @@ extension ReviewModel {
     func unstageAllChanges() async {
         do { try await git.unstageAll(worktree: worktree) }
         catch {
-            banner = String(describing: error)
-            toast(String(describing: error))
+            banner = refusalText(error)
+            toast(refusalText(error))
             return
         }
         await refreshIndex()
@@ -117,7 +117,7 @@ extension ReviewModel {
             await reload()
             toast("Committed")
         } catch {
-            commitError = String(describing: error)
+            commitError = refusalText(error)
         }
     }
 
@@ -147,8 +147,8 @@ extension ReviewModel {
                 message = "Pushed · published origin/\(branchLabel)"
             }
         } catch {
-            banner = String(describing: error)
-            toast(String(describing: error))
+            banner = refusalText(error)
+            toast(refusalText(error))
             return
         }
         await refreshUpstream()
