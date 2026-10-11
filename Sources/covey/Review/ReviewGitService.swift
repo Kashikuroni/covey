@@ -25,6 +25,7 @@ protocol ReviewGitReading: Sendable {
 
     // Management surface (phase 2) — reads repo-wide, writes via CoveyGit.
     func worktreeList(root: String) async throws -> [WorktreeListEntry]
+    func branchRecency(root: String) async -> [String: Int64]
     func mergedBranches(root: String, into base: String) async throws -> [String]
     func lastCommit(worktree: String) async -> Int64?
     func aheadBehind(root: String, branch: String, base: String) async -> (ahead: Int, behind: Int)
@@ -112,6 +113,10 @@ struct ReviewGitService: ReviewGitReading {
 
     func worktreeList(root: String) async throws -> [WorktreeListEntry] {
         try await offMainThrowing { try Repository(at: root).listWorktrees() }
+    }
+
+    func branchRecency(root: String) async -> [String: Int64] {
+        await offMain { (try? Repository(at: root).branchRecency()) ?? [:] }
     }
 
     func mergedBranches(root: String, into base: String) async throws -> [String] {

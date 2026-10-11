@@ -17,6 +17,7 @@ final class ReviewRepoModel {
     var base = ""
     var prs: [ReviewPR] = []
     var prError: String?
+    var listError: String?
     var rowErrors: [String: String] = [:]
     var cleanupSheetOpen = false
     var cleanupRows: [CleanupCandidate] = []
@@ -55,7 +56,14 @@ final class ReviewRepoModel {
     func reload() async {
         loading = true
         defer { loading = false }
-        guard let entries = try? await git.worktreeList(root: projectRoot) else { return }
+        let entries: [WorktreeListEntry]
+        do {
+            entries = try await git.worktreeList(root: projectRoot)
+            listError = nil
+        } catch {
+            listError = refusalText(error)
+            return
+        }
         base = await git.defaultBase(worktree: currentWorktree) ?? "main"
         let merged = (try? await git.mergedBranches(root: projectRoot, into: base)) ?? []
         let prSnapshot = await prReader.load(root: projectRoot)
@@ -90,15 +98,20 @@ final class ReviewRepoModel {
         worktreeRows = rows
 
         let names = await git.localBranches(worktree: currentWorktree)
+        let recency = (try? await git.branchRecency(root: projectRoot)) ?? [:]
+        let current = currentBranchName()
+        let ordered = names.sorted { lhs, rhs in
+            if (lhs == current) != (rhs == current) { return lhs == current }
+            return (recency[lhs] ?? 0, lhs) > (recency[rhs] ?? 0, rhs)
+        }
         var branches: [BranchRow] = []
-        for name in names {
+        for name in ordered {
             let counts = await git.aheadBehind(root: projectRoot, branch: name, base: base)
             branches.append(BranchRow(
-                name: name, isCurrentBranch: name == currentBranchName(),
+                name: name, isCurrentBranch: name == current,
                 ahead: counts.ahead, behind: counts.behind,
                 mergedIntoBase: merged.contains(name),
-                isProtected: protectedList.contains(name),
-                checkedOutAt: worktreeRows.first { $0.branch == name }?.path))
+                isProtected: protectedList.contains(name)))
         }
         branchRows = branches
     }
@@ -187,7 +200,9 @@ final class ReviewRepoModel {
 
     func updateFromBase() async {
         guard canUpdateFromBase else {
-            rowErrors[currentWorktree] = "a live agent session is working here — update is disabled"
+            rowErrors[currentWorktree] = currentBranchName() == nil
+                ? "detached HEAD — switch to a branch first"
+                : "a live agent session is working here — update is disabled"
             return
         }
         do {
@@ -199,10 +214,17 @@ final class ReviewRepoModel {
         await reload()
     }
 
+    /// The filesystem path of a would-be worktree — the single builder both
+    /// the model and the popover sheet use (review minor 6).
+    func worktreePath(named name: String) -> String {
+        let worktrees = (projectRoot as NSString).appendingPathComponent(".worktrees")
+        return (worktrees as NSString).appendingPathComponent(name)
+    }
+
     /// Git-level worktree creation; returns git's refusal text, nil on success.
     func newWorktree(name: String, base: String?) async -> String? {
-        let worktrees = (projectRoot as NSString).appendingPathComponent(".worktrees")
-        let path = (worktrees as NSString).appendingPathComponent(name)
+        let name = name.trimmingCharacters(in: .whitespaces)
+        let path = worktreePath(named: name)
         do {
             try await git.addWorktree(root: projectRoot, path: path,
                                       newBranch: name, base: base ?? self.base)
@@ -271,7 +293,7 @@ final class ReviewRepoModel {
             }
         }
         await reload()
-        if !cleanupRows.contains(where: { $0.ticked && !$0.done && $0.error != nil }) {
+        if !cleanupRows.contains(where: { $0.error != nil && !$0.done }) {
             cleanupSheetOpen = false
         }
     }

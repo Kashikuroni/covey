@@ -28,7 +28,10 @@ struct ReviewRepoPopover: View {
                 }
             }
             HStack(spacing: 8) {
-                ReviewButton(title: "New worktree", tk: tk) { newWorktreePrompt = true }
+                ReviewButton(title: "New worktree", tk: tk) {
+                    newWorktreeError = nil
+                    newWorktreePrompt = true
+                }
                 let counts = repo.cleanupAvailabilityCounts()
                 ReviewButton(title: cleanupConfirmLabel(worktrees: counts.worktrees,
                                                         branches: counts.branches),
@@ -43,6 +46,9 @@ struct ReviewRepoPopover: View {
                         await repo.refreshPRs()
                     }
                 }
+            }
+            if let error = repo.listError {
+                Text(error).font(.system(size: 11)).foregroundStyle(tk.err)
             }
             if let error = repo.prError {
                 Text(error).font(.system(size: 11)).foregroundStyle(tk.t3)
@@ -193,11 +199,9 @@ struct ReviewRepoPopover: View {
                             newWorktreeError = error
                         } else {
                             newWorktreePrompt = false
-                            let worktrees = (repo.projectRoot as NSString)
-                                .appendingPathComponent(".worktrees")
                             app.newSessionForWorktree(
-                                dir: (worktrees as NSString)
-                                    .appendingPathComponent(newWorktreeName))
+                                dir: repo.worktreePath(
+                                    named: newWorktreeName.trimmingCharacters(in: .whitespaces)))
                         }
                     }
                 }

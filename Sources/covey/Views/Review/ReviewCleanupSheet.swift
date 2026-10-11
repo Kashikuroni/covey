@@ -21,7 +21,7 @@ struct ReviewCleanupSheet: View {
                                 if row.canDeleteBranch {
                                     Toggle(isOn: Binding(get: { row.removeBranch },
                                                          set: { repo.tickCleanupBranch(row.id, $0) })) {
-                                        Text("и ветку").font(.system(size: 11)).foregroundStyle(tk.t3)
+                                        Text("and branch").font(.system(size: 11)).foregroundStyle(tk.t3)
                                     }
                                     .toggleStyle(.checkbox)
                                 }
@@ -37,10 +37,12 @@ struct ReviewCleanupSheet: View {
                     Spacer()
                     ReviewButton(title: "Cancel", tk: tk) { repo.cleanupSheetOpen = false }
                     let counts = repo.pendingCleanupCounts()
+                    let failed = repo.cleanupRows.filter { $0.error != nil && !$0.done }.count
                     ReviewButton(title: repo.cleanupRunning
                                  ? "Removing…"
-                                 : cleanupConfirmLabel(worktrees: counts.worktrees,
-                                                       branches: counts.branches),
+                                 : cleanupButtonLabel(failed: failed,
+                                                      worktrees: counts.worktrees,
+                                                      branches: counts.branches),
                                  prominent: true, tk: tk) {
                         Task { await repo.runCleanup() }
                     }

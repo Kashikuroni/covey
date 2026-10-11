@@ -44,7 +44,6 @@ struct BranchRow: Equatable, Identifiable {
     let behind: Int
     let mergedIntoBase: Bool
     let isProtected: Bool
-    let checkedOutAt: String?    // worktree path holding this branch
 
     var id: String { name }
 }
@@ -83,4 +82,14 @@ func cleanupConfirmLabel(worktrees: Int, branches: Int) -> String {
 func isLiveSession(_ worktreePath: String,
                    sessions: [(dir: String, agent: String)]) -> String? {
     sessions.first { $0.dir == worktreePath || $0.dir.hasPrefix(worktreePath + "/") }?.agent
+}
+
+/// The cleanup sheet's confirm button: while any failure is visible the
+/// button becomes a retry (donor wording), otherwise it names the batch.
+func cleanupButtonLabel(failed: Int, worktrees: Int, branches: Int) -> String {
+    if failed > 0 {
+        let rows = failed == 1 ? "1 worktree" : "\(failed) worktrees"
+        return "Retry \(rows)"
+    }
+    return cleanupConfirmLabel(worktrees: worktrees, branches: branches)
 }

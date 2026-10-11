@@ -228,7 +228,13 @@ final class FakeReviewGit: ReviewGitReading, @unchecked Sendable {
         opsLock.withLock { _updateFromBaseCalls }
     }
 
-    func worktreeList(root: String) async throws -> [WorktreeListEntry] { worktreeEntries }
+    var worktreeListError: Error?
+    var branchRecencyMap: [String: Int64] = [:]
+    func worktreeList(root: String) async throws -> [WorktreeListEntry] {
+        if let worktreeListError { throw worktreeListError }
+        return worktreeEntries
+    }
+    func branchRecency(root: String) async -> [String: Int64] { branchRecencyMap }
     func mergedBranches(root: String, into base: String) async throws -> [String] { mergedInto }
     func lastCommit(worktree: String) async -> Int64? { lastCommitStamps[worktree] }
     func aheadBehind(root: String, branch: String, base: String) async -> (ahead: Int, behind: Int) {
@@ -243,7 +249,7 @@ final class FakeReviewGit: ReviewGitReading, @unchecked Sendable {
         opsLock.withLock { _removeCalls.append(path) }
         if let opsError { throw opsError }
     }
-    func promoteWorktree(path: String, branch: String) async throws {
+    func promoteWorktree(root: String, path: String, branch: String) async throws {
         opsLock.withLock { _promoteCalls.append((path, branch)) }
         if let opsError { throw opsError }
     }

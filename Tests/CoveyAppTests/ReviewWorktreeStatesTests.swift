@@ -61,3 +61,14 @@ final class ReviewWorktreeStatesTests: XCTestCase {
         XCTAssertNil(isLiveSession("/repo", sessions: []))
     }
 }
+
+extension ReviewWorktreeStatesTests {
+    func testCleanupButtonLabelPrefersRetry() {                      // review minor 2
+        XCTAssertEqual(cleanupButtonLabel(failed: 1, worktrees: 1, branches: 1),
+                       "Retry 1 worktree")
+        XCTAssertEqual(cleanupButtonLabel(failed: 0, worktrees: 2, branches: 1),
+                       "Remove 2 worktrees and 1 branch")
+        XCTAssertEqual(cleanupButtonLabel(failed: 0, worktrees: 0, branches: 0),
+                       "Remove nothing")
+    }
+}

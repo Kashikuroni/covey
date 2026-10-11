@@ -179,3 +179,54 @@ extension ReviewRepoModelTests {
         XCTAssertFalse(model.escapeCleanupSheet())                     // nothing to close
     }
 }
+
+extension ReviewRepoModelTests {
+    func testBranchRowsOrderCurrentFirstThenRecency() async {        // review minor 3
+        let (model, git, _) = makeModel()
+        git.branchRecencyMap = ["main": 100, "feat": 200, "old": 300]
+        git.branches = ["feat", "old", "main"]
+        await model.reload()
+        XCTAssertEqual(model.branchRows.map(\.name), ["feat", "old", "main"],
+                       "current first, then recency descending")
+    }
+
+    func testUpdateFromBaseNamesDetachedWhenNoBranch() async {       // review minor 4
+        let (model, git, _) = makeModel()
+        git.worktreeEntries[1] = WorktreeListEntry(path: "/repo/.worktrees/feat",
+                                                   branch: nil, isPrimary: false)
+        await model.reload()
+        XCTAssertFalse(model.canUpdateFromBase)
+        await model.updateFromBase()
+        XCTAssertEqual(model.rowErrors["/repo/.worktrees/feat"], "detached HEAD — switch to a branch first")
+    }
+
+    func testWorktreeListFailureSurfacesListError() async {          // review minor 5
+        let (model, git, _) = makeModel()
+        git.worktreeListError = GitError("repo scan failed")
+        await model.reload()
+        XCTAssertEqual(model.listError, "repo scan failed")
+    }
+
+    func testNewWorktreeTrimsNameAndSharesPathBuilder() async {      // review minor 6
+        let (model, git, _) = makeModel()
+        await model.reload()
+        _ = await model.newWorktree(name: "  spaced  ", base: "main")
+        XCTAssertEqual(git.worktreeAddCalls[0].newBranch, "spaced")
+        XCTAssertEqual(model.worktreePath(named: "spaced"),
+                       (model.projectRoot as NSString).appendingPathComponent(".worktrees/spaced"))
+    }
+
+    func testCleanupSheetStaysOpenWhileAnyFailureExists() async {    // review minor 9
+        let (model, git, _) = makeModel()
+        git.opsError = GitError("refuse once")
+        await model.reload()
+        model.openCleanupSheet()
+
+        await model.runCleanup()
+        XCTAssertEqual(model.cleanupRows[0].error, "refuse once")
+        model.tickCleanup(model.cleanupRows[0].id, false)            // untick the failure
+
+        await model.runCleanup()
+        XCTAssertTrue(model.cleanupSheetOpen, "a failure must not hide behind an untick")
+    }
+}

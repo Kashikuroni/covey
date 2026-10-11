@@ -44,8 +44,7 @@ struct ReviewWorktreePicker: View {
 
     private func manageButton(_ repo: ReviewRepoModel) -> some View {
         Button {
-            repo.popoverOpen = true
-            Task { await repo.reload() }
+            repo.popoverOpen = true        // the popover's onAppear reloads
         } label: {
             Image(systemName: "arrow.triangle.branch")
                 .font(.system(size: 10))
