@@ -22,8 +22,8 @@ final class PMModelsTests: XCTestCase {
         XCTAssertTrue(PMTaskTransitions.human(.inProgress, .failed))
         XCTAssertTrue(PMTaskTransitions.human(.ready, .cancelled))
         XCTAssertTrue(PMTaskTransitions.human(.done, .inProgress))      // reopen
+        XCTAssertTrue(PMTaskTransitions.human(.done, .ready))           // reopen без привязок (spec §7.1)
         XCTAssertTrue(PMTaskTransitions.human(.failed, .archived))
-        XCTAssertFalse(PMTaskTransitions.human(.done, .ready))          // только reopen в in_progress
         XCTAssertFalse(PMTaskTransitions.human(.ready, .inProgress))    // это авто-переход bind/spawn
         XCTAssertFalse(PMTaskTransitions.human(.archived, .inProgress)) // архив не открывается
     }

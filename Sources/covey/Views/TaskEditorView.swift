@@ -11,24 +11,30 @@ struct PMDraft: Equatable, Identifiable {
 }
 
 /// Чистая модель редактора: черновик тела, dirty, debounce-сохранение.
+/// Save-замыкание возвращает новую ревизию — она становится рабочей:
+/// каждый следующий autosave идёт с ней, а не с протухшей (finding 2).
 @MainActor @Observable
 final class TaskEditorModel {
     var body: String
     var idleThresholdText: String
+    private(set) var lastError: String?
     private var original: String
     private var originalThresholdText: String
-    private let save: (String, Int?) async throws -> Void
+    private var revision: Int64
+    private let save: (String, Int?, Int64) async throws -> Int64
     private var saveTask: Task<Void, Never>?
 
     var isDirty: Bool { body != original || idleThresholdText != originalThresholdText }
 
-    init(task: PMTask, save: @escaping (String, Int?) async throws -> Void) {
+    init(task: PMTask,
+         save: @escaping (String, Int?, Int64) async throws -> Int64) {
         self.body = task.body
         self.original = task.body
         let threshold = PMIdleThreshold.format(
             task.idleThresholdSeconds ?? PMIdleThreshold.defaultSeconds)
         self.idleThresholdText = threshold
         self.originalThresholdText = threshold
+        self.revision = task.revision
         self.save = save
     }
 
@@ -38,21 +44,30 @@ final class TaskEditorModel {
         saveTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(1))
             guard !Task.isCancelled, let self else { return }
-            try? await self.performSave()
+            _ = try? await self.performSave()
         }
     }
 
     func saveNow() async throws {
         saveTask?.cancel()
-        try await performSave()
+        _ = try await performSave()
     }
 
-    private func performSave() async throws {
+    @discardableResult
+    private func performSave() async throws -> Int64 {
         let threshold = PMIdleThreshold.parse(idleThresholdText)
-        try await save(body, threshold)
-        // Успешное сохранение = сохранённое стало эталоном для dirty.
-        original = body
-        originalThresholdText = threshold.map { PMIdleThreshold.format($0) } ?? idleThresholdText
+        do {
+            let newRevision = try await save(body, threshold, revision)
+            revision = newRevision
+            lastError = nil
+            // Успешное сохранение = сохранённое стало эталоном для dirty.
+            original = body
+            originalThresholdText = threshold.map { PMIdleThreshold.format($0) } ?? idleThresholdText
+            return newRevision
+        } catch {
+            lastError = "save failed: \(error.localizedDescription.isEmpty ? "\(error)" : error.localizedDescription)"
+            throw error
+        }
     }
 }
 
@@ -90,6 +105,9 @@ struct TaskEditorView: View {
                 HStack {
                     Button("Save Now") { Task { try? await e.saveNow() } }
                         .buttonStyle(AyuButton(tk: tk, prominent: true))
+                    if let err = e.lastError {
+                        Text(err).font(.caption).foregroundStyle(tk.err).lineLimit(2)
+                    }
                     Spacer()
                 }
             }
@@ -103,11 +121,12 @@ struct TaskEditorView: View {
     private func makeEditor() -> TaskEditorModel {
         let task = taskView.task
         let pm = model.pm
-        return TaskEditorModel(task: task) { body, threshold in
-            try await pm.updateTask(id: task.id, projectID: task.projectID,
-                                    title: nil, body: body,
-                                    idleThresholdS: threshold,
-                                    expectedRevision: task.revision)
+        return TaskEditorModel(task: task) { body, threshold, expectedRevision in
+            let updated = try await pm.updateTask(id: task.id, projectID: task.projectID,
+                                                  title: nil, body: body,
+                                                  idleThresholdS: threshold,
+                                                  expectedRevision: expectedRevision)
+            return updated.revision
         }
     }
 

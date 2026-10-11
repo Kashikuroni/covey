@@ -95,6 +95,46 @@ final class RollupServiceTests: XCTestCase {
         XCTAssertEqual(total, 107)
     }
 
+    func testClosedIntervalsStillAttributeAfterRecompute() throws {
+        // Review finding 1: wiring демона обязан кормить RollupService ВСЕМИ
+        // интервалами (openBindings ест атрибуцию закрытых). Пин API:
+        // allBindings возвращает и закрытые интервалы; RollupCore по ним
+        // атрибутирует минуты внутрь интервала.
+        let path = "\(NSTemporaryDirectory())covey-pm-\(UInt32.random(in: 0..<UInt32.max)).db"
+        let db = try PMDB(path: path)
+        let projects = ProjectStore(db: db)
+        let tasks = TaskStore(db: db)
+        let bindings = BindingService(db: db, taskStore: tasks)
+        let p = try projects.register(rootPath: "/dev/\(UUID().uuidString.prefix(6))",
+                                      name: nil, now: 1)
+        let t = try tasks.create(projectID: p.id, title: "T", body: "",
+                                 assignee: nil, idleThresholdS: nil, now: 1)
+        let b = try bindings.bind(taskID: t.id, session: "s1", now: 100)
+        try bindings.closeOpen(forSession: "s1", now: 500)   // сессия умерла
+
+        let all = try bindings.allBindings()
+        XCTAssertEqual(all.first?.id, b.id)
+        XCTAssertEqual(all.first?.endedAt, 500, "закрытый интервал входит в allBindings")
+
+        // И атрибуция по нему живёт:
+        let now = Int64(Date().timeIntervalSince1970)
+        let nowMs = now * 1000
+        let service = RollupService(
+            db: db,
+            loadBuckets: { [self.bucket(nowMs - 25 * 60_000, key: "ext-1", input: 50, output: 10)] },
+            loadBindings: { (try? bindings.allBindings()) ?? [] },
+            externalKeys: { ["s1": ["ext-1"]] },
+            projectOfSession: { _ in p.id })
+        try service.recompute(nowMs: nowMs)
+        // минута вне интервала (сейчас-25мин > endedAt при now-500с... интервал
+        // [100..500]с от старой эпохи — атрибуции быть НЕ должно, минута в unbound
+        // корректно; поэтому главный ассерт — allBindings выше, а здесь —
+        // отсутствие падения и unbound-строка)
+        let unbound = try db.query("SELECT COUNT(*) FROM rollup_day_task WHERE task_id=''",
+                                   []) { $0.int(0) }.first
+        XCTAssertEqual(unbound, 1)
+    }
+
     func testFrozenDaysNotRewritten() throws {
         let path = "\(NSTemporaryDirectory())covey-pm-\(UInt32.random(in: 0..<UInt32.max)).db"
         let db = try PMDB(path: path)

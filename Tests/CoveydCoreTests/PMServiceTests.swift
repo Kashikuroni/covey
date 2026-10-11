@@ -120,4 +120,114 @@ final class PMServiceTests: XCTestCase {
         _ = try service.handle(.pmTasksList(projectID: nil))
         XCTAssertEqual(try bindings.externalSessionMap()["s1"], ["uuid-s1"])
     }
+
+    /// Review finding 3: привязка УЖЕ работающей сессии тоже обязана
+    /// фиксировать external_session_id (sessionAdded был раньше привязки).
+    func testManualBindResolvesExternalSessionID() throws {
+        let projects = ProjectStore(db: db)
+        let tasks = TaskStore(db: db)
+        let bindings = BindingService(db: db, taskStore: tasks)
+        let live = Session(name: "s-live", dir: "/x", cwd: "/x", agent: "claude", created: 0,
+                           resumeCmd: "claude --resume live-uuid")
+        let service = PMService(db: db, projects: projects, tasks: tasks, bindings: bindings,
+                                rollups: RollupService(db: db, loadBuckets: { [] },
+                                    loadBindings: { [] }, externalKeys: { [:] },
+                                    projectOfSession: { _ in nil }),
+                                analytics: AnalyticsQuery(db: db, prices: []),
+                                resolveExternal: { session in
+                                    session.resumeCmd == nil ? nil : "uuid-\(session.name)"
+                                },
+                                sessionByName: { name in name == live.name ? live : nil },
+                                now: { 1000 })
+        guard case .pmProjects(let plist) = try service.handle(
+                .pmProjectsRegister(rootPath: "/dev/\(UUID().uuidString.prefix(6))")),
+              let project = plist.first,
+              case .pmTask(let task) = try service.handle(.pmTasksCreate(
+                projectID: project.id, title: "T", body: nil, assignee: nil,
+                idleThresholdS: nil, requestID: "c"))
+        else { return XCTFail("setup failed") }
+        _ = try service.handle(.pmTasksBind(taskID: task.id, session: "s-live", requestID: "b"))
+        _ = try service.handle(.pmTasksList(projectID: nil))   // дождаться q
+        XCTAssertEqual(try bindings.externalSessionMap()["s-live"], ["uuid-s-live"])
+    }
+
+    /// Review finding 7: восстановление после порчи БД видно событием.
+    func testRecoveryEmitsEvent() throws {
+        let projects = ProjectStore(db: db)
+        let tasks = TaskStore(db: db)
+        let service = PMService(db: db, projects: projects, tasks: tasks,
+                                bindings: BindingService(db: db, taskStore: tasks),
+                                rollups: RollupService(db: db, loadBuckets: { [] },
+                                    loadBindings: { [] }, externalKeys: { [:] },
+                                    projectOfSession: { _ in nil }),
+                                analytics: AnalyticsQuery(db: db, prices: []),
+                                recoveryNote: "pm.db was corrupt; started fresh",
+                                now: { 1000 })
+        var seen: [PMEventEnvelope] = []
+        service.onEvent = { seen.append($0) }
+        service.start(liveSessions: [], statuses: [:])
+        _ = try service.handle(.pmTasksList(projectID: nil))   // дождаться q
+        XCTAssertTrue(seen.contains { $0.type == "pm.recovered" })
+    }
+
+    /// Review finding 8: пауза по стеночным часам без нового события статуса.
+    func testActivityTickFlipsToPausedOnWallClock() throws {
+        var nowVal: Int64 = 1000
+        let projects = ProjectStore(db: db)
+        let tasks = TaskStore(db: db)
+        let service = PMService(db: db, projects: projects, tasks: tasks,
+                                bindings: BindingService(db: db, taskStore: tasks),
+                                rollups: RollupService(db: db, loadBuckets: { [] },
+                                    loadBindings: { [] }, externalKeys: { [:] },
+                                    projectOfSession: { _ in nil }),
+                                analytics: AnalyticsQuery(db: db, prices: []),
+                                now: { nowVal })
+        var seen: [PMEventEnvelope] = []
+        service.onEvent = { seen.append($0) }
+        guard case .pmProjects(let plist) = try service.handle(
+                .pmProjectsRegister(rootPath: "/dev/\(UUID().uuidString.prefix(6))")),
+              let project = plist.first,
+              case .pmTask(let task) = try service.handle(.pmTasksCreate(
+                projectID: project.id, title: "T", body: nil, assignee: nil,
+                idleThresholdS: 900, requestID: "c"))
+        else { return XCTFail("setup failed") }
+        _ = try service.handle(.pmTasksBind(taskID: task.id, session: "s1", requestID: "b"))
+        service.onStatus(name: "s1", status: .running, now: nowVal)   // работала
+        service.onStatus(name: "s1", status: .idle, now: nowVal)      // замолчала
+        _ = try service.handle(.pmTasksList(projectID: nil))
+        XCTAssertEqual(seen.last(where: { $0.type == "task.activity_changed" })?.value, "active")
+        nowVal += 901   // порог 900с истёк, новых событий статуса нет
+        service.tickActivities()
+        _ = try service.handle(.pmTasksList(projectID: nil))   // дренировать q
+        XCTAssertEqual(seen.last(where: { $0.type == "task.activity_changed" })?.value, "paused")
+    }
+
+    /// Review finding 10: reopen без живых привязок → ready (spec §7.1).
+    func testReopenWithoutBindingsGoesReady() throws {
+        let projects = ProjectStore(db: db)
+        let tasks = TaskStore(db: db)
+        let service = PMService(db: db, projects: projects, tasks: tasks,
+                                bindings: BindingService(db: db, taskStore: tasks),
+                                rollups: RollupService(db: db, loadBuckets: { [] },
+                                    loadBindings: { [] }, externalKeys: { [:] },
+                                    projectOfSession: { _ in nil }),
+                                analytics: AnalyticsQuery(db: db, prices: []),
+                                now: { 1000 })
+        guard case .pmProjects(let plist) = try service.handle(
+                .pmProjectsRegister(rootPath: "/dev/\(UUID().uuidString.prefix(6))")),
+              let project = plist.first,
+              case .pmTask(let task) = try service.handle(.pmTasksCreate(
+                projectID: project.id, title: "T", body: nil, assignee: nil,
+                idleThresholdS: nil, requestID: "c")),
+              case .pmTask = try service.handle(.pmTasksSetStatus(
+                id: task.id, lifecycle: "done", expectedRevision: task.revision,
+                requestID: "d"))
+        else { return XCTFail("setup failed") }
+        // done → «reopen» (in_progress от человека) без привязок = ready
+        let reopened = try service.handle(.pmTasksSetStatus(
+            id: task.id, lifecycle: "in_progress", expectedRevision: task.revision + 1,
+            requestID: "r"))
+        guard case .pmTask(let after) = reopened else { return XCTFail() }
+        XCTAssertEqual(after.lifecycle, .ready)
+    }
 }

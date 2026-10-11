@@ -180,7 +180,7 @@ public final class IPCServer {
             guard let pm else {
                 return reply(.error(code: "pmUnavailable", message: "PM service not running"))
             }
-            reply(pm.handle(request.op))
+            pm.handleAsync(request.op) { result in sink.send(.response(id: id, result: result)) }
 
         case .usageSubscribe:
             guard let snapshot = usageSnapshot else {

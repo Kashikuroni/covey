@@ -18,6 +18,11 @@ public final class PMService {
     /// provider sessionId → ключ вёдер TokenAggregator. Claude: uuid
     /// транскрипта из resumeCmd; Codex: nil (роллауты матчятся демоном иначе).
     private let resolveExternal: (Session) -> String?
+    /// Имя сессии → Session из реестра (резолв external id при ручной привязке).
+    private let sessionByName: (String) -> Session?
+    /// Non-nil, если pm.db был восстановлен после порчи — start эмитит событие.
+    private let recoveryNote: String?
+    private var didAnnounceRecovery = false
     private var deriver = ActivityDeriver()
     private var nextSeq: Int64 = 1
     private var replay: [String: (fingerprint: Int, result: ServerMessage.Result)] = [:]
@@ -26,16 +31,21 @@ public final class PMService {
     private var lastActivity: [String: PMActivity] = [:]
     private var rollupDebounce: DispatchSourceTimer?
     private var dailyTimer: DispatchSourceTimer?
+    private var activityTimer: DispatchSourceTimer?
 
     public init(db: PMDB, projects: ProjectStore, tasks: TaskStore,
                 bindings: BindingService, rollups: RollupService,
                 analytics: AnalyticsQuery,
                 resolveExternal: @escaping (Session) -> String? = { _ in nil },
+                sessionByName: @escaping (String) -> Session? = { _ in nil },
+                recoveryNote: String? = nil,
                 now: @escaping () -> Int64) {
         self.db = db; self.projects = projects; self.tasks = tasks
         self.bindings = bindings; self.rollups = rollups
         self.analytics = analytics
         self.resolveExternal = resolveExternal
+        self.sessionByName = sessionByName
+        self.recoveryNote = recoveryNote
         self.now = now
         nextSeq = ((try? db.query("SELECT MAX(seq) FROM events", []) { $0.int(0) }.first) ?? 0) + 1
     }
@@ -47,6 +57,10 @@ public final class PMService {
     public func start(liveSessions: [String], statuses: [String: Status]) {
         q.async { [weak self] in
             guard let self else { return }
+            if let note = self.recoveryNote, !self.didAnnounceRecovery {
+                self.didAnnounceRecovery = true
+                self.emit("pm.recovered", "pm", nil, value: note)
+            }
             self.deriver.snapshot(names: liveSessions, statuses: statuses, now: self.now())
             try? self.bindings.closeOpen(notIn: Set(liveSessions), now: self.now())
             self.scheduleRollup(delay: 0)
@@ -57,6 +71,19 @@ public final class PMService {
         timer.setEventHandler { [weak self] in self?.scheduleRollup(delay: 0) }
         timer.resume()
         dailyTimer = timer
+        // Review finding 8: активность — стеночное условие (простой > N), а
+        // StatusMonitor стреляет только на переходы. Тик раз в 30с пересчитывает
+        // active→paused без новых событий.
+        let activityTimer = DispatchSource.makeTimerSource(queue: q)
+        activityTimer.schedule(deadline: .now() + 30, repeating: 30)
+        activityTimer.setEventHandler { [weak self] in self?.tickActivities() }
+        activityTimer.resume()
+        self.activityTimer = activityTimer
+    }
+
+    /// Пере-вывод активностей по текущим часам (таймер 30с; тесты — напрямую).
+    public func tickActivities() {
+        q.async { [weak self] in self?.refreshActivities() }
     }
 
     public func sessionAdded(_ session: Session) {
@@ -86,10 +113,11 @@ public final class PMService {
         }
     }
 
-    public func onStatus(name: String, status: Status) {
+    public func onStatus(name: String, status: Status, now stamp: Int64? = nil) {
         q.async { [weak self] in
-            self?.deriver.onStatus(name: name, status: status, now: self?.now() ?? 0)
-            self?.refreshActivities()
+            guard let self else { return }
+            self.deriver.onStatus(name: name, status: status, now: stamp ?? self.now())
+            self.refreshActivities()
         }
     }
 
@@ -97,6 +125,17 @@ public final class PMService {
 
     public func handle(_ op: Request.Op) -> ServerMessage.Result {
         q.sync { dispatch(op) }
+    }
+
+    /// Finding 4: pm-операции уходят с serial-очереди IPC (spawn/rollup не
+    /// должны замораживать весь протокол демона). Reply потокобезопасен —
+    /// sink.send уже зовут с createQueue.
+    public func handleAsync(_ op: Request.Op,
+                            reply: @escaping (ServerMessage.Result) -> Void) {
+        q.async { [weak self] in
+            guard let self else { return }
+            reply(self.dispatch(op))
+        }
     }
 
     private func dispatch(_ op: Request.Op) -> ServerMessage.Result {
@@ -153,8 +192,15 @@ public final class PMService {
 
         case .pmTasksSetStatus(let id, let lifecycle, let rev, let rid):
             return idempotent(rid, op) {
-                guard let to = PMTaskLifecycle(rawValue: lifecycle) else {
+                guard var to = PMTaskLifecycle(rawValue: lifecycle) else {
                     throw PMStoreError.badRequest("unknown lifecycle")
+                }
+                // Spec §7.1: reopen из терминального → in_progress при живых
+                // привязках, иначе ready (finding 10).
+                if to == .inProgress, let current = try tasks.byID(id),
+                   [.done, .failed, .cancelled].contains(current.lifecycle),
+                   ((try? bindings.openBindings(taskID: id)) ?? []).isEmpty {
+                    to = .ready
                 }
                 let t = try tasks.setStatus(id: id, to: to, expectedRevision: rev, now: now())
                 emit("task.lifecycle_changed", t.id, t.revision)
@@ -168,6 +214,11 @@ public final class PMService {
         case .pmTasksBind(let taskID, let session, let rid):
             return idempotent(rid, op) {
                 let b = try bindings.bind(taskID: taskID, session: session, now: now())
+                // Finding 3: привязка живой сессии фиксирует external_session_id
+                // сразу — sessionAdded этой сессии стрелял до привязки.
+                if let key = resolveExternalFor(sessionName: session) {
+                    try? bindings.setExternalSessionID(bindingID: b.id, key: key)
+                }
                 emit("session.bound", b.taskID, nil)
                 refreshActivities()
                 scheduleRollup(delay: 5)
@@ -212,6 +263,12 @@ public final class PMService {
     }
 
     // MARK: - helpers (на очереди q)
+
+    /// Ключ вёдер для сессии по имени (реестр демона + резолвер провайдера).
+    private func resolveExternalFor(sessionName: String) -> String? {
+        guard let session = sessionByName(sessionName) else { return nil }
+        return resolveExternal(session)
+    }
 
     private func taskView(_ t: PMTask) -> PMTaskView {
         let open = (try? bindings.openBindings(taskID: t.id)) ?? []

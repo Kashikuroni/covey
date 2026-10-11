@@ -67,6 +67,14 @@ public final class BindingService {
                      [], Self.rowToBinding)
     }
 
+    /// ВСЕ интервалы, включая закрытые. RollupService кормится только этим:
+    /// openBindings() стирает атрибуцию закрытых интервалов при recompute
+    /// (минуты ушедшей сессии обязаны оставаться в её задаче).
+    public func allBindings() throws -> [PMBinding] {
+        try db.query("SELECT \(Self.cols) FROM agent_sessions ORDER BY started_at",
+                     [], Self.rowToBinding)
+    }
+
     public func openBindings(taskID: String) throws -> [PMBinding] {
         try db.query("""
             SELECT \(Self.cols) FROM agent_sessions

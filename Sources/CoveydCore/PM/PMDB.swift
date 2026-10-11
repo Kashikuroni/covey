@@ -39,6 +39,9 @@ public final class PMDB {
     public static let latestSchemaVersion = 1
     private var handle: OpaquePointer?
     public let path: String
+    /// Non-nil, если файл был признан порченным и заменён свежей БД (finding 7:
+    /// потеря данных должна быть видимой — main.swift логирует и шлёт событие).
+    public private(set) var recoveryNote: String?
 
     public init(path: String) throws {
         self.path = path
@@ -71,6 +74,13 @@ public final class PMDB {
         let corrupt = "\(path).corrupt-\(ts)"
         try? FileManager.default.removeItem(atPath: corrupt)
         try? FileManager.default.moveItem(atPath: path, toPath: corrupt)
+        // WAL-сайдкары уносим вместе с файлом: побочный -wal от старой БД
+        // может быть воспроизведён в свежую (finding 6).
+        for sidecar in ["-wal", "-shm"] {
+            try? FileManager.default.moveItem(atPath: path + sidecar,
+                                              toPath: corrupt + sidecar)
+        }
+        recoveryNote = "pm.db was corrupt; moved to \(corrupt) and started fresh"
         try openAndMigrate(recovered: true)
     }
 
@@ -80,6 +90,9 @@ public final class PMDB {
         // Бэкап — только при обновлении старой схемы (user_version > 0):
         // свежий файл (version 0) миграцией не является, копия пустой БД не нужна.
         if current > 0 {
+            // Checkpoint перед копией: без него бэкап теряет коммиты, живущие
+            // в -wal (finding 6).
+            try? execute("PRAGMA wal_checkpoint(TRUNCATE)")
             let backup = "\(path).backup-\(Int64(Date().timeIntervalSince1970))"
             try? FileManager.default.removeItem(atPath: backup)
             try? FileManager.default.copyItem(atPath: path, toPath: backup)

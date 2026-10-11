@@ -96,14 +96,17 @@ public enum PMTaskTransitions {
     public static func autoOnBind(_ from: PMTaskLifecycle) -> PMTaskLifecycle? {
         from == .ready ? .inProgress : nil
     }
-    /// Терминальные/реопен/архив — только человек (spec §7.1).
+    /// Терминальные/реопен/архив — только человек (spec §7.1). Reopen в
+    /// in_progress разрешён при живых привязках; PMService мапит его в ready,
+    /// когда привязок нет — поэтому ready здесь тоже легальная цель.
     public static func human(_ from: PMTaskLifecycle, _ to: PMTaskLifecycle) -> Bool {
         switch (from, to) {
         case (.ready, .done), (.ready, .failed), (.ready, .cancelled),
              (.inProgress, .done), (.inProgress, .failed), (.inProgress, .cancelled),
              (.inProgress, .archived),
              (.done, .archived), (.failed, .archived), (.cancelled, .archived),
-             (.done, .inProgress), (.failed, .inProgress), (.cancelled, .inProgress):
+             (.done, .inProgress), (.failed, .inProgress), (.cancelled, .inProgress),
+             (.done, .ready), (.failed, .ready), (.cancelled, .ready):
             return true
         default:
             return false

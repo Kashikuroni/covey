@@ -43,7 +43,9 @@ struct PMAnalyticsView: View {
             }
             .padding()
         }
-        .task(id: rangeDays) {
+        // Key = проект + диапазон: смена выбранного проекта перезагружает
+        // карточки без касания пикера (finding 9).
+        .task(id: "\(projectID ?? "all")-\(rangeDays)") {
             model.pm.analyticsRangeDays = rangeDays
             await model.pm.loadAnalytics(projectID: projectID)
         }

@@ -23,6 +23,18 @@ final class ProjectStoreTests: XCTestCase {
         XCTAssertEqual(a.id, b.id)
     }
 
+    /// Review finding 5: повторная регистрация архивированного корня
+    /// оживляет проект (removeProject = archive; re-add не должен быть тупиком).
+    func testRegisterRevivesArchivedProject() throws {
+        let store = try makeStore()
+        let p = try store.register(rootPath: "/dev/x", name: nil, now: 1)
+        _ = try store.archive(id: p.id, archived: true, expectedRevision: p.revision, now: 2)
+        let revived = try store.register(rootPath: "/dev/x", name: nil, now: 3)
+        XCTAssertEqual(revived.id, p.id)
+        XCTAssertNil(revived.archivedAt)
+        XCTAssertEqual(try store.list(includeArchived: false).count, 1)
+    }
+
     func testRenameGuardsRevision() throws {
         let store = try makeStore()
         let p = try store.register(rootPath: "/dev/x", name: nil, now: 1)

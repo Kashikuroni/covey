@@ -86,7 +86,7 @@ let bindingService = BindingService(
 let rollupService = RollupService(
     db: pmDB,
     loadBuckets: { QuotaSampleStore(path: usageSamplesPath).buckets },
-    loadBindings: { (try? bindingService.openBindings()) ?? [] },
+    loadBindings: { (try? bindingService.allBindings()) ?? [] },
     externalKeys: { (try? bindingService.externalSessionMap()) ?? [:] },
     projectOfSession: { name in
         guard let s = registry.get(name: name) else { return nil }
@@ -99,7 +99,16 @@ let pmService = PMService(db: pmDB, projects: projectsStore, tasks: tasksStore,
                           resolveExternal: { session in
                               ClaudeTranscript.sessionUUID(resumeCmd: session.resumeCmd)
                           },
+                          sessionByName: { name in registry.get(name: name) },
+                          recoveryNote: pmDB.recoveryNote,
                           now: { Int64(Date().timeIntervalSince1970) })
+if let note = pmDB.recoveryNote {
+    // Потеря pm.db обязана быть видимой (spec §11): диагностика в лог + событие
+    // pm.recovered GUI превратит в toast.
+    FileHandle.standardError.write(Data("coveyd: PM DATABASE RECOVERED FRESH: \(note)\n".utf8))
+    try? "\(note)".write(toFile: CoveyPaths.path("pm-recovery.log"), atomically: true,
+                         encoding: .utf8)
+}
 // Одноразовая миграция projects/projectNames/projectOrder из state.json (spec §10).
 if let stateData = try? Data(contentsOf: URL(fileURLWithPath: dir.appendingPathComponent("state.json").path)),
    let state = try? JSONDecoder().decode(PersistedState.self, from: stateData) {

@@ -54,7 +54,7 @@ final class TestDaemon {
         let bindingService = BindingService(db: pmDB, taskStore: tasksStore)
         let rollupService = RollupService(
             db: pmDB, loadBuckets: { [] },
-            loadBindings: { (try? bindingService.openBindings()) ?? [] },
+            loadBindings: { (try? bindingService.allBindings()) ?? [] },
             externalKeys: { [:] },
             projectOfSession: { name in
                 guard let s = registry.get(name: name) else { return nil }

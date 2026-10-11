@@ -108,13 +108,17 @@ final class PMModel {
         await reloadAllTasks()
     }
 
+    @discardableResult
     func updateTask(id: String, projectID: String, title: String?, body: String?,
-                    idleThresholdS: Int?, expectedRevision: Int64) async throws {
-        guard let gateway else { return }
-        _ = try await gateway.taskUpdate(id: id, title: title, body: body,
-                                         idleThresholdS: idleThresholdS,
-                                         expectedRevision: expectedRevision)
+                    idleThresholdS: Int?, expectedRevision: Int64) async throws -> PMTask {
+        guard let gateway else {
+            throw IPCClientError.notConnected
+        }
+        let updated = try await gateway.taskUpdate(id: id, title: title, body: body,
+                                                   idleThresholdS: idleThresholdS,
+                                                   expectedRevision: expectedRevision)
         await reloadTasks(projectID: projectID)
+        return updated
     }
 
     // MARK: - реестр проектов (обёртки для AppModel)

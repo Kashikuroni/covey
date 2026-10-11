@@ -2041,6 +2041,10 @@ public final class AppModel {
         case let .pm(envelope):
             // PM Foundation: событие — сигнал; PMModel применяет activity из
             // конверта, остальное перечитывает одним запросом (ТЗ §22.6).
+            if envelope.type == "pm.recovered" {
+                toast = "pm.db was corrupt — projects/tasks started fresh (see pm-recovery.log)"
+                break
+            }
             pm.apply(envelope)
             if envelope.type != "project.changed" {
                 Task { await pm.reloadAllTasks() }

@@ -39,7 +39,16 @@ public final class ProjectStore {
     @discardableResult
     public func register(rootPath: String, name: String?, now: Int64) throws -> PMProject {
         let root = pmProjectRoot(rootPath)
-        if let existing = try byRoot(root) { return existing }
+        if let existing = try byRoot(root) {
+            // Повторная регистрация архивированного корня оживляет проект:
+            // removeProject = archive, re-add не должен быть тупиком (finding 5).
+            if existing.archivedAt != nil {
+                return try bump(existing.id,
+                                sql: "UPDATE projects SET archived_at=NULL, revision=revision+1 WHERE id=?",
+                                params: [.text(existing.id)])
+            }
+            return existing
+        }
         let id = UUID().uuidString
         // -1: свежая регистрация не «явно упорядочена» — в GUI живые корни
         // идут раньше, зарегистрированные-без-порядка добавляются в конец
