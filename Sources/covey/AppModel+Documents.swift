@@ -106,6 +106,7 @@ extension AppModel {
         return reader
     }
     func syncDocumentActivity() async {
+        guard windowMode == .sessions else { for reader in documentReaders.values { reader.stop() }; return }
         let active = activeViewID
         for (id,reader) in documentReaders where id != active { reader.stop() }
         guard let active, let zone = views[active]?.documents else { return }
@@ -122,7 +123,11 @@ extension AppModel {
     func closeDocuments(viewID: ViewID) {
         discardDocumentState(viewID:viewID)
         mutateForView(viewID) { $0.documents = nil }
-        if activeViewID == viewID, focus == .documents { setFocus(.terminal); sendTerminalCommand(.focus) }
+        if activeViewID == viewID, focus == .documents {
+            if let agent = focusedAgentPane, views[viewID]?.leaves.contains(agent) == true { focusPane(agent) }
+            else if let agent = views[viewID]?.leaves.first { focusPane(agent) }
+            else { setFocus(.sessions) }
+        }
     }
     func setDocumentWidth(_ width: Double, viewID: ViewID) {
         guard width.isFinite else { return }

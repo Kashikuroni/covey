@@ -5,7 +5,7 @@ import CoveyKit
 
 /// ⌃1-5 zone targets (menu key equivalents — reachable from any focus).
 public enum FocusZone: Equatable {
-    case session, agent, issues, terminalSplit, trace
+    case session, agent, issues, terminalSplit, trace, documents
 }
 
 struct ProviderLaunch: Equatable {
@@ -1249,7 +1249,7 @@ public final class AppModel {
         switch command {
         case .openProjectDocument: Task { await openDocumentPicker() }
         case .closeDocumentView: if let id = activeViewID { closeDocuments(viewID:id) }
-        case .focusDocuments: setFocus(.documents)
+        case .focusDocuments: sendTerminalCommand(.blur); setFocus(.documents)
         case .newSession:
             newSessionPrefillDir = nil
             modal = .newSession
@@ -1259,7 +1259,8 @@ public final class AppModel {
         case .recentSessions:
             modal = .recent
         case .filterSessions:
-            filterActive = true
+            if focus == .documents { documentFindRequest = UUID() }
+            else { filterActive = true }
         case .selectPreviousSession:
             cycleSession(by: -1)
         case .selectNextSession:
@@ -1617,6 +1618,9 @@ public final class AppModel {
     /// of mutating anything (spec: no auto-show inspector, no auto-split).
     public func focusZone(_ zone: FocusZone) {
         switch zone {
+        case .documents:
+            guard activeView?.documents != nil else { return }
+            sendTerminalCommand(.blur); setFocus(.documents)
         case .session:
             sendTerminalCommand(.blur)
             setFocus(.sessions)
@@ -1661,6 +1665,9 @@ public final class AppModel {
         }
         if let shell = activeShell {
             zones.append(("pane:\(shell)", { self.focusPane(shell) }))
+        }
+        if activeView?.documents != nil {
+            zones.append(("documents", { self.sendTerminalCommand(.blur); self.setFocus(.documents) }))
         }
         if showInspector {
             zones.append(("inspector", {

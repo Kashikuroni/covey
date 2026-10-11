@@ -10,6 +10,7 @@ func commandWHandling(focus: AppModel.Focus,
                       modalPresented: Bool = false) -> CommandWHandling {
     guard !modalPresented else { return .consume }
     guard inputMode == .normal else { return .consume }
+    if focus == .documents { return .perform(.closeDocumentView) }
     return focus == .terminal ? .perform(.closeTerminalSplit) : .consume
 }
 
@@ -119,6 +120,7 @@ struct ContentView: View {
             }
         }
         .onChange(of: model.windowMode) { _, mode in
+            Task { await model.syncDocumentActivity() }
             // Nothing hidden may keep the keyboard: not a terminal, not the
             // sessions filter, not an inspector editor.
             if mode == .review { windowScope.window?.makeFirstResponder(nil) }
@@ -128,6 +130,7 @@ struct ContentView: View {
             model.setMainWindowOccluded(!window.occlusionState.contains(.visible))
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+            if (note.object as? NSWindow) === windowScope.window, model.windowMode == .sessions { Task { await model.syncDocumentActivity() } }
             // Back from another app: look for the agent's changes now.
             guard (note.object as? NSWindow) === windowScope.window,
                   model.windowMode == .review, let review = model.review else { return }
@@ -214,6 +217,18 @@ struct ContentView: View {
     }
 
     private func handleSessionsKey(_ event: NSEvent) -> NSEvent? {
+        let flags = event.modifierFlags
+        let documentInput = DocumentKeyInput(characters:flags.contains(.command) && event.keyCode == 3 ? "f" : flags.contains(.command) && event.keyCode == 13 ? "w" : event.charactersIgnoringModifiers ?? "",
+            command:flags.contains(.command),control:flags.contains(.control),shift:flags.contains(.shift),option:flags.contains(.option),
+            documentsFocused:model.focus == .documents,textInput:event.window?.firstResponder is NSTextView,
+            paletteOpen:model.commandPalettePresented,sheetOpen:model.modal != nil,reviewOpen:model.windowMode == .review,overlayOpen:model.inputMode != .normal)
+        switch DocumentFocusRouting.decide(input:documentInput) {
+        case .find: model.documentFindRequest = UUID(); return nil
+        case .close: if let id = model.activeViewID { model.closeDocuments(viewID:id) }; return nil
+        case .cycle(let forward): model.apply(.cycleFocus(forward:forward)); return nil
+        case .native: return event
+        case .pass: break
+        }
         // Reserve physical ⌘W for Covey before AppKit can choose
         // File→Close: close a terminal split, consume it everywhere else.
         if isCommandW(event) {
@@ -318,7 +333,6 @@ struct ContentView: View {
                 }
                 TerminalPaneView(model: model)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .onTapGesture { model.setFocus(.terminal) }
                 if model.showInspector {
                     rightDivider(total: geo.size.width)
                     InspectorView(model: model)

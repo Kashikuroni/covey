@@ -33,6 +33,7 @@ struct TerminalPaneView: View {
     /// делят (`PanelLayout.splitFrames`), ZStack раскладывает панели по кадрам.
     private var splitBody: some View {
         GeometryReader { geo in
+            let documents = model.activeView?.documents.map { PanelLayout.documentFrames(size:geo.size,requestedWidth:$0.width.map { CGFloat($0) },gutter:Tokens.gutter) }
             // Одиночная панель живёт вне дерева (инвариант: дерево ⇔ ≥2 листа),
             // поэтому `selected` идёт в геометрию отдельным листом.
             let frames = PanelLayout.splitFrames(
@@ -40,7 +41,7 @@ struct TerminalPaneView: View {
                 companionShell: model.activeView?.terminal?.shellSession,
                 companionAxis: model.activeView?.terminal?.axis ?? .vertical,
                 companionRatio: model.activeView?.agentAreaRatio ?? 0.6,
-                size: geo.size, gutter: Tokens.gutter)
+                size: documents?.terminalArea.size ?? geo.size, gutter: Tokens.gutter)
             ZStack(alignment: .topLeading) {
                 ForEach(leaves(frames)) { leaf in
                     paneStack(leaf.name, zone: .agent, label: "Agent")
@@ -63,6 +64,17 @@ struct TerminalPaneView: View {
                    let col = frames.companion {
                     columnDivider(area: area, companion: col,
                                   axis: model.activeView?.terminal?.axis ?? .vertical)
+                }
+                if let documents, let id = model.activeViewID, let zone = model.activeView?.documents {
+                    if let reader = model.documentReaders[id] {
+                        DocumentPaneView(reader:reader,zone:zone,model:model,viewID:id) { model.closeDocuments(viewID:id) }
+                            .placed(in:documents.documents)
+                    }
+                    Rectangle().fill(Color.clear).contentShape(Rectangle()).placed(in:documents.divider)
+                        .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
+                        .gesture(DragGesture(coordinateSpace:.named(Self.splitSpace)).onChanged { value in
+                            model.setDocumentWidth(Double(max(0,geo.size.width-value.location.x-Tokens.gutter/2)),viewID:id)
+                        })
                 }
             }
         }
@@ -89,6 +101,7 @@ struct TerminalPaneView: View {
             pane(name)
         }
         .panelCard(tk, surface: tk.termBg)
+        .simultaneousGesture(TapGesture().onEnded { model.focusPane(name) })
     }
 
     /// Делята узлов дерева: ручка стоит в шве между потомками (`handle`

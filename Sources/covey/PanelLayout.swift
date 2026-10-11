@@ -78,6 +78,21 @@ struct PanelLayout: Equatable {
     /// Пол одной agent-панели сплита; при переполнении деградирует (см. ниже).
     static let minSplitPane: CGFloat = 120
     static let minSplitRatio: Double = 0.15
+    struct DocumentFrames {
+        let terminalArea: CGRect
+        let documents: CGRect
+        let divider: CGRect
+    }
+    static func documentFrames(size: CGSize, requestedWidth: CGFloat?, gutter: CGFloat) -> DocumentFrames {
+        let width = max(0,size.width), height = max(0,size.height)
+        let seam = min(width,max(0,gutter)), available = max(0,width-seam)
+        let preferred = requestedWidth.flatMap { $0.isFinite ? $0 : nil } ?? available * 0.4
+        let documentWidth = available >= 600 ? min(available-280,max(320,preferred)) : available * (320.0/600.0)
+        let terminalWidth = max(0,available-documentWidth)
+        return .init(terminalArea:CGRect(x:0,y:0,width:terminalWidth,height:height),
+                     documents:CGRect(x:terminalWidth+seam,y:0,width:documentWidth,height:height),
+                     divider:CGRect(x:terminalWidth,y:0,width:seam,height:height))
+    }
     static let maxSplitRatio: Double = 0.85
 
     /// Размер первой ветки узла: драг-кламп 0.15–0.85, затем пол 120pt на лист

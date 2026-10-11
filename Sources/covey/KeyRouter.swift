@@ -59,6 +59,11 @@ enum KeyRouter {
     static func route(_ input: KeyInput, context: Context) -> KeyAction? {
         guard !context.sheetOpen else { return nil }
         let ch = input.char.map(latinize)
+        if context.focus == .documents, context.mode == .normal {
+            if input.isControl, ch == "l" { return .cycleFocus(forward:true) }
+            if input.isControl, ch == "h" { return .cycleFocus(forward:false) }
+            return nil
+        }
 
         // Transient overlays own the keyboard even when they were opened
         // while a native terminal view held focus.
