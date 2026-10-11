@@ -25,6 +25,9 @@ struct SettingsSheet: View {
     let model: AppModel
     @State private var draft: SettingsDraft
     @State private var showingKeySheet = false
+    @State private var showingDocumentSettings = false
+    @State private var documentContext: DocumentContext?
+    @State private var detectedDocumentPresets: Set<DocumentPresetID> = [.common]
     @State private var keyProfile = ProviderProfile.anthropic
     @FocusState private var keyboardFocused: Bool
 
@@ -65,6 +68,10 @@ struct SettingsSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if showingDocumentSettings {
+                DocumentExclusionsSettingsView(configuration:$draft.values.documentExclusions,context:documentContext,
+                                               detected:detectedDocumentPresets,tk:tk) { showingDocumentSettings = false; keyboardFocused = true }
+            } else {
             Text("Settings").font(.headline)
             section("Appearance") {
                 choiceRow(.theme, label: "Theme",
@@ -102,16 +109,26 @@ struct SettingsSheet: View {
                 checkboxRow(.linksOnFocus, label: "Links on focus",
                             value: $draft.values.linksOnFocus)
             }
+            section("Documents") {
+                Button("Document exclusions…") { draft.selectedRow = .documentExclusions; showingDocumentSettings = true; keyboardFocused = false }
+                    .buttonStyle(.plain).foregroundStyle(tk.t1).settingsRow()
+            }
             actionRow
+            }
         }
         .padding(20)
-        .frame(width: 480)
+        .frame(width: showingDocumentSettings ? 600 : 480)
         .focusable()
         .focusEffectDisabled()
         .focused($keyboardFocused)
         .onAppear { keyboardFocused = true }
         .task {
             await model.refreshProviderKeyStatuses(credentialProfiles)
+            if let session = model.sessions.first(where: { $0.name == model.selected }) {
+                let resolved = await DocumentRootResolver.resolve(session:session)
+                documentContext = resolved.context
+                if let catalog = try? await ProjectDocumentCatalog().scan(context:resolved.context,configuration:draft.values.documentExclusions) { detectedDocumentPresets = catalog.detected }
+            }
         }
         .onKeyPress(phases: .down) { press in handle(press) }
         .sheet(isPresented: $showingKeySheet) {
@@ -214,15 +231,21 @@ struct SettingsSheet: View {
             perform(action)
         }
         .buttonStyle(AyuButton(tk: tk, prominent: prominent))
+        .disabled(action == .save && !DocumentExclusionDraft(configuration:draft.values.documentExclusions,projectKey:documentContext?.projectKey).validate(detected:detectedDocumentPresets).isEmpty)
         .focusable(false)
     }
 
     private func handle(_ press: KeyPress) -> KeyPress.Result {
+        if showingDocumentSettings {
+            if press.key == .escape { showingDocumentSettings = false; keyboardFocused = true; return .handled }
+            return .ignored
+        }
         if press.key == .escape {
             perform(.cancel)
             return .handled
         }
         if press.key == .return {
+            if draft.selectedRow == .documentExclusions { showingDocumentSettings = true; keyboardFocused = false; return .handled }
             // The key row opens the key prompt rather than saving.
             if draft.selectedRow == .providerKey,
                let profile = credentialProfiles.first {
@@ -245,7 +268,11 @@ struct SettingsSheet: View {
     private func perform(_ action: SettingsAction) {
         switch action {
         case .cancel: model.modal = nil
-        case .save: model.applySettings(draft.values)
+        case .save:
+            guard DocumentExclusionDraft(configuration:draft.values.documentExclusions,projectKey:documentContext?.projectKey).validate(detected:detectedDocumentPresets).isEmpty else {
+                showingDocumentSettings = true; keyboardFocused = false; return
+            }
+            model.applySettings(draft.values)
         }
     }
 }

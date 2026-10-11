@@ -1,4 +1,5 @@
 import Foundation
+import CoveyKit
 
 struct SettingsValues: Equatable {
     var theme: Theme
@@ -11,6 +12,7 @@ struct SettingsValues: Equatable {
     var codexUsageEnabled: Bool
     var glmUsageEnabled: Bool
     var linksOnFocus: Bool = true
+    var documentExclusions: DocumentExclusionConfiguration = .init()
 }
 
 enum SettingsRow: Int, CaseIterable, Equatable {
@@ -25,6 +27,7 @@ enum SettingsRow: Int, CaseIterable, Equatable {
     case codexUsage
     case glmUsage
     case linksOnFocus
+    case documentExclusions
 }
 
 enum SettingsAction: Equatable { case cancel, save }
@@ -80,7 +83,7 @@ struct SettingsDraft: Equatable {
         case .theme:
             if increasing { values.theme = .light }
             else { values.theme = .dark }
-        case .providerKey:
+        case .providerKey, .documentExclusions:
             break   // activated via .activate in the sheet (opens the key prompt)
         case .vimMode:
             values.vimMode = increasing

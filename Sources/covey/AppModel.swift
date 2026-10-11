@@ -170,6 +170,7 @@ public final class AppModel {
     @ObservationIgnored var reviewModelFactory: ((ReviewOpening) -> ReviewModel)?
     /// The Review graph's link settings (persisted), shared with the live review.
     let reviewLinks = ReviewLinkSettings()
+    let documentExclusionSettings = DocumentExclusionSettings()
     public private(set) var connected = false
     public private(set) var themeRaw: String = "dark"
     public private(set) var splitPct: Int = 38
@@ -405,6 +406,7 @@ public final class AppModel {
             glmForecastConfig: CoveyConfig.load().glmForecast ?? GLMForecastConfigSection())
         issueBrowser.toast = { [weak self] msg in self?.showToast(msg) }
         reviewLinks.changed = { [weak self] in self?.persist() }
+        documentExclusionSettings.changed = { [weak self] _ in self?.persist() }
         issueBrowser.fetchBranches = { [weak self] dir in
             await self?.gitInfo(dir).branches ?? []
         }
@@ -412,6 +414,7 @@ public final class AppModel {
 
     public func start() async {
         persisted = store.load()
+        documentExclusionSettings.apply(persisted.documentExclusions ?? .init(),notify:false)
         themeRaw = persisted.theme ?? "dark"
         splitPct = persisted.splitPct ?? 38
         usagePlacement = persisted.usagePlacement.flatMap(UsagePlacement.init(rawValue:)) ?? .right
@@ -1030,7 +1033,8 @@ public final class AppModel {
                        claudeUsageEnabled: claudeUsageEnabled,
                        codexUsageEnabled: codexUsageEnabled,
                        glmUsageEnabled: glmUsageEnabled,
-                       linksOnFocus: reviewLinks.linksOnFocus)
+                       linksOnFocus: reviewLinks.linksOnFocus,
+                       documentExclusions: documentExclusionSettings.configuration)
     }
 
     func openSettings() {
@@ -1363,6 +1367,7 @@ public final class AppModel {
     }
 
     func applySettings(_ values: SettingsValues) {
+        guard DocumentExclusionDraft(configuration:values.documentExclusions,projectKey:nil).validate(detected:[]).isEmpty else { return }
         let old = settingsValues
         guard values != old else {
             modal = nil
@@ -1376,6 +1381,7 @@ public final class AppModel {
         showFooter = values.showFooter
         usagePlacement = values.usagePlacement
         reviewLinks.linksOnFocus = values.linksOnFocus
+        documentExclusionSettings.apply(values.documentExclusions)
         if values.claudeUsageEnabled != old.claudeUsageEnabled { setClaudeUsageEnabled(values.claudeUsageEnabled) }
         if values.codexUsageEnabled != old.codexUsageEnabled { setCodexUsageEnabled(values.codexUsageEnabled) }
         if values.glmUsageEnabled != old.glmUsageEnabled { setGlmUsageEnabled(values.glmUsageEnabled) }
@@ -1923,6 +1929,7 @@ public final class AppModel {
         persisted.vimMode = vimMode
         persisted.showLinks = reviewLinks.showLinks
         persisted.linksOnFocus = reviewLinks.linksOnFocus
+        persisted.documentExclusions = documentExclusionSettings.configuration
         persisted.projectNames = projectNames
         persisted.projects = projects
         snapshotWorkspaceViews()
