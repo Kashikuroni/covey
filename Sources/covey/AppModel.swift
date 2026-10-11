@@ -1973,8 +1973,15 @@ public final class AppModel {
             traceStoreBytes = bytes
         case let .createProgress(stage):
             noteCreateProgress(stage)
+        case let .pm(envelope):
+            // PM Foundation: до подключения PMModel (следующий слайс) события
+            // буферизуются — GUI остаётся собираемым и не теряет конверты.
+            pmEventBuffer.append(envelope)
         }
     }
+
+    /// Буфер PM-событий демона; PMModel (Task 11+) заберёт применение на себя.
+    var pmEventBuffer: [PMEventEnvelope] = []
 
     /// Latest session-create stage as presentable text. Internal so tests can
     /// drive it without a daemon round-trip; the event loop lands here too.

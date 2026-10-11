@@ -12,6 +12,7 @@ public final class IPCServer {
     private let modelMonitor: ModelMonitor?
     private let traceMonitor: TraceMonitor?
     private let traceStore: TraceStore?
+    private let pm: PMService?
     private let server = DispatchQueue(label: "covey.ipc")
     /// Form creates run here, off the serial `server` queue: their git IO
     /// (base pull, worktree add, seeding) takes seconds and must not freeze
@@ -60,13 +61,18 @@ public final class IPCServer {
 
     public init(registry: SessionRegistry, monitor: StatusMonitor,
                 gitMonitor: GitMonitor? = nil, modelMonitor: ModelMonitor? = nil,
-                traceMonitor: TraceMonitor? = nil, traceStore: TraceStore? = nil) {
+                traceMonitor: TraceMonitor? = nil, traceStore: TraceStore? = nil,
+                pm: PMService? = nil) {
         self.registry = registry
         self.monitor = monitor
         self.gitMonitor = gitMonitor
         self.modelMonitor = modelMonitor
         self.traceMonitor = traceMonitor
         self.traceStore = traceStore
+        self.pm = pm
+        pm?.onEvent = { [weak self] envelope in
+            self?.broadcast(.event(.pm(envelope)))
+        }
         gitMonitor?.onGitChanged = { [weak self, weak registry] name, git in
             registry?.updateGit(name: name, git: git)
             self?.broadcast(.event(.gitChanged(name: name, git: git)))
@@ -86,12 +92,15 @@ public final class IPCServer {
             }
         }
         monitor.onStatusChanged = { [weak self] name, status in
+            self?.pm?.onStatus(name: name, status: status)
             self?.broadcast(.event(.statusChanged(name: name, status: status)))
         }
         registry.onSessionAdded = { [weak self] s in
+            self?.pm?.sessionAdded(s)   // до broadcast: фиксирует external_session_id
             self?.broadcast(.event(.sessionAdded(session: s)))
         }
         registry.onSessionRemoved = { [weak self] name in
+            self?.pm?.sessionGone(name: name)
             self?.broadcast(.event(.sessionRemoved(name: name)))
         }
         registry.onRenamed = { [weak self] old, new in
@@ -165,6 +174,14 @@ public final class IPCServer {
         func notFound(_ name: String) { reply(.error(code: "notFound", message: "no session: \(name)")) }
 
         switch request.op {
+        case .pmProjectsList, .pmProjectsRegister, .pmProjectsRename, .pmProjectsArchive,
+             .pmProjectsReorder, .pmTasksCreate, .pmTasksUpdate, .pmTasksSetStatus,
+             .pmTasksList, .pmTasksBind, .pmTasksUnbind, .pmTasksSpawn, .pmAnalyticsQuery:
+            guard let pm else {
+                return reply(.error(code: "pmUnavailable", message: "PM service not running"))
+            }
+            reply(pm.handle(request.op))
+
         case .usageSubscribe:
             guard let snapshot = usageSnapshot else {
                 return reply(.error(code: "usageUnavailable", message: "Daemon usage collector unavailable"))

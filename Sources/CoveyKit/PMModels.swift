@@ -109,6 +109,27 @@ public enum PMTaskTransitions {
     }
 }
 
+/// Конверт события PM (ТЗ §22.6, spec §5.3). seq монотонен в рамках запуска
+/// демона; GUI дедуплицирует по eventID и не применяет старую ревизию.
+public struct PMEventEnvelope: Codable, Equatable, Sendable {
+    public var eventID: String
+    public var seq: Int64
+    public var entityID: String
+    public var entityRevision: Int64?
+    public var type: String
+    /// Новое значение для производных событий: rawValue PMActivity для
+    /// task.activity_changed. nil для остальных типов.
+    public var value: String?
+    public var occurredAt: Int64
+    public init(eventID: String, seq: Int64, entityID: String,
+                entityRevision: Int64? = nil, type: String,
+                value: String? = nil, occurredAt: Int64) {
+        self.eventID = eventID; self.seq = seq; self.entityID = entityID
+        self.entityRevision = entityRevision; self.type = type
+        self.value = value; self.occurredAt = occurredAt
+    }
+}
+
 /// Порог простоя per-task: "30m" / "2h" / "3d" (spec D3).
 public enum PMIdleThreshold {
     public static let defaultSeconds = 900
