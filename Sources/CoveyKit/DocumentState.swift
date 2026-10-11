@@ -39,7 +39,7 @@ public struct PersistedDocumentZone: Codable, Equatable, Sendable {
 }
 
 public enum DocumentPresetID: String, Codable, CaseIterable, Sendable {
-    case common, rust, node, react, vue, python
+    case common, rust, node, react, vue, python, next, nuxt
 }
 
 /// Nil overrides inherit the global/default policy. Explicit false disables it.
