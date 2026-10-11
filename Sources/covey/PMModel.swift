@@ -141,6 +141,17 @@ final class PMModel {
         await reloadProjectsOnly()
     }
 
+    /// Явный порядок: корни, которых нет в реестре, пропускаются (порядок
+    /// живых корней — забота GUI); зарегистрированные получают 0..n.
+    func reorderProjects(rootOrder: [String]) async {
+        guard let gateway else { return }
+        let byRoot = Dictionary(uniqueKeysWithValues: projects.map { ($0.rootPath, $0.id) })
+        let ids = rootOrder.compactMap { byRoot[$0] }
+        guard !ids.isEmpty else { return }
+        try? await gateway.reorder(ids: ids)
+        await reloadProjectsOnly()
+    }
+
     func loadAnalytics(projectID: String?, taskID: String? = nil) async {
         guard let gateway else { return }
         analytics = try? await gateway.analytics(projectID: projectID, taskID: taskID,

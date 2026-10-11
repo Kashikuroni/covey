@@ -21,9 +21,13 @@ public final class ProjectStore {
     private static let cols = "id, root_path, name, sort_order, archived_at, revision, created_at"
 
     public func list(includeArchived: Bool) throws -> [PMProject] {
+        // Явно упорядоченные (sort_order >= 0) — по порядку; свежие
+        // регистрации (sort_order = -1) — за ними, в порядке вставки (rowid;
+        // created_at имеет секундовое разрешение и у соседних добавлений
+        // совпадает).
         let sql = includeArchived
-            ? "SELECT \(Self.cols) FROM projects ORDER BY sort_order, root_path"
-            : "SELECT \(Self.cols) FROM projects WHERE archived_at IS NULL ORDER BY sort_order, root_path"
+            ? "SELECT \(Self.cols) FROM projects ORDER BY (sort_order < 0), sort_order, rowid"
+            : "SELECT \(Self.cols) FROM projects WHERE archived_at IS NULL ORDER BY (sort_order < 0), sort_order, rowid"
         return try db.query(sql, []) {
             let p = rowToProject($0)
             var copy = p
@@ -37,12 +41,14 @@ public final class ProjectStore {
         let root = pmProjectRoot(rootPath)
         if let existing = try byRoot(root) { return existing }
         let id = UUID().uuidString
-        let order = try db.query("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM projects", []) { $0.int(0) }.first ?? 0
+        // -1: свежая регистрация не «явно упорядочена» — в GUI живые корни
+        // идут раньше, зарегистрированные-без-порядка добавляются в конец
+        // (семантикаorderedDirs до PM).
         try db.run("""
             INSERT INTO projects (id, root_path, name, sort_order, created_at)
             VALUES (?,?,?,?,?)
             """, [.text(id), .text(root), .text(name ?? pmProjectDefaultName(root)),
-                  .int(order), .int(now)])
+                  .int(-1), .int(now)])
         return try byID(id)!
     }
 
@@ -72,7 +78,10 @@ public final class ProjectStore {
                         params: [ts, .text(id), .int(expectedRevision)])
     }
 
+    /// Явный порядок: перечисленные — 0..n; все прочие сбрасываются в -1
+    /// (неявные), как moveProject делал до PM (полный список → всё явно).
     public func reorder(ids: [String]) throws {
+        try db.run("UPDATE projects SET sort_order = -1", [])
         for (i, id) in ids.enumerated() {
             try db.run("UPDATE projects SET sort_order=? WHERE id=?", [.int(Int64(i)), .text(id)])
         }
@@ -95,7 +104,8 @@ public final class ProjectStore {
         for root in roots {
             if try byRoot(root) != nil { continue }
             let name = state.projectNames?[root] ?? pmProjectDefaultName(root)
-            let sortOrder = order.firstIndex(of: root).map(Int64.init) ?? Int64(roots.count)
+            // Явный порядок — только для тех, кто был в projectOrder; прочие -1.
+            let sortOrder = order.firstIndex(of: root).map(Int64.init) ?? -1
             let id = UUID().uuidString
             try db.run("""
                 INSERT INTO projects (id, root_path, name, sort_order, created_at)

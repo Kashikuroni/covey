@@ -1011,8 +1011,12 @@ public final class AppModel {
     public func moveProject(from: IndexSet, to: Int) {
         var dirs = orderedDirs()
         dirs.move(fromOffsets: from, toOffset: to)
-        projectOrder = dirs
-        persist()
+        projectOrder = dirs   // оптимистично; демон-истина приедет событием/синком
+        let orderedRoots = dirs
+        Task {
+            await pm.reorderProjects(rootOrder: orderedRoots)
+            syncProjectsFromPM()
+        }
     }
 
     public func setShowSessions(_ on: Bool) { showSessions = on; persist() }
@@ -1751,9 +1755,20 @@ public final class AppModel {
         selectedProjectRoot = root
     }
 
+    /// PM-операции реестра выполняются строго последовательно: быстрый
+    /// remove сразу после add обязан прийти в демон ПОСЛЕ регистрации
+    /// (иначе no-op архива оставит проект живым — гонка из спеки сайдбара).
+    private var projectOps: Task<Void, Never> = Task {}
+    private func enqueueProjectOp(_ op: @escaping @MainActor () async -> Void) {
+        projectOps = Task { [prior = projectOps] in
+            await prior.value
+            await op()
+        }
+    }
+
     public func addProject(_ dir: String) {
         let root = projectRoot(dir)
-        Task {
+        enqueueProjectOp { [self] in
             await pm.registerProject(rootPath: root)
             syncProjectsFromPM()
             await selectProject(root)
@@ -1767,7 +1782,7 @@ public final class AppModel {
 
     public func removeProject(_ root: String) {
         guard projects.contains(root) else { toast = "project not registered"; return }
-        Task {
+        enqueueProjectOp { [self] in
             await pm.archiveProjectRoot(rootPath: root)
             syncProjectsFromPM()
             if selectedProjectRoot == root { selectedProjectRoot = nil }
@@ -1776,13 +1791,13 @@ public final class AppModel {
     }
 
     /// Зеркалирует демон-реестр (pm.projects) в локальные структуры сайдбара.
+    /// projectOrder — только явно упорядоченные (sortOrder >= 0): свежие
+    /// регистрации остаются «неявными» и в orderedDirs идут после живых корней.
     func syncProjectsFromPM() {
-        let active = pm.projects
-            .filter { $0.archivedAt == nil }
-            .sorted { $0.sortOrder < $1.sortOrder }
+        let active = pm.projects.filter { $0.archivedAt == nil }
         projects = active.map(\.rootPath)
         projectNames = Dictionary(uniqueKeysWithValues: active.map { ($0.rootPath, $0.name) })
-        projectOrder = active.map(\.rootPath)
+        projectOrder = active.filter { $0.sortOrder >= 0 }.map(\.rootPath)
     }
 
     public func activateIssues() {

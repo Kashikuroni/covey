@@ -14,6 +14,8 @@ final class TestDaemon {
     var modelMonitor: ModelMonitor!
     var traceMonitor: TraceMonitor!
     let traceStore: TraceStore
+    /// Временная pm.db тестового демона (удаляется в stop).
+    let pmDBPath: String
     /// Fake ~/.claude/projects for transcript fixtures.
     let modelRoot: String
     let traceRoot: String
@@ -44,9 +46,28 @@ final class TestDaemon {
         traceMonitor = TraceMonitor(store: traceStore, projectsRoot: modelRoot, snapshot: {
             registry.list().map { ($0.name, $0.cwd, $0.agent, $0.created, $0.resumeCmd) }
         })
+        // PM Foundation: тот же стек, что coveyd/main — на временной pm.db.
+        let pmDB = try PMDB(path: "\(NSTemporaryDirectory())covey-app-pm-\(UInt32.random(in: 0..<UInt32.max)).db")
+        self.pmDBPath = pmDB.path
+        let projectsStore = ProjectStore(db: pmDB)
+        let tasksStore = TaskStore(db: pmDB)
+        let bindingService = BindingService(db: pmDB, taskStore: tasksStore)
+        let rollupService = RollupService(
+            db: pmDB, loadBuckets: { [] },
+            loadBindings: { (try? bindingService.openBindings()) ?? [] },
+            externalKeys: { [:] },
+            projectOfSession: { name in
+                guard let s = registry.get(name: name) else { return nil }
+                return projectsStore.projectID(forSessionRoot: pmSessionRoot(s))
+            })
+        let pmService = PMService(db: pmDB, projects: projectsStore, tasks: tasksStore,
+                                  bindings: bindingService, rollups: rollupService,
+                                  analytics: AnalyticsQuery(db: pmDB, prices: []),
+                                  now: { Int64(Date().timeIntervalSince1970) })
+        pmService.start(liveSessions: registry.list().map(\.name), statuses: [:])
         ipc = IPCServer(registry: registry, monitor: monitor, gitMonitor: gitMonitor,
                         modelMonitor: modelMonitor, traceMonitor: traceMonitor,
-                        traceStore: traceStore)
+                        traceStore: traceStore, pm: pmService)
         server = SocketServer(path: path)
         let ipc = self.ipc
         server.onAccept = { conn in
@@ -64,6 +85,7 @@ final class TestDaemon {
         server.stop()
         try? FileManager.default.removeItem(atPath: modelRoot)
         try? FileManager.default.removeItem(atPath: traceRoot)
+        try? FileManager.default.removeItem(atPath: pmDBPath)
     }
 }
 
