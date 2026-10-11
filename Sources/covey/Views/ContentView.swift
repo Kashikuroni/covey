@@ -177,6 +177,11 @@ struct ContentView: View {
     /// Review's half (formerly the Review window's own monitor); the
     /// decision itself is `ReviewModeKeys.decide`.
     private func handleReviewKey(_ event: NSEvent, review: ReviewModel) -> NSEvent? {
+        // The cleanup sheet sits above the review: Esc closes it first and
+        // must not reach the ladder underneath (review fix I2).
+        if event.keyCode == 53, model.reviewRepo?.escapeCleanupSheet() == true {
+            return nil
+        }
         let responder = event.window?.firstResponder
         let flags = event.modifierFlags
         let input = ReviewModeKeyInput(

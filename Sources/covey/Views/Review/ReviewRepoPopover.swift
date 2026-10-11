@@ -11,6 +11,7 @@ struct ReviewRepoPopover: View {
     let tk: Tokens
 
     @State private var newWorktreePrompt = false
+    @State private var pendingRemove: String?
     @State private var newWorktreeName = ""
     @State private var newWorktreeError: String?
 
@@ -28,7 +29,7 @@ struct ReviewRepoPopover: View {
             }
             HStack(spacing: 8) {
                 ReviewButton(title: "New worktree", tk: tk) { newWorktreePrompt = true }
-                let counts = repo.pendingCleanupCounts()
+                let counts = repo.cleanupAvailabilityCounts()
                 ReviewButton(title: cleanupConfirmLabel(worktrees: counts.worktrees,
                                                         branches: counts.branches),
                              prominent: counts.worktrees > 0, tk: tk) {
@@ -83,8 +84,19 @@ struct ReviewRepoPopover: View {
                     Text("\(days)d").font(.system(size: 10)).foregroundStyle(tk.t3)
                 }
                 if row.state != .root, !row.isCurrent {
-                    popoverAction("Remove") {
-                        Task { await repo.removeWorktree(row.path, deleteBranchToo: row.mergedIntoBase) }
+                    if pendingRemove == row.path {
+                        popoverAction("Confirm remove") {
+                            pendingRemove = nil
+                            Task {
+                                await repo.removeWorktree(row.path,
+                                                          deleteBranchToo: row.mergedIntoBase,
+                                                          confirmed: true)
+                            }
+                        }
+                    } else {
+                        popoverAction(row.clean ? "Remove" : "Remove (dirty)") {
+                            pendingRemove = row.path
+                        }
                     }
                     popoverAction("Promote") {
                         Task { await repo.promote(row.path) }

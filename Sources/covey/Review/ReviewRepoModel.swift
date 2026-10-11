@@ -122,7 +122,14 @@ final class ReviewRepoModel {
 
     // MARK: Row actions
 
-    func removeWorktree(_ path: String, deleteBranchToo: Bool) async {
+    /// Removes a worktree. CoveyGit's removal is `--force`, so git never
+    /// refuses — a dirty tree needs the explicit `confirmed` second step
+    /// (review fix I1: uncommitted changes must not vanish on one click).
+    func removeWorktree(_ path: String, deleteBranchToo: Bool, confirmed: Bool = false) async {
+        if let row = worktreeRows.first(where: { $0.path == path }), !row.clean, !confirmed {
+            rowErrors[path] = "has uncommitted changes — confirm the removal"
+            return
+        }
         do {
             try await git.removeWorktree(path: path)
             rowErrors[path] = nil
@@ -141,7 +148,7 @@ final class ReviewRepoModel {
     func promote(_ path: String) async {
         guard let branch = worktreeRows.first(where: { $0.path == path })?.branch else { return }
         do {
-            try await git.promoteWorktree(path: path, branch: branch)
+            try await git.promoteWorktree(root: projectRoot, path: path, branch: branch)
             rowErrors[path] = nil
         } catch {
             noteRowError(path, error)
@@ -207,6 +214,22 @@ final class ReviewRepoModel {
     }
 
     // MARK: Batch cleanup
+
+    /// Popover-footer counts: what WOULD be cleaned now, derived straight from
+    /// the worktree rows — not from the sheet state (review fix C2: the sheet
+    /// rows are empty until the button is pressed, so counting them disabled
+    /// the button forever).
+    func cleanupAvailabilityCounts() -> (worktrees: Int, branches: Int) {
+        let candidates = cleanupCandidates(worktreeRows)
+        return (candidates.count, candidates.filter(\.canDeleteBranch).count)
+    }
+
+    /// Esc on the cleanup sheet: closes it and reports whether it was open.
+    func escapeCleanupSheet() -> Bool {
+        guard cleanupSheetOpen else { return false }
+        cleanupSheetOpen = false
+        return true
+    }
 
     func openCleanupSheet() {
         cleanupRows = cleanupCandidates(worktreeRows)

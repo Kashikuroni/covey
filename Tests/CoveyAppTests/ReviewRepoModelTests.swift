@@ -144,3 +144,38 @@ final class FakeReviewPRs: ReviewPRReading {
     func load(root: String) async -> PRSnapshot { loaded = true; return snapshot }
     func refresh(root: String) async -> PRSnapshot { loaded = true; return snapshot }
 }
+
+extension ReviewRepoModelTests {
+    func testCleanupAvailabilityCountsComeFromWorktreeRows() async {   // review fix C2
+        let (model, _, _) = makeModel()          // one Done worktree; cleanupRows untouched
+        await model.reload()
+        XCTAssertEqual(model.cleanupRows.count, 0)
+        let counts = model.cleanupAvailabilityCounts()
+        XCTAssertEqual(counts.worktrees, 1)
+        XCTAssertEqual(counts.branches, 1)
+    }
+
+    func testRemoveDirtyWorktreeRequiresConfirmation() async {         // review fix I1
+        let (model, git, _) = makeModel()
+        git.summaries["/repo/.worktrees/feat"] = WorkingTreeSummary(
+            branch: "feat", unstaged: DiffTotals(files: 1, added: 1, removed: 0),
+            staged: .empty, untracked: 0)
+        await model.reload()
+
+        await model.removeWorktree("/repo/.worktrees/feat", deleteBranchToo: false, confirmed: false)
+        XCTAssertTrue(git.removeCalls.isEmpty, "dirty worktree needs an explicit confirm")
+        XCTAssertEqual(model.rowErrors["/repo/.worktrees/feat"]?.isEmpty, false)
+
+        await model.removeWorktree("/repo/.worktrees/feat", deleteBranchToo: false, confirmed: true)
+        XCTAssertEqual(git.removeCalls, ["/repo/.worktrees/feat"])
+    }
+
+    func testEscapeClosesCleanupSheet() async {                        // review fix I2
+        let (model, _, _) = makeModel()
+        await model.reload()
+        model.openCleanupSheet()
+        XCTAssertTrue(model.escapeCleanupSheet())
+        XCTAssertFalse(model.cleanupSheetOpen)
+        XCTAssertFalse(model.escapeCleanupSheet())                     // nothing to close
+    }
+}

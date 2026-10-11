@@ -31,7 +31,7 @@ protocol ReviewGitReading: Sendable {
     func summary(worktree: String) async -> WorkingTreeSummary?
     func addWorktree(root: String, path: String, newBranch: String, base: String) async throws
     func removeWorktree(path: String) async throws
-    func promoteWorktree(path: String, branch: String) async throws
+    func promoteWorktree(root: String, path: String, branch: String) async throws
     func checkout(worktree: String, branch: String) async throws
     func deleteBranch(worktree: String, branch: String, protected: [String]) async throws
     func updateFromBase(worktree: String, base: String) async throws
@@ -140,8 +140,13 @@ struct ReviewGitService: ReviewGitReading {
         try await offMainThrowing { try Repository(at: path).removeWorktree(at: path) }
     }
 
-    func promoteWorktree(path: String, branch: String) async throws {
-        try await offMainThrowing { try Repository(at: path).promoteWorktree(at: path, branch: branch) }
+    func promoteWorktree(root: String, path: String, branch: String) async throws {
+        // The ROOT checkout is the receiver: the worktree is removed
+        // mid-operation, so a worktree receiver could not check the branch
+        // out afterwards (review fix C3).
+        try await offMainThrowing {
+            try Repository(at: root).promoteWorktree(at: path, branch: branch)
+        }
     }
 
     func checkout(worktree: String, branch: String) async throws {

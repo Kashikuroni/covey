@@ -54,19 +54,19 @@ final class ReviewPRService: ReviewPRReading, @unchecked Sendable {
     static let ghNotFoundMessage =
         "gh CLI not found — install it (brew install gh), then `gh auth login`"
 
-    private let runner: ([String]) async -> GhRun?
+    private let runner: (String, [String]) async -> GhRun?
     private let ttl: TimeInterval
     private let lock = NSLock()
     private var cache: [String: (fetched: Date, snapshot: PRSnapshot)] = [:]
     private static let queue = DispatchQueue(label: "review.pr.gh")
 
     init(ttl: TimeInterval = 300,
-         runner: (([String]) async -> GhRun?)? = nil) {
+         runner: ((String, [String]) async -> GhRun?)? = nil) {
         self.ttl = ttl
-        self.runner = runner ?? { args in
+        self.runner = runner ?? { root, args in
             await withCheckedContinuation { continuation in
                 Self.queue.async {
-                    continuation.resume(returning: runGhSync(args: args))
+                    continuation.resume(returning: runGhSync(args: args, dir: root))
                 }
             }
         }
@@ -90,8 +90,12 @@ final class ReviewPRService: ReviewPRReading, @unchecked Sendable {
     }
 
     private static func fetch(root: String,
-                              runner: ([String]) async -> GhRun?) async -> PRSnapshot {
-        guard let run = await runner(prListArgs()) else {
+                              runner: (String, [String]) async -> GhRun?) async -> PRSnapshot {
+        guard let run = await runner(root, prListArgs()) else {
+            return PRSnapshot(prs: [], error: ghNotFoundMessage)
+        }
+        // Missing gh spawns fine under /usr/bin/env and exits 127.
+        if run.status == 127 {
             return PRSnapshot(prs: [], error: ghNotFoundMessage)
         }
         guard run.status == 0 else {
@@ -104,10 +108,12 @@ final class ReviewPRService: ReviewPRReading, @unchecked Sendable {
 }
 
 /// Synchronous gh run for the serial queue; same env enrichment as runGh.
-func runGhSync(args: [String]) -> GhRun? {
+/// gh resolves the repository from its working directory — `dir` is mandatory.
+func runGhSync(args: [String], dir: String) -> GhRun? {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
     p.arguments = args
+    p.currentDirectoryURL = URL(fileURLWithPath: dir)
     p.environment = ghEnvironment(base: ProcessInfo.processInfo.environment,
                                   home: NSHomeDirectory())
     let out = Pipe(), err = Pipe()
