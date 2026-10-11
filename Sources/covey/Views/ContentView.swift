@@ -81,6 +81,9 @@ struct ContentView: View {
                 }
             }
         }
+        .sheet(item: $model.pmDraft) { draft in
+            PMDraftSheet(model: model, draft: draft)
+        }
         .sheet(item: $model.modal, onDismiss: { model.modalDidDismiss() }) { modal in
             Group {
                 switch modal {
@@ -288,6 +291,12 @@ struct ContentView: View {
             }
             if forecasting {
                 ForecastModeView(model: model)
+                    .padding(.horizontal, Tokens.edge)
+                    .padding(.top, model.showHeader ? 0 : Tokens.edge)
+                    .padding(.bottom, model.showFooter ? 0 : Tokens.edge)
+            }
+            if model.windowMode == .projects {
+                ProjectsModeView(model: model)
                     .padding(.horizontal, Tokens.edge)
                     .padding(.top, model.showHeader ? 0 : Tokens.edge)
                     .padding(.bottom, model.showFooter ? 0 : Tokens.edge)

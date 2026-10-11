@@ -264,10 +264,12 @@ public struct PersistedState: Codable, Equatable {
     public var provider: String?
     public var splitPct: Int?
     public var recents: [RecentSession]
-    // schema-only (round-trip, no UI this slice)
+    // schema-only (round-trip, no UI this slice). PM: реестр проектов переехал
+    // в демон (pm.db); поля опциональны, чтобы state.json их больше не писал
+    // (старые файлы декодируются, новые — без этих ключей).
     public var order: [String]
-    public var projectOrder: [String]
-    public var projectNames: [String: String]
+    public var projectOrder: [String]?
+    public var projectNames: [String: String]?
     public var drafts: [String: String]
     public var sessions: [String: PersistedSession]
     public var fontScale: Int?
@@ -334,8 +336,8 @@ public struct PersistedState: Codable, Equatable {
     public init(
         theme: String? = nil, provider: String? = nil, splitPct: Int? = nil,
         recents: [RecentSession] = [],
-        order: [String] = [], projectOrder: [String] = [],
-        projectNames: [String: String] = [:], drafts: [String: String] = [:],
+        order: [String] = [], projectOrder: [String]? = nil,
+        projectNames: [String: String]? = nil, drafts: [String: String] = [:],
         sessions: [String: PersistedSession] = [:],
         fontScale: Int? = nil, sbWidth: Int? = nil,
         splitTree: PersistedPaneNode? = nil,

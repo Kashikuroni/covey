@@ -15,6 +15,8 @@ struct InspectorView: View {
             if model.inspectorMode == .trace {
                 TracePane(model: model)
                     .panelCard(tk, surface: tk.surface)
+            } else if model.inspectorMode == .tasks {
+                TasksDrawerView(model: model)
             } else {
                 VStack(spacing: 0) {
                     HStack {

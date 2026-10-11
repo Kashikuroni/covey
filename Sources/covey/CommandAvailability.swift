@@ -58,7 +58,7 @@ enum CommandRules {
         case .newSession, .recentSessions, .filterSessions,
              .toggleSessionsPanel, .toggleInspector, .toggleAgentTrace,
              .toggleStatusBar, .toggleTopBar, .toggleTheme,
-             .showProviders, .toggleForecast, .toggleForecastSource,
+             .showProviders, .toggleForecast, .toggleForecastSource, .toggleProjects,
              .focusSessionList, .showKeyboardHelp,
              .addProject, .settings, .searchLogs:
             return .enabled
@@ -183,7 +183,7 @@ enum CommandRules {
             return context.hasSelectedSession
                 ? .enabled : .disabled(reason: "No session selected")
 
-        case .focusIssues, .focusTrace:
+        case .focusIssues, .focusTrace, .focusTasks:
             return context.inspectorShown
                 ? .enabled : .disabled(reason: "Inspector is hidden")
         }

@@ -51,7 +51,7 @@ final class ProjectRegistrationTests: XCTestCase {
         model.addProject("/repo/x")
         _ = await eventually { model.selectedProjectRoot == "/repo/x" }
         model.removeProject("/repo/x")
-        XCTAssertEqual(model.projects, [])
+        _ = await eventually { model.projects.isEmpty }   // реестр теперь в демоне
         XCTAssertNil(model.selectedProjectRoot)
         XCTAssertEqual(model.toast, "project removed")
     }
@@ -216,7 +216,7 @@ final class ProjectRegistrationTests: XCTestCase {
         model.addProject("/repo/x")
         _ = await eventually { model.selectedProjectRoot == "/repo/x" }
         model.perform(.removeProject)
-        XCTAssertEqual(model.projects, [])
+        _ = await eventually { model.projects.isEmpty }   // реестр теперь в демоне
         XCTAssertNil(model.selectedProjectRoot)
     }
 

@@ -41,6 +41,22 @@ public struct Request: Codable, Equatable {
         // events since `sinceSeq`, then live `traceAppended` events follow.
         case traceSubscribe(name: String, sinceSeq: Int?)
         case traceUnsubscribe(name: String)
+        // PM Foundation (spec pm-design): проекты, задачи, привязки, аналитика.
+        case pmProjectsList
+        case pmProjectsRegister(rootPath: String)
+        case pmProjectsRename(id: String, name: String, expectedRevision: Int64, requestID: String)
+        case pmProjectsArchive(id: String, archived: Bool, expectedRevision: Int64, requestID: String)
+        case pmProjectsReorder(ids: [String], requestID: String)
+        case pmTasksCreate(projectID: String, title: String, body: String?, assignee: String?,
+                           idleThresholdS: Int?, requestID: String)
+        case pmTasksUpdate(id: String, title: String?, body: String?, idleThresholdS: Int?,
+                           expectedRevision: Int64, requestID: String)
+        case pmTasksSetStatus(id: String, lifecycle: String, expectedRevision: Int64, requestID: String)
+        case pmTasksList(projectID: String?)
+        case pmTasksBind(taskID: String, session: String, requestID: String)
+        case pmTasksUnbind(bindingID: String, requestID: String)
+        case pmTasksSpawn(taskID: String, requestID: String)
+        case pmAnalyticsQuery(projectID: String?, taskID: String?, rangeDays: Int?)
     }
 }
 
@@ -65,6 +81,13 @@ public enum ServerMessage: Codable, Equatable{
         // Reply to `traceSubscribe`: events since the requested cursor plus the
         // current total on-disk size of the trace store.
         case traceBacklog(events: [TraceEvent], storeBytes: Int)
+        // PM Foundation replies (spec pm-design §5.2).
+        case pmProjects([PMProject])
+        case pmTask(PMTask)
+        case pmTasks([PMTaskView])
+        case pmBinding(PMBinding)
+        case pmSpawned(PMBinding, Session)
+        case pmAnalytics(PMAnalyticsResult)
     }
 }
 
@@ -85,6 +108,8 @@ public enum DaemonEvent: Codable, Equatable {
     // worktree create runs (updatingBase → creatingWorktree → seedingFiles →
     // startingAgent) so the sheet can show a stage instead of looking frozen.
     case createProgress(stage: CreateStage)
+    // PM Foundation: конверт события (см. PMEventEnvelope, ТЗ §22.6).
+    case pm(PMEventEnvelope)
 }
 
 /// One step of a session create worth telling the user about.

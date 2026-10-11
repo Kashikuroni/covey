@@ -20,6 +20,8 @@ struct WindowModeSwitch: View {
                 .help("Review the selected session's worktree  ⌥⌘R")
             segment("Forecast", mode: .forecast, enabled: true)
                 .help("Limits and the GLM forecast across the whole window")
+            segment("Projects", mode: .projects, enabled: true)
+                .help("Projects, tasks and analytics  ⌘⇧P")
         }
         .padding(2)
         .background(tk.surf2)
@@ -62,6 +64,8 @@ struct WindowModeSwitch: View {
             }
         case .review:
             model.perform(.toggleReview)
+        case .projects:
+            model.windowMode = .projects
         }
     }
 }

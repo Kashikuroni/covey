@@ -58,9 +58,67 @@ let traceStore = TraceStore()
 let traceMonitor = TraceMonitor(store: traceStore, snapshot: {
     registry.list().map { ($0.name, $0.cwd, $0.agent, $0.created, $0.resumeCmd) }
 })
+// PM Foundation (Этап 0, spec pm-design): SQLite-домен проектов/задач/аналитики.
+let pmDB: PMDB
+do {
+    pmDB = try PMDB(path: dir.appendingPathComponent("pm.db").path)
+} catch {
+    FileHandle.standardError.write(Data("coveyd: pm.db unrecoverable: \(error)\n".utf8))
+    exit(1)
+}
+let projectsStore = ProjectStore(db: pmDB)
+let tasksStore = TaskStore(db: pmDB)
+let usageSamplesPath = dir.appendingPathComponent("usage-samples.json").path
+let bindingService = BindingService(
+    db: pmDB, taskStore: tasksStore,
+    createSession: { dir, _ in
+        // Тот же путь, что form-create в IPCServer: git-IO вне очереди реестра.
+        let spec = CreateSpec(name: nil, dir: dir, agent: "claude", terminal: false,
+                              worktree: nil, model: nil, effort: nil, resume: nil, hidden: false)
+        let prepared = try CreateService.prepare(spec, progress: { _ in })
+        return try registry.create(dir: prepared.finalDir, agent: prepared.label,
+                                   argv: prepared.argv, name: nil,
+                                   worktreeRepo: prepared.worktreeRepo,
+                                   resumeCmd: prepared.resumeCmd,
+                                   companionOf: nil, env: nil, providerId: nil, hidden: false)
+    },
+    writePrompt: { name, bytes in registry.write(name: name, bytes: bytes) })
+let rollupService = RollupService(
+    db: pmDB,
+    loadBuckets: { QuotaSampleStore(path: usageSamplesPath).buckets },
+    loadBindings: { (try? bindingService.allBindings()) ?? [] },
+    externalKeys: { (try? bindingService.externalSessionMap()) ?? [:] },
+    projectOfSession: { name in
+        guard let s = registry.get(name: name) else { return nil }
+        return projectsStore.projectID(forSessionRoot: pmSessionRoot(s))
+    })
+let pmService = PMService(db: pmDB, projects: projectsStore, tasks: tasksStore,
+                          bindings: bindingService, rollups: rollupService,
+                          analytics: AnalyticsQuery(db: pmDB,
+                                                    prices: PMPrices.loadBundled() ?? []),
+                          resolveExternal: { session in
+                              ClaudeTranscript.sessionUUID(resumeCmd: session.resumeCmd)
+                          },
+                          sessionByName: { name in registry.get(name: name) },
+                          recoveryNote: pmDB.recoveryNote,
+                          now: { Int64(Date().timeIntervalSince1970) })
+if let note = pmDB.recoveryNote {
+    // Потеря pm.db обязана быть видимой (spec §11): диагностика в лог + событие
+    // pm.recovered GUI превратит в toast.
+    FileHandle.standardError.write(Data("coveyd: PM DATABASE RECOVERED FRESH: \(note)\n".utf8))
+    try? "\(note)".write(toFile: CoveyPaths.path("pm-recovery.log"), atomically: true,
+                         encoding: .utf8)
+}
+// Одноразовая миграция projects/projectNames/projectOrder из state.json (spec §10).
+if let stateData = try? Data(contentsOf: URL(fileURLWithPath: dir.appendingPathComponent("state.json").path)),
+   let state = try? JSONDecoder().decode(PersistedState.self, from: stateData) {
+    _ = try? projectsStore.seed(from: state, now: Int64(Date().timeIntervalSince1970))
+}
+pmService.start(liveSessions: registry.list().map(\.name),
+                statuses: monitor.currentStatuses())
 let ipc = IPCServer(registry: registry, monitor: monitor, gitMonitor: gitMonitor,
                     modelMonitor: modelMonitor, traceMonitor: traceMonitor,
-                    traceStore: traceStore)
+                    traceStore: traceStore, pm: pmService)
 let usageMonitor = MainActor.assumeIsolated {
     // Прогнозная аналитика: один стор/агрегатор/актор на оба провайдера.
     let forecastStore = QuotaSampleStore(path: dir.appendingPathComponent("usage-samples.json").path)

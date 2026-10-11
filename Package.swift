@@ -37,6 +37,7 @@ let package = Package(
         ),
         .target(
             name: "CoveyKit",
+            resources: [.copy("Resources/prices.json")],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .target(

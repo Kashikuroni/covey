@@ -267,8 +267,8 @@ public final class AppModel {
         if let active = activeView { return active.inspector.isShown }
         return selectedProjectRoot != nil
     }
-    /// The right drawer shows either GitHub Issues or the selected agent's trace.
-    public enum InspectorMode: String, Equatable { case issues, trace }
+    /// The right drawer shows GitHub Issues, the selected agent's trace, or PM tasks.
+    public enum InspectorMode: String, Equatable { case issues, trace, tasks }
     public var inspectorMode: InspectorMode { activeView?.inspector.mode ?? .issues }
     /// Agent trace for the selected session (streamed from the daemon).
     public private(set) var traceEvents: [TraceEvent] = []
@@ -294,6 +294,10 @@ public final class AppModel {
     public private(set) var newSessionPrefillName: String?
     /// The issue browser's state machine (gh access injected here).
     public let issueBrowser: IssueBrowserModel
+    /// PM Foundation: модель проектов/задач (источник правды — демон, pm.db).
+    let pm = PMModel()
+    /// Черновик быстрого создания задачи (модалка).
+    var pmDraft: PMDraft?
     /// Bumped when Create GitHub Issue activates the composer title field.
     public private(set) var issueFocusTick = 0
     public private(set) var sbWidth = 360
@@ -419,7 +423,7 @@ public final class AppModel {
         forecastSource = persisted.forecastSource.flatMap(ForecastSource.init(rawValue:)) ?? .claudeCode
         recents = persisted.recents
         order = persisted.order
-        projectOrder = persisted.projectOrder
+        projectOrder = persisted.projectOrder ?? []
         showSessions = persisted.showSessions ?? true
         showFooter = persisted.showFooter ?? true
         showHeader = persisted.showHeader ?? true
@@ -427,7 +431,7 @@ public final class AppModel {
         vimMode = persisted.vimMode ?? true
         reviewLinks.showLinks = persisted.showLinks ?? false
         reviewLinks.linksOnFocus = persisted.linksOnFocus ?? true
-        projectNames = persisted.projectNames
+        projectNames = persisted.projectNames ?? [:]
         projects = persisted.projects ?? []
         do {
             let (list, statuses, lost, models) = try await client.list()
@@ -436,6 +440,11 @@ public final class AppModel {
             modelByName = models
             connected = true
             toast = nil
+            // PM: реестр проектов теперь в демоне — грузим оттуда и зеркалим
+            // в локальные структуры сайдбара (группировка сессий не меняется).
+            pm.install(gateway: IPCPMGateway(client: client))
+            await pm.bootstrap()
+            syncProjectsFromPM()
             // Legacy: the oldest `splitAxes` payload keeps one companion shell;
             // the workspace-view migration then folds it into a view.
             var legacyShell: String?
@@ -541,6 +550,12 @@ public final class AppModel {
     public func setInspectorMode(_ mode: InspectorMode) {
         mutateActiveView { $0.inspector = .shown(mode: mode) }
         if mode == .trace { Task { await subscribeTrace() } }
+    }
+
+    /// Показать шторку задач (Tasks) в инспекторе.
+    public func activateTasks() {
+        setInspectorMode(.tasks)
+        Task { await pm.reloadAllTasks() }
     }
 
     /// (Re)subscribe the selected session's trace: replace the buffer with the
@@ -1008,8 +1023,12 @@ public final class AppModel {
     public func moveProject(from: IndexSet, to: Int) {
         var dirs = orderedDirs()
         dirs.move(fromOffsets: from, toOffset: to)
-        projectOrder = dirs
-        persist()
+        projectOrder = dirs   // оптимистично; демон-истина приедет событием/синком
+        let orderedRoots = dirs
+        Task {
+            await pm.reorderProjects(rootOrder: orderedRoots)
+            syncProjectsFromPM()
+        }
     }
 
     public func setShowSessions(_ on: Bool) { showSessions = on; persist() }
@@ -1267,6 +1286,8 @@ public final class AppModel {
             activateIssues()
         case .toggleReview:
             Task { await toggleReview() }
+        case .toggleProjects:
+            windowMode = windowMode == .projects ? .sessions : .projects
         case .promoteWorktree:
             modal = selected.map(Modal.promote)
         case .deleteSessionBranch:
@@ -1342,6 +1363,10 @@ public final class AppModel {
             focusZone(.agent)
         case .focusIssues:
             focusZone(.issues)
+        case .focusTasks:
+            if !showInspector { setShowInspector(true) }
+            activateTasks()
+            setFocus(.inspector)
         case .focusTerminalSplit:
             focusZone(.terminalSplit)
         case .focusTrace:
@@ -1533,8 +1558,11 @@ public final class AppModel {
     }
 
     public func setProjectName(dir: String, name: String) {
-        if name.isEmpty { projectNames[dir] = nil } else { projectNames[dir] = name }
-        persist()
+        let target = name.isEmpty ? pmProjectDefaultName(dir) : name
+        Task {
+            await pm.renameProjectRoot(rootPath: dir, to: target)
+            syncProjectsFromPM()
+        }
     }
 
     public func displayName(forDir dir: String) -> String {
@@ -1712,7 +1740,7 @@ public final class AppModel {
         if let successor { focusPane(successor) }
     }
 
-    private func selectedSession() -> Session? {
+    func selectedSession() -> Session? {
         sessions.first { $0.name == selected }
     }
 
@@ -1742,21 +1770,49 @@ public final class AppModel {
         selectedProjectRoot = root
     }
 
+    /// PM-операции реестра выполняются строго последовательно: быстрый
+    /// remove сразу после add обязан прийти в демон ПОСЛЕ регистрации
+    /// (иначе no-op архива оставит проект живым — гонка из спеки сайдбара).
+    private var projectOps: Task<Void, Never> = Task {}
+    private func enqueueProjectOp(_ op: @escaping @MainActor () async -> Void) {
+        projectOps = Task { [prior = projectOps] in
+            await prior.value
+            await op()
+        }
+    }
+
     public func addProject(_ dir: String) {
         let root = projectRoot(dir)
-        if !projects.contains(root) {
-            projects.append(root)
-            persist()
+        enqueueProjectOp { [self] in
+            await pm.registerProject(rootPath: root)
+            syncProjectsFromPM()
+            await selectProject(root)
         }
-        Task { await selectProject(root) }
+    }
+
+    /// Projects-режим: открыть существующий диалог выбора папки проекта.
+    func addProjectPrompt() {
+        modal = .addProject
     }
 
     public func removeProject(_ root: String) {
         guard projects.contains(root) else { toast = "project not registered"; return }
-        projects.removeAll { $0 == root }
-        if selectedProjectRoot == root { selectedProjectRoot = nil }
-        persist()
-        toast = "project removed"
+        enqueueProjectOp { [self] in
+            await pm.archiveProjectRoot(rootPath: root)
+            syncProjectsFromPM()
+            if selectedProjectRoot == root { selectedProjectRoot = nil }
+            toast = "project removed"
+        }
+    }
+
+    /// Зеркалирует демон-реестр (pm.projects) в локальные структуры сайдбара.
+    /// projectOrder — только явно упорядоченные (sortOrder >= 0): свежие
+    /// регистрации остаются «неявными» и в orderedDirs идут после живых корней.
+    func syncProjectsFromPM() {
+        let active = pm.projects.filter { $0.archivedAt == nil }
+        projects = active.map(\.rootPath)
+        projectNames = Dictionary(uniqueKeysWithValues: active.map { ($0.rootPath, $0.name) })
+        projectOrder = active.filter { $0.sortOrder >= 0 }.map(\.rootPath)
     }
 
     public func activateIssues() {
@@ -1925,8 +1981,17 @@ public final class AppModel {
         persisted.linksOnFocus = reviewLinks.linksOnFocus
         persisted.projectNames = projectNames
         persisted.projects = projects
+        Self.pmSanitize(&persisted)
         snapshotWorkspaceViews()
         store.save(persisted)
+    }
+
+    /// PM: реестр проектов переехал в демон (pm.db) — state.json не пишет эти
+    /// поля с Этапа 0. Декодирование старых файлов остаётся (spec §10).
+    static func pmSanitize(_ state: inout PersistedState) {
+        state.projects = nil
+        state.projectNames = nil
+        state.projectOrder = nil
     }
 
     private func apply(_ event: DaemonEvent) {
@@ -1989,6 +2054,19 @@ public final class AppModel {
             traceStoreBytes = bytes
         case let .createProgress(stage):
             noteCreateProgress(stage)
+        case let .pm(envelope):
+            // PM Foundation: событие — сигнал; PMModel применяет activity из
+            // конверта, остальное перечитывает одним запросом (ТЗ §22.6).
+            if envelope.type == "pm.recovered" {
+                toast = "pm.db was corrupt — projects/tasks started fresh (see pm-recovery.log)"
+                break
+            }
+            pm.apply(envelope)
+            if envelope.type != "project.changed" {
+                Task { await pm.reloadAllTasks() }
+            } else {
+                syncProjectsFromPM()
+            }
         }
     }
 

@@ -13,7 +13,7 @@ enum AppCommand: String, CaseIterable, Hashable {
     case toggleViewTerminal, openTerminalBelow
     case toggleReview, toggleSessionsPanel, toggleInspector, toggleAgentTrace
     case toggleStatusBar, toggleTopBar, toggleTheme
-    case showProviders, toggleForecast, toggleForecastSource, focusSessionList, focusAgent, focusIssues
+    case showProviders, toggleForecast, toggleForecastSource, toggleProjects, focusSessionList, focusAgent, focusIssues, focusTasks
     case focusTerminalSplit, focusTrace, showKeyboardHelp
     case addProject, removeProject, renameProject, settings, searchLogs
 }
@@ -182,6 +182,9 @@ enum CommandCatalog {
                    ["review", "code review", "diff review", "toggle review",
                     "ревью", "просмотр изменений", "режим ревью"],
                    .init(key: "r", modifiers: [.command, .option], display: "⌥⌘R")),
+        descriptor(.toggleProjects, "Projects Mode", .view,
+                   ["projects", "tasks", "проекты", "задачи"],
+                   .init(key: "p", modifiers: commandShift, display: "⌘⇧P")),
         descriptor(.toggleSessionsPanel, "Toggle Sessions Panel", .view,
                    ["show hide sessions", "панель сессий", "показать сессии", "скрыть сессии"]),
         descriptor(.toggleInspector, "Toggle Inspector", .view,
@@ -212,6 +215,8 @@ enum CommandCatalog {
         descriptor(.focusIssues, "Focus Issues", .view,
                    ["focus issues", "фокус на задачи", "перейти к issues"],
                    .init(key: "3", modifiers: .control, display: "⌃3")),
+        descriptor(.focusTasks, "Focus Tasks", .view,
+                   ["tasks drawer", "pm tasks", "шторка задач", "фокус на задачи проекта"]),
         descriptor(.focusTerminalSplit, "Focus Terminal Split", .view,
                    ["focus shell split", "фокус на сплит терминала", "перейти к shell"],
                    .init(key: "4", modifiers: .control, display: "⌃4")),

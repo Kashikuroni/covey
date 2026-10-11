@@ -1,0 +1,10 @@
+{
+  "prices": [
+    { "match": "claude-opus",    "input": 15,   "output": 75,  "cacheRead": 1.875, "cacheWrite": 18.75 },
+    { "match": "claude-sonnet",  "input": 3,    "output": 15,  "cacheRead": 0.3,   "cacheWrite": 3.75 },
+    { "match": "claude-haiku",   "input": 0.8,  "output": 4,   "cacheRead": 0.08,  "cacheWrite": 1.0 },
+    { "match": "claude",         "input": 3,    "output": 15,  "cacheRead": 0.3,   "cacheWrite": 3.75 },
+    { "match": "gpt-5",          "input": 1.25, "output": 10,  "cacheRead": 0.125, "cacheWrite": 0 },
+    { "match": "glm-",           "input": 0.6,  "output": 2.2, "cacheRead": 0.11,  "cacheWrite": 0 }
+  ]
+}

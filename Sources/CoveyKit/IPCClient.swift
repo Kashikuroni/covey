@@ -79,6 +79,77 @@ public final class IPCClient {
         try await usageRequest(.usageRefresh(provider: provider))
     }
 
+    // MARK: - PM (Project Manager, spec pm-design §5.2)
+
+    public func pmProjectsList() async throws -> [PMProject] {
+        guard case .pmProjects(let list) = try await request(.pmProjectsList) else { throw pmUnexpected() }
+        return list
+    }
+    public func pmProjectsRegister(rootPath: String) async throws -> [PMProject] {
+        guard case .pmProjects(let list) = try await request(.pmProjectsRegister(rootPath: rootPath)) else { throw pmUnexpected() }
+        return list
+    }
+    public func pmProjectsRename(id: String, name: String, expectedRevision: Int64) async throws {
+        _ = try await request(.pmProjectsRename(id: id, name: name,
+                                                expectedRevision: expectedRevision, requestID: newRequestID()))
+    }
+    public func pmProjectsArchive(id: String, archived: Bool, expectedRevision: Int64) async throws {
+        _ = try await request(.pmProjectsArchive(id: id, archived: archived,
+                                                 expectedRevision: expectedRevision, requestID: newRequestID()))
+    }
+    public func pmProjectsReorder(ids: [String]) async throws {
+        _ = try await request(.pmProjectsReorder(ids: ids, requestID: newRequestID()))
+    }
+    public func pmTasksCreate(projectID: String, title: String, body: String?,
+                              assignee: String?, idleThresholdS: Int?) async throws -> PMTask {
+        guard case .pmTask(let t) = try await request(.pmTasksCreate(
+            projectID: projectID, title: title, body: body, assignee: assignee,
+            idleThresholdS: idleThresholdS, requestID: newRequestID())) else { throw pmUnexpected() }
+        return t
+    }
+    public func pmTasksUpdate(id: String, title: String?, body: String?, idleThresholdS: Int?,
+                              expectedRevision: Int64) async throws -> PMTask {
+        guard case .pmTask(let t) = try await request(.pmTasksUpdate(
+            id: id, title: title, body: body, idleThresholdS: idleThresholdS,
+            expectedRevision: expectedRevision, requestID: newRequestID())) else { throw pmUnexpected() }
+        return t
+    }
+    public func pmTasksSetStatus(id: String, lifecycle: PMTaskLifecycle,
+                                 expectedRevision: Int64) async throws -> PMTask {
+        guard case .pmTask(let t) = try await request(.pmTasksSetStatus(
+            id: id, lifecycle: lifecycle.rawValue, expectedRevision: expectedRevision,
+            requestID: newRequestID())) else { throw pmUnexpected() }
+        return t
+    }
+    public func pmTasksList(projectID: String?) async throws -> [PMTaskView] {
+        guard case .pmTasks(let v) = try await request(.pmTasksList(projectID: projectID)) else { throw pmUnexpected() }
+        return v
+    }
+    public func pmTasksBind(taskID: String, session: String) async throws -> PMBinding {
+        guard case .pmBinding(let b) = try await request(.pmTasksBind(
+            taskID: taskID, session: session, requestID: newRequestID())) else { throw pmUnexpected() }
+        return b
+    }
+    public func pmTasksUnbind(bindingID: String) async throws {
+        _ = try await request(.pmTasksUnbind(bindingID: bindingID, requestID: newRequestID()))
+    }
+    public func pmTasksSpawn(taskID: String) async throws -> PMBinding {
+        guard case .pmSpawned(let b, _) = try await request(.pmTasksSpawn(
+            taskID: taskID, requestID: newRequestID())) else { throw pmUnexpected() }
+        return b
+    }
+    public func pmAnalytics(projectID: String?, taskID: String?,
+                           rangeDays: Int?) async throws -> PMAnalyticsResult {
+        guard case .pmAnalytics(let a) = try await request(.pmAnalyticsQuery(
+            projectID: projectID, taskID: taskID, rangeDays: rangeDays)) else { throw pmUnexpected() }
+        return a
+    }
+
+    private func newRequestID() -> String { UUID().uuidString }
+    private func pmUnexpected() -> IPCClientError {
+        .daemonError(code: "pmUnexpected", message: "unexpected result shape")
+    }
+
     private func usageRequest(_ op: Request.Op) async throws -> UsageSnapshot {
         if case let .usageSnapshot(snapshot) = try await request(op) { return snapshot }
         throw IPCClientError.daemonError(code: "badResponse", message: "expected usage snapshot")
