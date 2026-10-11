@@ -81,6 +81,9 @@ struct ContentView: View {
                 }
             }
         }
+        .sheet(item: $model.pmDraft) { draft in
+            PMDraftSheet(model: model, draft: draft)
+        }
         .sheet(item: $model.modal, onDismiss: { model.modalDidDismiss() }) { modal in
             Group {
                 switch modal {

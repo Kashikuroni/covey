@@ -86,46 +86,19 @@ struct ProjectsModeView: View {
                 }
             }
         }
+        .overlay(alignment: .bottom) {
+            Button("New Task") { model.pmDraft = PMDraft(projectID: selectedProjectID) }
+                .buttonStyle(.borderedProminent)
+                .padding(8)
+                .background(tk.surf2)
+        }
     }
 
     @ViewBuilder private var detailColumn: some View {
         if let v = tasks.first(where: { $0.task.id == selectedTaskID }) {
-            TaskSummaryView(view: v, tk: tk)
+            TaskEditorView(model: model, taskView: v)
         } else {
             Text("Select a task").foregroundStyle(tk.t3)
-        }
-    }
-}
-
-/// Read-only сводка задачи до приезда редактора (следующий слайс).
-struct TaskSummaryView: View {
-    let view: PMTaskView
-    let tk: Tokens
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(view.task.title).font(.title3).foregroundStyle(tk.t1)
-                HStack(spacing: 8) {
-                    Text(view.task.lifecycle.rawValue)
-                        .font(.caption).padding(3)
-                        .background(tk.surf4).clipShape(RoundedRectangle(cornerRadius: Tokens.rSm))
-                    Text(view.activity.rawValue)
-                        .font(.caption).padding(3)
-                        .background(tk.surf4).clipShape(RoundedRectangle(cornerRadius: Tokens.rSm))
-                    Text(view.task.assignee).font(.caption).foregroundStyle(tk.t3)
-                }
-                if !view.openBindings.isEmpty {
-                    Text("Sessions: " + view.openBindings.map(\.coveySession).joined(separator: ", "))
-                        .font(.caption).foregroundStyle(tk.t2)
-                }
-                if !view.task.body.isEmpty {
-                    Text(view.task.body).font(.body).foregroundStyle(tk.t2)
-                        .textSelection(.enabled)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding()
         }
     }
 }

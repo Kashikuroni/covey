@@ -293,6 +293,8 @@ public final class AppModel {
     public let issueBrowser: IssueBrowserModel
     /// PM Foundation: модель проектов/задач (источник правды — демон, pm.db).
     let pm = PMModel()
+    /// Черновик быстрого создания задачи (модалка).
+    var pmDraft: PMDraft?
     /// Bumped when Create GitHub Issue activates the composer title field.
     public private(set) var issueFocusTick = 0
     public private(set) var sbWidth = 360
