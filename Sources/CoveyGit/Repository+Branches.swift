@@ -157,3 +157,18 @@ extension Repository {
             .filter { !$0.isEmpty && $0 != current && $0 != ref }
     }
 }
+
+extension Repository {
+    /// GitHub-squash detection: the branch has no ancestry merge into `base`,
+    /// but every path it changed since the fork point already carries the
+    /// branch's content in base (donor: feat/git-window's WorktreeScan).
+    public func squashMerged(branch: String, base: String) throws -> Bool {
+        let fork = try git(["merge-base", base, branch], readOnly: true)
+        let changed = try git(["diff", "--name-only", "\(fork)..\(branch)"], readOnly: true)
+        let paths = changed.split(separator: "\n").map(String.init)
+        guard !paths.isEmpty else { return true }         // no own changes: contained
+        let stillDifferent = try git(["diff", "--name-only", base, branch, "--"] + paths,
+                                     readOnly: true)
+        return stillDifferent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}

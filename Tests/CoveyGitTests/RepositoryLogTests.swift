@@ -29,3 +29,19 @@ final class RepositoryLogTests: XCTestCase {
         XCTAssertEqual(reverse.behind, 1)
     }
 }
+
+
+extension RepositoryLogTests {
+    func testBranchRecencyMapsAllBranches() throws {
+        let repo = try TestRepo()
+        defer { repo.remove() }
+        try repo.write("a.txt", "one\n")
+        try repo.commitAll("base")
+        try repo.sh("git -C '\(repo.path)' branch feat")
+
+        let recency = try Repository(at: repo.path).branchRecency()
+        XCTAssertEqual(Set(recency.keys), ["main", "feat"])
+        let now = Int64(Date().timeIntervalSince1970)
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(recency["main"]), now - 60)
+    }
+}

@@ -19,3 +19,20 @@ extension Repository {
         return (ahead, behind)
     }
 }
+
+extension Repository {
+    /// Local branch name → last committer epoch seconds. Input for the
+    /// "current first, then recency" branch ordering.
+    public func branchRecency() throws -> [String: Int64] {
+        let out = try git(["for-each-ref", "--sort=-committerdate",
+                           "--format=%(refname:short)%09%(committerdate:unix)",
+                           "refs/heads"], readOnly: true)
+        var recency: [String: Int64] = [:]
+        for line in out.split(separator: "\n") {
+            let parts = line.split(separator: "\t").map(String.init)
+            guard parts.count == 2, let stamp = Int64(parts[1]) else { continue }
+            recency[parts[0]] = stamp
+        }
+        return recency
+    }
+}

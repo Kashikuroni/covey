@@ -88,3 +88,31 @@ final class RepositoryMergeTests: XCTestCase {
         }
     }
 }
+
+extension RepositoryMergeTests {
+    func testSquashMergedDetectsLandedContent() throws {
+        try write("a.txt", "base\n")
+        try repo.commitAll("base")
+        try sh("git -C '\(repo.path)' checkout -q -b feat")
+        try write("feature.txt", "feature work\n")
+        try sh("git -C '\(repo.path)' add feature.txt && git -C '\(repo.path)' -c user.email=t@t -c user.name=t commit -q -m feat")
+        // The feature lands in main as a SQUASH commit: same content, new sha.
+        try sh("git -C '\(repo.path)' checkout -q main")
+        try write("feature.txt", "feature work\n")
+        try sh("git -C '\(repo.path)' add feature.txt && git -C '\(repo.path)' -c user.email=t@t -c user.name=t commit -q -m squashed")
+        try sh("git -C '\(repo.path)' checkout -q feat")
+
+        XCTAssertFalse(try git.mergedBranches(into: "main").contains("feat"), "ancestry must NOT see it")
+        XCTAssertTrue(try git.squashMerged(branch: "feat", base: "main"))
+    }
+
+    func testSquashMergedFalseWhenContentDiffers() throws {
+        try write("a.txt", "base\n")
+        try repo.commitAll("base")
+        try sh("git -C '\(repo.path)' checkout -q -b feat")
+        try write("feature.txt", "feature work\n")
+        try sh("git -C '\(repo.path)' add feature.txt && git -C '\(repo.path)' -c user.email=t@t -c user.name=t commit -q -m feat")
+
+        XCTAssertFalse(try git.squashMerged(branch: "feat", base: "main"))
+    }
+}
