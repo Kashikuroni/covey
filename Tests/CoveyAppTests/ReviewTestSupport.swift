@@ -55,6 +55,7 @@ final class FakeReviewGit: ReviewGitReading, @unchecked Sendable {
     private var _diffCalls = 0
     private var changesGates: [String: CallGate] = [:]
     private var diffGates: [Bool: CallGate] = [:]
+    private var _fingerprintGates: [CallGate] = []
 
     var changesCalls: Int { lock.withLock { _changesCalls } }
     var fingerprintCalls: Int { lock.withLock { _fingerprintCalls } }
@@ -66,6 +67,13 @@ final class FakeReviewGit: ReviewGitReading, @unchecked Sendable {
     func holdNextChanges(base: String) -> CallGate {
         let gate = CallGate()
         lock.withLock { changesGates[base] = gate }
+        return gate
+    }
+
+    /// The next `fingerprint` call parks until the gate is released.
+    func holdNextFingerprint() -> CallGate {
+        let gate = CallGate()
+        lock.withLock { _fingerprintGates.append(gate) }
         return gate
     }
 
@@ -95,10 +103,12 @@ final class FakeReviewGit: ReviewGitReading, @unchecked Sendable {
     }
 
     func fingerprint(worktree: String, comparison: GitComparison, paths: [String]) async throws -> String {
-        lock.withLock {
+        let gate: CallGate? = lock.withLock {
             _fingerprintCalls += 1
             _fingerprintWorktrees.append(worktree)
+            return _fingerprintGates.isEmpty ? nil : _fingerprintGates.removeFirst()
         }
+        if let gate { try await gate.hold() }
         if let fingerprintError { throw fingerprintError }
         return fingerprintValue ?? state?.fingerprint ?? ""
     }
@@ -112,6 +122,142 @@ final class FakeReviewGit: ReviewGitReading, @unchecked Sendable {
         if let gate { try await gate.hold() }
         if let diffError { throw diffError }
         return (fullFile ? fullDiffs[file.path] : nil) ?? diffs[file.path] ?? .empty
+    }
+
+    // MARK: Ops surface (scripted answers + recorded calls)
+
+    var indexEntries: [IndexEntry] = []
+    var upstream: UpstreamInfo?
+    var commitError: Error?
+    var pushError: Error?
+    var commitOID = "feed0001"
+
+    private let opsLock = NSLock()
+    private var _stageCalls: [[String]] = []
+    private var _unstageCalls: [[String]] = []
+    private var _stageAllCalls = 0
+    private var _unstageAllCalls = 0
+    private var _commitCalls: [(summary: String, body: String, amend: Bool)] = []
+    private var _pushCalls: [(remote: String, setUpstream: Bool)] = []
+    private var _fetchCalls: [String] = []
+
+    var stageCalls: [[String]] { opsLock.withLock { _stageCalls } }
+    var unstageCalls: [[String]] { opsLock.withLock { _unstageCalls } }
+    var stageAllCalls: Int { opsLock.withLock { _stageAllCalls } }
+    var unstageAllCalls: Int { opsLock.withLock { _unstageAllCalls } }
+    var commitCalls: [(summary: String, body: String, amend: Bool)] { opsLock.withLock { _commitCalls } }
+    var pushCalls: [(remote: String, setUpstream: Bool)] { opsLock.withLock { _pushCalls } }
+    var fetchCalls: [String] { opsLock.withLock { _fetchCalls } }
+
+    func indexStatus(worktree: String) async throws -> [IndexEntry] { indexEntries }
+
+    func upstreamInfo(worktree: String) async -> UpstreamInfo? { upstream }
+
+    func stage(worktree: String, paths: [String]) async throws {
+        opsLock.withLock { _stageCalls.append(paths) }
+        for path in paths {
+            indexEntries.removeAll { $0.path == path }
+            indexEntries.append(IndexEntry(path: path, staged: true, isUntracked: false))
+        }
+    }
+
+    func stageAll(worktree: String) async throws {
+        opsLock.withLock { _stageAllCalls += 1 }
+        indexEntries = indexEntries.map {
+            IndexEntry(path: $0.path, staged: true, isUntracked: $0.isUntracked)
+        }
+    }
+
+    func unstage(worktree: String, paths: [String]) async throws {
+        opsLock.withLock { _unstageCalls.append(paths) }
+        for path in paths {
+            indexEntries.removeAll { $0.path == path }
+            indexEntries.append(IndexEntry(path: path, staged: false, isUntracked: false))
+        }
+    }
+
+    func unstageAll(worktree: String) async throws {
+        opsLock.withLock { _unstageAllCalls += 1 }
+        indexEntries = indexEntries.map {
+            IndexEntry(path: $0.path, staged: false, isUntracked: $0.isUntracked)
+        }
+    }
+
+    func commit(worktree: String, summary: String, body: String, amend: Bool) async throws -> String {
+        opsLock.withLock { _commitCalls.append((summary, body, amend)) }
+        if let commitError { throw commitError }
+        return commitOID
+    }
+
+    func push(worktree: String, remote: String, setUpstream: Bool) async throws {
+        opsLock.withLock { _pushCalls.append((remote, setUpstream)) }
+        if let pushError { throw pushError }
+        if !setUpstream { upstream?.ahead = 0 }
+    }
+
+    func fetch(worktree: String, remote: String) async throws {
+        opsLock.withLock { _fetchCalls.append(remote) }
+    }
+
+    // MARK: Management surface (phase 2, scripted answers + recorded calls)
+
+    var worktreeEntries: [WorktreeListEntry] = []
+    var mergedInto: [String] = []
+    var lastCommitStamps: [String: Int64] = [:]
+    var aheadBehindByBranch: [String: (ahead: Int, behind: Int)] = [:]
+    var summaries: [String: WorkingTreeSummary] = [:]
+    var opsError: Error?
+
+    private var _worktreeAddCalls: [(path: String, newBranch: String, base: String)] = []
+    private var _removeCalls: [String] = []
+    private var _promoteCalls: [(path: String, branch: String)] = []
+    private var _checkoutCalls: [(worktree: String, branch: String)] = []
+    private var _branchDeleteCalls: [(branch: String, protected: [String])] = []
+    private var _updateFromBaseCalls: [(worktree: String, base: String)] = []
+
+    var worktreeAddCalls: [(path: String, newBranch: String, base: String)] {
+        opsLock.withLock { _worktreeAddCalls }
+    }
+    var removeCalls: [String] { opsLock.withLock { _removeCalls } }
+    var promoteCalls: [(path: String, branch: String)] { opsLock.withLock { _promoteCalls } }
+    var checkoutCalls: [(worktree: String, branch: String)] { opsLock.withLock { _checkoutCalls } }
+    var branchDeleteCalls: [(branch: String, protected: [String])] {
+        opsLock.withLock { _branchDeleteCalls }
+    }
+    var updateFromBaseCalls: [(worktree: String, base: String)] {
+        opsLock.withLock { _updateFromBaseCalls }
+    }
+
+    func worktreeList(root: String) async throws -> [WorktreeListEntry] { worktreeEntries }
+    func mergedBranches(root: String, into base: String) async throws -> [String] { mergedInto }
+    func lastCommit(worktree: String) async -> Int64? { lastCommitStamps[worktree] }
+    func aheadBehind(root: String, branch: String, base: String) async -> (ahead: Int, behind: Int) {
+        aheadBehindByBranch[branch] ?? (0, 0)
+    }
+    func summary(worktree: String) async -> WorkingTreeSummary? { summaries[worktree] }
+    func addWorktree(root: String, path: String, newBranch: String, base: String) async throws {
+        opsLock.withLock { _worktreeAddCalls.append((path, newBranch, base)) }
+        if let opsError { throw opsError }
+    }
+    func removeWorktree(path: String) async throws {
+        opsLock.withLock { _removeCalls.append(path) }
+        if let opsError { throw opsError }
+    }
+    func promoteWorktree(path: String, branch: String) async throws {
+        opsLock.withLock { _promoteCalls.append((path, branch)) }
+        if let opsError { throw opsError }
+    }
+    func checkout(worktree: String, branch: String) async throws {
+        opsLock.withLock { _checkoutCalls.append((worktree, branch)) }
+        if let opsError { throw opsError }
+    }
+    func deleteBranch(worktree: String, branch: String, protected: [String]) async throws {
+        opsLock.withLock { _branchDeleteCalls.append((branch, protected)) }
+        if let opsError { throw opsError }
+    }
+    func updateFromBase(worktree: String, base: String) async throws {
+        opsLock.withLock { _updateFromBaseCalls.append((worktree, base)) }
+        if let opsError { throw opsError }
     }
 }
 

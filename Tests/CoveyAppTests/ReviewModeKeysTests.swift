@@ -3,9 +3,11 @@ import XCTest
 
 final class ReviewModeKeysTests: XCTestCase {
     private func decide(_ characters: String, escape: Bool = false, command: Bool = false,
+                        shift: Bool = false, isRepeat: Bool = false,
                         _ configure: (inout ReviewModeKeyInput) -> Void = { _ in }) -> ReviewModeKeyDecision {
         var input = ReviewModeKeyInput(key: ReviewKeyEvent(characters: characters, isEscape: escape,
-                                                           command: command))
+                                                           command: command, shift: shift),
+                                       isRepeat: isRepeat)
         configure(&input)
         return ReviewModeKeys.decide(input)
     }
@@ -15,6 +17,20 @@ final class ReviewModeKeysTests: XCTestCase {
         XCTAssertEqual(decide("?"), .perform(.showKeys))
         XCTAssertEqual(decide("", escape: true), .perform(.escape))
         XCTAssertEqual(decide("x"), .pass)
+    }
+
+    func testSpaceStagesAndShiftSpaceUnstages() {
+        XCTAssertEqual(decide(" "), .perform(.stageFocused))
+        XCTAssertEqual(decide(" ", shift: true), .perform(.unstageFocused))
+    }
+
+    func testAStagesAll() {
+        XCTAssertEqual(decide("a"), .perform(.stageAllFiles))
+    }
+
+    func testStagingKeysSwallowRepeats() {
+        XCTAssertEqual(decide(" ", isRepeat: true), .swallow)
+        XCTAssertEqual(decide("a", isRepeat: true), .swallow)
     }
 
     func testCommandWLeavesReviewOnAnyLayout() {

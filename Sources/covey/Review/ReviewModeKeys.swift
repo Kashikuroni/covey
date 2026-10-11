@@ -39,7 +39,8 @@ enum ReviewModeKeyDecision: Equatable {
 /// window's own monitor), pure so it can be tested.
 enum ReviewModeKeys {
     /// Held keys that would flip-flop a toggle.
-    static let noRepeat: Set<ReviewKeyAction> = [.toggleReviewed, .toggleFullFile, .showKeys, .toggleLinks]
+    static let noRepeat: Set<ReviewKeyAction> = [.toggleReviewed, .toggleFullFile, .showKeys, .toggleLinks,
+                                             .stageFocused, .unstageFocused, .stageAllFiles]
 
     static func decide(_ input: ReviewModeKeyInput) -> ReviewModeKeyDecision {
         let blocked = input.paletteOpen || input.sheetOpen

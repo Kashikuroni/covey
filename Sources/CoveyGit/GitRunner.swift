@@ -17,9 +17,11 @@ public enum GitRunner {
     /// of the answer; only launch failure, timeout and the output cap throw.
     public static func execute(in dir: String, _ args: [String], readOnly: Bool,
                                timeout: TimeInterval = defaultTimeout,
-                               outputLimit: Int = defaultOutputLimit) throws -> GitOutput {
+                               outputLimit: Int = defaultOutputLimit,
+                               additionalEnvironment: [String: String] = [:]) throws -> GitOutput {
         let result = try executeRaw(in: dir, args, readOnly: readOnly, timeout: timeout,
-                                    outputLimit: outputLimit)
+                                    outputLimit: outputLimit,
+                                    additionalEnvironment: additionalEnvironment)
         return GitOutput(stdout: String(decoding: result.stdout, as: UTF8.self),
                          stderr: String(decoding: result.stderr, as: UTF8.self),
                          status: result.status)
@@ -29,12 +31,13 @@ public enum GitRunner {
     /// `-z` output is split on NUL before decoding.
     static func executeRaw(in dir: String, _ args: [String], readOnly: Bool,
                            timeout: TimeInterval = defaultTimeout,
-                           outputLimit: Int = defaultOutputLimit) throws -> ProcessResult {
+                           outputLimit: Int = defaultOutputLimit,
+                           additionalEnvironment: [String: String] = [:]) throws -> ProcessResult {
         let command = "git \(args.joined(separator: " "))"
         do {
             return try ProcessRunner.run(
                 executable: "/usr/bin/env", arguments: ["git", "-C", dir] + args,
-                environment: environment(readOnly: readOnly),
+                environment: environment(readOnly: readOnly, additional: additionalEnvironment),
                 timeout: timeout, outputLimit: outputLimit)
         } catch ProcessFailure.timedOut {
             throw GitError(kind: .timedOut,
@@ -50,8 +53,10 @@ public enum GitRunner {
     /// (or the command line when git said nothing).
     @discardableResult
     public static func run(in dir: String, _ args: [String], readOnly: Bool = false,
-                           timeout: TimeInterval = defaultTimeout) throws -> String {
-        let out = try execute(in: dir, args, readOnly: readOnly, timeout: timeout)
+                           timeout: TimeInterval = defaultTimeout,
+                           additionalEnvironment: [String: String] = [:]) throws -> String {
+        let out = try execute(in: dir, args, readOnly: readOnly, timeout: timeout,
+                              additionalEnvironment: additionalEnvironment)
         guard out.status == 0 else {
             let message = out.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
             throw GitError(kind: .failed(status: out.status),
@@ -63,10 +68,13 @@ public enum GitRunner {
 
     /// `LC_ALL=C` always, so parsed English words are stable; reads add
     /// `GIT_OPTIONAL_LOCKS=0` so they never stall on (or take) the index lock.
-    public static func environment(readOnly: Bool) -> [String: String] {
+    /// `additional` overrides per call (push/fetch credential guards).
+    public static func environment(readOnly: Bool,
+                                   additional: [String: String] = [:]) -> [String: String] {
         var env = ProcessInfo.processInfo.environment
         env["LC_ALL"] = "C"
         if readOnly { env["GIT_OPTIONAL_LOCKS"] = "0" }
+        for (key, value) in additional { env[key] = value }
         return env
     }
 }

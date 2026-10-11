@@ -77,6 +77,16 @@ final class ReviewModel {
     var suggestedBase: String?
     var banner: String?
     var toasts: [ReviewToast] = []
+
+    // Git ops state (ReviewModel+Ops); git is the source of truth, this is a
+    // re-read mirror refreshed by open/reload — never persisted to the store.
+    var indexState: [String: Bool] = [:]      // path → staged
+    var upstream: UpstreamInfo?
+    var commitSheetOpen = false
+    var commitError: String?
+    var committing = false
+    var pushing = false
+    var pushUpstreamPending = false
     /// Bumped whenever the comparison changes (`open`). An async result that
     /// finds it moved belongs to a comparison the user has left and is dropped.
     @ObservationIgnored var loadGeneration = 0
@@ -228,6 +238,10 @@ final class ReviewModel {
             phase = .ready
             banner = nil
             failureStreak = 0
+            // Refresh ops mirrors only once the phase is .ready — both
+            // refreshes guard on it.
+            await refreshIndex()
+            await refreshUpstream()
             comparisonPopoverOpen = false
             store.setLastComparison(comparison, worktree: worktree)
             persist()
@@ -559,6 +573,9 @@ final class ReviewModel {
         } else if sendDraft != nil {
             sendDraft = nil
             sendError = nil
+        } else if commitSheetOpen {
+            commitSheetOpen = false
+            commitError = nil
         } else if composer != nil {
             composer = nil
         } else if comparisonPopoverOpen {

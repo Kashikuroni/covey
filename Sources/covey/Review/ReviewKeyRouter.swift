@@ -6,15 +6,18 @@ enum ReviewKeyAction: Hashable {
     case fit, zoomReset, zoomIn, zoomOut
     case focusTree, focusDiff, focusCard, showKeys, escape, closeReview
     case toggleLinks
+    case stageFocused, unstageFocused, stageAllFiles
 }
 
 struct ReviewKeyEvent: Equatable {
     /// `charactersIgnoringModifiers` (Shift still applies: ⇧I arrives as "I").
+    /// Space has no shifted form, so ⇧Space needs the explicit flag below.
     var characters: String
     var isEscape = false
     var command = false
     var control = false
     var option = false
+    var shift = false
 }
 
 struct ReviewKeyContext: Equatable {
@@ -55,6 +58,8 @@ enum ReviewKeyRouter {
         case "3": return .focusCard
         case "l": return .toggleLinks
         case "?": return .showKeys
+        case " ": return event.shift ? .unstageFocused : .stageFocused
+        case "a": return .stageAllFiles
         default: return nil
         }
     }
@@ -67,6 +72,9 @@ enum ReviewKeyRouter {
         ("Mark reviewed", "R"),
         ("Full file / hunks", "E"),
         ("Comment on current change", "C"),
+        ("Stage / unstage focused file", "Space"),
+        ("Unstage focused file", "⇧Space"),
+        ("Stage all changes", "A"),
         ("Fit canvas", "F"),
         ("Zoom 100%", "0"),
         ("Zoom in / out", "=  −"),

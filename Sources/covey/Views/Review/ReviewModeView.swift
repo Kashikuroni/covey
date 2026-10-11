@@ -29,7 +29,7 @@ struct ReviewModeView: View {
     var body: some View {
         VStack(spacing: 0) {
             ReviewTopBar(model: model, tk: tk) {
-                ReviewWorktreePicker(app: app, review: model, tk: tk)
+                ReviewWorktreePicker(app: app, review: model, repo: app.reviewRepo, tk: tk)
             }
             if let banner = model.banner {
                 ReviewBanner(text: banner, tk: tk) { Task { await model.retry() } }
@@ -40,6 +40,12 @@ struct ReviewModeView: View {
         // window's content (and with it the hidden terminals) wider.
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
         .overlay { if model.sendDraft != nil { ReviewSendSheet(model: model, tk: tk) } }
+        .overlay { if model.commitSheetOpen { ReviewCommitSheet(model: model, tk: tk) } }
+        .overlay {
+            if let repo = app.reviewRepo, repo.cleanupSheetOpen {
+                ReviewCleanupSheet(repo: repo, tk: tk)
+            }
+        }
         .overlay {
             if model.keysOverlayOpen {
                 ReviewKeysOverlay(tk: tk) { model.keysOverlayOpen = false }

@@ -82,6 +82,8 @@ extension ReviewModel {
             guard generation == loadGeneration else { return }
             await recheckAnchors()
             guard generation == loadGeneration else { return }
+            await refreshIndex()
+            await refreshUpstream()
             failureStreak = 0
             banner = nil
             persist()

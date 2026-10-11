@@ -60,9 +60,10 @@ final class ReviewKeyRouterTests: XCTestCase {
     }
 
     func testHelpListsEveryShortcutOnce() {
-        XCTAssertEqual(ReviewKeyRouter.help.count, 17)
-        XCTAssertEqual(Set(ReviewKeyRouter.help.map(\.label)).count, 17)
+        XCTAssertEqual(ReviewKeyRouter.help.count, 20)
+        XCTAssertEqual(Set(ReviewKeyRouter.help.map(\.label)).count, 20)
         XCTAssertTrue(ReviewKeyRouter.help.contains { $0.label == "Show links" && $0.keys == "L" })
+        XCTAssertTrue(ReviewKeyRouter.help.contains { $0.label == "Stage all changes" && $0.keys == "A" })
         XCTAssertTrue(ReviewKeyRouter.help.contains { $0.label == "Back to sessions" && $0.keys == "⌘W" })
     }
 

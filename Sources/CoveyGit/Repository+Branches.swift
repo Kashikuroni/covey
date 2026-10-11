@@ -144,3 +144,16 @@ extension Repository {
             .filter { !$0.isEmpty && $0 != current }
     }
 }
+
+extension Repository {
+    /// Local branches other than `ref` itself that are fully contained in it
+    /// (ancestry merge); the current branch is excluded. Protected branches
+    /// are included — the caller locks them in the UI.
+    public func mergedBranches(into ref: String) throws -> [String] {
+        let out = try git(["branch", "--merged", ref, "--format=%(refname:short)"],
+                          readOnly: true)
+        let current = currentBranch()
+        return out.split(separator: "\n").map(String.init)
+            .filter { !$0.isEmpty && $0 != current && $0 != ref }
+    }
+}

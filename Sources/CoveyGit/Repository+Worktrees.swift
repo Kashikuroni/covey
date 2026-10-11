@@ -130,3 +130,45 @@ extension Repository {
         }
     }
 }
+
+/// One row of `worktree list --porcelain`.
+public struct WorktreeListEntry: Equatable, Sendable {
+    public var path: String
+    public var branch: String?      // nil = detached HEAD
+    public var isPrimary: Bool
+
+    public init(path: String, branch: String?, isPrimary: Bool) {
+        self.path = path
+        self.branch = branch
+        self.isPrimary = isPrimary
+    }
+}
+
+extension Repository {
+    /// Every worktree of the repository, main first (porcelain order);
+    /// detached worktrees carry a nil branch.
+    public func listWorktrees() throws -> [WorktreeListEntry] {
+        let raw = try git(["worktree", "list", "--porcelain"], readOnly: true)
+        var entries: [WorktreeListEntry] = []
+        var path: String?
+        var branch: String?
+        for line in raw.split(separator: "\n").map(String.init) {
+            if line.hasPrefix("worktree ") {
+                if let p = path {
+                    entries.append(WorktreeListEntry(path: p, branch: branch,
+                                                     isPrimary: entries.isEmpty))
+                }
+                path = String(line.dropFirst("worktree ".count))
+                branch = nil
+            } else if line.hasPrefix("branch refs/heads/") {
+                branch = String(line.dropFirst("branch refs/heads/".count))
+            }
+            // "bare" / "detached" lines need no extra state.
+        }
+        if let p = path {
+            entries.append(WorktreeListEntry(path: p, branch: branch,
+                                             isPrimary: entries.isEmpty))
+        }
+        return entries
+    }
+}

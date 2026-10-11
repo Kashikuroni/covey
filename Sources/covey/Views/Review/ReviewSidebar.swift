@@ -129,6 +129,12 @@ private struct ReviewTreeRowView: View {
                 if let removed = file.removed, removed > 0 {
                     Text("−\(removed)").font(ReviewFont.mono(10.5)).foregroundStyle(tk.diffDel)
                 }
+                if model.indexState[file.path] == true {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(tk.diffAdd)
+                        .help("Staged")
+                }
                 if issues > 0 {
                     Text("\(issues)").font(ReviewFont.mono(10.5)).foregroundStyle(tk.err)
                 }
