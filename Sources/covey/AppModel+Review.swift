@@ -91,6 +91,25 @@ extension AppModel {
         windowMode = .review
         syncReviewVisibility()
         await created.start()
+
+        // The management popover's state rides along: reused per project,
+        // retargeted when the review moves to another worktree.
+        if let repo = reviewRepo, repo.projectRoot == opening.projectRoot {
+            repo.currentWorktree = opening.worktree
+        } else {
+            reviewRepo = ReviewRepoModel(
+                projectRoot: opening.projectRoot, currentWorktree: opening.worktree,
+                git: ReviewGitService(), prReader: ReviewPRService(),
+                liveSessions: { [weak self] in self?.liveAgentSessionDirs() ?? [] })
+        }
+    }
+
+    /// Live non-shell sessions as (directory, agent) pairs for the popover's
+    /// Active state. Directory as-is — ReviewRepoModel matches by path prefix.
+    func liveAgentSessionDirs() -> [(dir: String, agent: String)] {
+        visibleSessions
+            .filter { !isShellAgent($0.agent) }
+            .map { ($0.dir, $0.agent) }
     }
 
     /// Back to the sessions. The review keeps its state and stops polling.

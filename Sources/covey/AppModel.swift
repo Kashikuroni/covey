@@ -154,6 +154,9 @@ public final class AppModel {
     /// The one live review. It survives trips back to the sessions and is
     /// replaced only when Review opens for another worktree.
     var review: ReviewModel?
+    /// The management popover's state (worktrees/branches/PRs), scoped to the
+    /// review's project; reused while the review stays in one project.
+    internal(set) var reviewRepo: ReviewRepoModel?
     /// The main window is fully covered; the review stops polling then.
     @ObservationIgnored var mainWindowOccluded = false
     /// Bumped by every Review entry and exit, so a toplevel that git resolves
@@ -1529,6 +1532,13 @@ public final class AppModel {
         newSessionPrefillName = sessionNameForIssue(number: number, title: title)
         newSessionPrefillIssue = number
         newSessionPrefillBranch = branch
+        modal = .newSession
+    }
+
+    /// Opens the New Session sheet pre-filled with a worktree directory
+    /// (the management popover's "open session" tick).
+    public func newSessionForWorktree(dir: String) {
+        newSessionPrefillDir = dir
         modal = .newSession
     }
 
