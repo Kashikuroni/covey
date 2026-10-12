@@ -4,7 +4,7 @@ import CoveyKit
 enum DocumentRuleSource: Equatable, Sendable { case builtin(String), global(line: Int), project(line: Int) }
 struct DocumentRuleDiagnostic: Equatable, Sendable { let line: Int; let message: String }
 struct DocumentRuleCompileError: Error { let diagnostics: [DocumentRuleDiagnostic] }
-struct DocumentExclusionDecision: Equatable {
+struct DocumentExclusionDecision: Equatable, Sendable {
     var excluded = false
     var source: DocumentRuleSource?
     var pattern: String?
@@ -20,10 +20,15 @@ struct DocumentExclusionRules: @unchecked Sendable {
         let source: DocumentRuleSource
     }
     private var rules: [Rule]
+    private(set) var enabledPresets: Set<DocumentPresetID>
+    var enabledBuiltinPatterns: Set<String> {
+        Set(rules.compactMap { rule in if case .builtin = rule.source { return rule.pattern }; return nil })
+    }
     static func compile(configuration: DocumentExclusionConfiguration, projectKey: String,
                         detected: Set<DocumentPresetID>) throws -> Self {
         let global = configuration.global, project = configuration.projects[projectKey] ?? .init()
         var input: [(String, DocumentRuleSource)] = []
+        var enabledPresets: Set<DocumentPresetID> = []
         if project.useBuiltins ?? global.useBuiltins ?? true {
             var enabled = detected.union([.common])
             for preset in DocumentPresetID.allCases {
@@ -33,6 +38,7 @@ struct DocumentExclusionRules: @unchecked Sendable {
             }
             if !enabled.isDisjoint(with: [.react, .vue, .next, .nuxt]),
                (project.presetOverrides[.node] ?? global.presetOverrides[.node]) != false { enabled.insert(.node) }
+            enabledPresets = enabled
             for preset in DocumentPresetID.allCases where enabled.contains(preset) {
                 for pattern in DocumentPresets.rules[preset] ?? [] where (project.ruleOverrides[pattern] ?? global.ruleOverrides[pattern]) != false {
                     input.append((pattern, .builtin(preset.rawValue)))
@@ -54,7 +60,7 @@ struct DocumentExclusionRules: @unchecked Sendable {
             }
         }
         if !diagnostics.isEmpty { throw DocumentRuleCompileError(diagnostics: diagnostics) }
-        return Self(rules: parsed)
+        return Self(rules: parsed, enabledPresets:enabledPresets)
     }
     func decision(path: String, isDirectory: Bool) -> DocumentExclusionDecision {
         let parts = path.split(separator: "/", omittingEmptySubsequences: true)

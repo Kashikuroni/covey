@@ -15,6 +15,9 @@ struct DocumentPickerView: View {
                 if let context = picker.context { Text("\(context.sourceSession) · \(context.root)").font(.caption).foregroundStyle(tk.t2).textSelection(.enabled) }
                 HStack {
                     TextField("Find by name or path",text:$picker.state.query).focused($searchFocused)
+                        .onSubmit { open(picker) }
+                        .onKeyPress(.downArrow) { move(picker,1,entries:matches); return .handled }
+                        .onKeyPress(.upArrow) { move(picker,-1,entries:matches); return .handled }
                     Toggle("Markdown only",isOn:$picker.state.markdownOnly).toggleStyle(.checkbox)
                 }
                 if picker.loading { ProgressView("Scanning project…").controlSize(.small) }
@@ -50,5 +53,10 @@ struct DocumentPickerView: View {
     private func open(_ picker: DocumentPickerModel) {
         guard let path = picker.exactPath.isEmpty ? picker.state.selection : picker.exactPath else { return }
         Task { await model.openDocument(path:path,viewID:picker.viewID) }
+    }
+    private func move(_ picker: DocumentPickerModel, _ delta: Int, entries: [DocumentEntry]) {
+        guard !entries.isEmpty else { picker.state.selection = nil; return }
+        let current = entries.firstIndex(where: { $0.path == picker.state.selection }) ?? 0
+        picker.state.selection = entries[min(entries.count-1,max(0,current+delta))].path
     }
 }

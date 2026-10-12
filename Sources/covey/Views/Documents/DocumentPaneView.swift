@@ -83,6 +83,7 @@ struct DocumentPaneView: View {
             } else { presentation = nil }
         }
         .onChange(of:model.focus) { _,focus in if focus == .documents, !findFocused { command = .init(action:.focus) } }
+        .onChange(of:model.showDashboardSettings) { _,shown in if !shown, model.focus == .documents, model.modal == nil { command = .init(action:.focus) } }
         .onChange(of:model.documentFindRequest) { _,_ in if model.activeViewID == viewID { showingFind = true; findFocused = true } }
     }
     @ViewBuilder private var content: some View {

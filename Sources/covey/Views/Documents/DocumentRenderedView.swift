@@ -136,8 +136,7 @@ struct DocumentRenderedView: NSViewRepresentable {
                     guard type?.conforms(to:.image) == true else { throw DocumentAccessError.unsupportedLink }
                     mime = type?.preferredMIMEType ?? "application/octet-stream"
                     data = try await Task.detached {
-                        let fd = Darwin.open(image.path,O_RDONLY | O_NONBLOCK | O_NOFOLLOW)
-                        guard fd >= 0 else { throw DocumentAccessError.unavailable }
+                        let fd = try DocumentLinkResolver.openRegularFile(path:relative,context:capturedContext)
                         defer { Darwin.close(fd) }
                         var info = stat()
                         guard fstat(fd,&info) == 0, info.st_mode & S_IFMT == S_IFREG, info.st_size <= DocumentFileLoader.maxPreviewBytes else { throw DocumentAccessError.notRegularFile }

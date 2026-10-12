@@ -1,5 +1,6 @@
 import Foundation
 import CoveyKit
+import Darwin
 
 enum DocumentAccessError: LocalizedError {
     case outsideProject, unsupportedLink, notRegularFile, unavailable
@@ -14,6 +15,28 @@ enum DocumentAccessError: LocalizedError {
 }
 enum DocumentLinkTarget: Equatable { case local(path:String,fragment:String?), web(URL) }
 enum DocumentLinkResolver {
+    /// Resolve internal symlinks first, then open from the project descriptor.
+    /// Refusing symlinks during the descriptor walk prevents a directory swap
+    /// between validation and reading from escaping the project.
+    static func openRegularFile(path: String, context: DocumentContext) throws -> Int32 {
+        let url = try fileURL(path:path,context:context)
+        let relative = try relativePath(url:url,context:context)
+        let parts = relative.split(separator:"/").map(String.init)
+        var directory = Darwin.open(context.root,O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard directory >= 0 else { throw DocumentAccessError.unavailable }
+        defer { Darwin.close(directory) }
+        for part in parts.dropLast() {
+            let next = Darwin.openat(directory,part,O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            guard next >= 0 else { throw DocumentAccessError.unavailable }
+            Darwin.close(directory); directory = next
+        }
+        guard let name = parts.last else { throw DocumentAccessError.notRegularFile }
+        let fd = Darwin.openat(directory,name,O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
+        guard fd >= 0 else { throw DocumentAccessError.unavailable }
+        var info = stat()
+        guard fstat(fd,&info) == 0, info.st_mode & S_IFMT == S_IFREG else { Darwin.close(fd); throw DocumentAccessError.notRegularFile }
+        return fd
+    }
     private static func canonicalURL(_ url: URL) -> URL {
         let normalized = url.standardizedFileURL
         if FileManager.default.fileExists(atPath: normalized.path) {

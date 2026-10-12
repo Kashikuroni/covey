@@ -92,9 +92,6 @@ enum CommandCatalog {
     }
 
     static let all: [CommandDescriptor] = [
-        descriptor(.openProjectDocument,"Open Project Document",.view,["document","markdown","spec","plan","документ"]),
-        descriptor(.closeDocumentView,"Close Document View",.view,["close document","закрыть документ"]),
-        descriptor(.focusDocuments,"Focus Documents",.view,["focus document","фокус документ"]),
         descriptor(.newSession, "New Session", .session,
                    ["new", "create", "новая сессия", "создать сессию"],
                    .init(key: "n", modifiers: command, display: "⌘N")),
@@ -182,6 +179,9 @@ enum CommandCatalog {
                     "открыть терминал под агентом"],
                    .init(key: "t", modifiers: commandShift, display: "⌘⇧T")),
 
+        descriptor(.openProjectDocument,"Open Project Document",.view,["document","markdown","spec","plan","документ"]),
+        descriptor(.closeDocumentView,"Close Document View",.view,["close document","закрыть документ"]),
+        descriptor(.focusDocuments,"Focus Documents",.view,["focus document","фокус документ"]),
         descriptor(.toggleReview, "Review", .view,
                    ["review", "code review", "diff review", "toggle review",
                     "ревью", "просмотр изменений", "режим ревью"],

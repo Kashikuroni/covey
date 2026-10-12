@@ -300,8 +300,8 @@ final class SettingsApplyTests: XCTestCase {
         let model = try makeSettingsModel(daemon, store: store)
         await model.start()
         model.openSettings()
-        XCTAssertEqual(model.modal, .settings)
-        XCTAssertEqual(model.modal?.id, "settings")
+        XCTAssertNil(model.modal)
+        XCTAssertTrue(model.showDashboardSettings)
         model.modal = .recent
         model.openSettings()
         XCTAssertEqual(model.modal, .recent)

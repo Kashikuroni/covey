@@ -75,7 +75,7 @@ struct ContentView: View {
                                                tk: Tokens(Theme(raw: model.themeRaw))) {
                             model.showDashboardSettings = false
                         }
-                        .frame(width: geo.size.width * 0.4)
+                        .frame(width:min(max(0,geo.size.width-Tokens.edge*2),max(420,geo.size.width*0.4)))
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                     }
                     .animation(.easeInOut(duration: 0.18), value: model.showDashboardSettings)
@@ -85,7 +85,7 @@ struct ContentView: View {
         .sheet(item: $model.modal, onDismiss: { model.modalDidDismiss() }) { modal in
             Group {
                 switch modal {
-                case .settings: SettingsSheet(model: model)
+                case .settings: Color.clear.task { model.modal = nil; model.openSettings() }
                 case .documentPicker: DocumentPickerView(model:model)
                 case .newSession: NewSessionSheet(model: model)
                 case .recent: RecentSheet(model: model)
@@ -144,6 +144,7 @@ struct ContentView: View {
                 palettePreviousResponder = nil
                 DispatchQueue.main.async {
                     if model.windowMode == .sessions,
+                       !model.showDashboardSettings,
                        shouldRestoreCommandPaletteResponder(inputMode: model.inputMode),
                        model.modal == nil,
                        let window = NSApp.keyWindow,
@@ -169,6 +170,10 @@ struct ContentView: View {
     /// the sessions' otherwise.
     private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
         guard windowScope.contains(event.window) else { return event }
+        if model.showDashboardSettings {
+            if isCommandW(event) { model.showDashboardSettings = false; return nil }
+            return event
+        }
         if model.windowMode == .review, let review = model.review {
             return handleReviewKey(event, review: review)
         }

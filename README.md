@@ -2,7 +2,7 @@
 
 **Covey** is a native macOS control center for running and supervising multiple AI coding agents in parallel. Each agent lives in its own long-running PTY, optionally in a dedicated Git worktree, while one SwiftUI application exposes the terminals, session state, repository context, GitHub issues, usage limits, and agent traces.
 
-Covey is a from-scratch Swift counterpart to the Rust `agents_multiplexer` project (`amux-desktop` + `amux-core`). It does not use tmux, Electron, or a WebView: the application is AppKit/SwiftUI, terminal emulation is provided by SwiftTerm, and a local daemon owns the child processes directly.
+Covey is a from-scratch Swift counterpart to the Rust `agents_multiplexer` project (`amux-desktop` + `amux-core`). The application is AppKit/SwiftUI, terminal emulation is provided by SwiftTerm, and a local daemon owns the child processes directly. A sandboxed WKWebView renders read-only project documents with bundled offline Markdown and syntax-highlighting assets.
 
 ## Status and requirements
 
@@ -25,6 +25,7 @@ Other CLI agents can be added as presets or entered as a custom command. Covey l
 - **Agent and repository signals** — running/waiting/idle inference, the last observed Claude/Codex model, current branch, and added/removed line counts.
 - **Git worktrees** — open existing branches or create new branches in linked worktrees; remove worktrees, delete safe branches, promote a worktree to the repository root, and clean up merged branches.
 - **Terminal splits** — add a vertical or horizontal companion shell to the selected agent session and move keyboard focus between panes.
+- **Project documents** — open Markdown specifications and plans beside the agent with an outline, local search, history, source view, and live file refresh. Other UTF-8 files have a plain-text preview; binary files show metadata.
 - **Agent traces** — normalize Claude Code transcripts and Codex rollouts into one event stream with turns, tool calls/results, edits, token usage, model/effort metadata, and nested-agent filtering. Normalized traces are retained locally for seven days.
 - **GitHub Issues** — browse, search, create, edit, close, reopen, and delete issues through `gh`; issue drafts are persisted per project, and issues can seed session names and branches.
 - **Provider profiles** — Claude Code can use the normal Anthropic login or Claude-compatible providers. Anthropic is built in; additional profiles can be defined in `~/.covey/config.json`, with secrets stored in Keychain.
@@ -33,6 +34,55 @@ Other CLI agents can be added as presets or entered as a custom command. Covey l
 - **Persistent workspace** — theme, panel visibility and sizes, project/session order, recent sessions, provider toggles, issue bindings, and drafts are stored in `~/.covey/state.json`.
 
 ## Architecture
+
+### Reading project documents
+
+Use **Command-P → Open Project Document**. The picker starts with Markdown files;
+turn off **Markdown only** to browse other project files. Search matches relative
+paths, recent documents appear first, and arrow keys select a file. An exact path
+can open a file excluded from the picker.
+
+The document pane stays bound to the originating session's actual working tree.
+Changing the selected agent does not redirect an existing pane to another root.
+Local links and images stay inside that project; HTTP/HTTPS links open in the
+browser. Documents are read only, refresh after filesystem changes, and restore
+the reading position. Text previews are limited to 4 MB. Markdown supports
+headings, tables, nested lists, task lists, fenced code, and reference links.
+Raw HTML and project scripts are not executed.
+
+With Documents focused, **Command-F** searches the document, **Command-W** closes
+the pane, **Command-C** copies the native selection, and **Control-H/L** moves
+between workspace zones. Opening and closing documents preserves agent PTYs.
+
+The gear panel, Covey → Settings, Command-comma and the Settings palette command
+open the same settings. Switches apply immediately; document custom rules use
+Apply rules and Revert.
+
+**Settings → Documents** manages independent picker rules; `.gitignore`
+never limits document access. Global rules can be overridden per project, shared
+by its worktrees. Automatic presets exclude VCS internals, Rust `target`, Node
+dependency/cache folders, Python environments/caches, and Next/Nuxt output only
+when those frameworks are detected. Swift/Xcode projects exclude `.build`,
+`.swiftpm`, `DerivedData`, `build`, `xcuserdata`, `*.xcuserstate`, and
+`*.xcuserdatad`, preserving project/workspace configuration. Settings shows
+each preset's patterns and effective status, plus up to 200 actual excluded
+paths with the rule and scope responsible. Excluded folders stand for all
+their contents, which are not scanned or counted. Other build/report folders such as `dist`, `out`,
+`coverage`, and `storybook-static` are optional and initially visible. `docs`,
+`specs`, `plans`, `.claude`, `.codex`, and `.github` remain visible by default.
+
+Custom rules use one glob per line: `*`, `**`, `?`, character classes, backslash
+escaping, `#` comments, leading `/` for the root, trailing `/` for directories,
+and `!` to include again. The last matching rule wins; an excluded parent must
+be included before a child can be included. Invalid rules block Apply. Reset
+presets preserves custom rules, while Inherit clears project overrides. Changes
+apply immediately for switches and through Apply rules for custom text;
+Revert or closing settings discards unapplied text. Rules
+affect browsing/search only: exact paths, local links, and open-file refresh still
+work. Workspace state stores paths, position, pane width, and up to 30 recent
+paths per working root, without storing document content.
+
+### Client and daemon
 
 Covey uses a local client/server design:
 

@@ -1,8 +1,38 @@
 import XCTest
 import CoveyKit
+import Darwin
 @testable import covey
 
 final class ProjectDocumentCatalogTests: XCTestCase {
+    func testSpecialAndOutsideManifestFilesAreNotRead() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+        defer { try? FileManager.default.removeItem(at:root) }
+        let outside = root.appendingPathComponent("outside.json")
+        try Data("{\"dependencies\":{\"next\":\"1\"}}".utf8).write(to:outside)
+        let project = root.appendingPathComponent("project")
+        try FileManager.default.createDirectory(at:project,withIntermediateDirectories:true)
+        try FileManager.default.createSymbolicLink(at:project.appendingPathComponent("package.json"),withDestinationURL:outside)
+        let context = DocumentContext(sourceSession:"s",root:project.path,projectKey:project.path)
+        let snapshot = try await ProjectDocumentCatalog().scan(context:context,configuration:.init())
+        XCTAssertFalse(snapshot.detected.contains(.next))
+        try FileManager.default.removeItem(at:project.appendingPathComponent("package.json"))
+        XCTAssertEqual(mkfifo(project.appendingPathComponent("package.json").path,0o600),0)
+        let safe = try await ProjectDocumentCatalog().scan(context:context,configuration:.init())
+        XCTAssertFalse(safe.detected.contains(.next))
+    }
+    func testDependencyManifestsDoNotEnableProjectFrameworks() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:root.appendingPathComponent("node_modules/vendor"),withIntermediateDirectories:true)
+        defer { try? FileManager.default.removeItem(at:root) }
+        try Data("{\"dependencies\":{\"react\":\"1\"}}".utf8).write(to:root.appendingPathComponent("package.json"))
+        try Data("{\"dependencies\":{\"next\":\"1\"}}".utf8).write(to:root.appendingPathComponent("node_modules/vendor/package.json"))
+        let context = DocumentContext(sourceSession:"s",root:root.path,projectKey:root.path)
+        let result = try await ProjectDocumentCatalog().scan(context:context,configuration:.init())
+        XCTAssertTrue(result.detected.contains(.react))
+        XCTAssertFalse(result.detected.contains(.next),"Excluded dependency trees must not influence project presets")
+        XCTAssertFalse(result.entries.contains(where: { $0.path.hasPrefix("node_modules/") }))
+    }
     func testIndependentCatalogAndStableMonorepoPresets() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)

@@ -68,6 +68,7 @@ struct TerminalPaneView: View {
                 if let documents, let id = model.activeViewID, let zone = model.activeView?.documents {
                     if let reader = model.documentReaders[id] {
                         DocumentPaneView(reader:reader,zone:zone,model:model,viewID:id) { model.closeDocuments(viewID:id) }
+                            .id(id)
                             .placed(in:documents.documents)
                     }
                     Rectangle().fill(Color.clear).contentShape(Rectangle()).placed(in:documents.divider)

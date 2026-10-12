@@ -82,6 +82,10 @@ extension AppModel {
         guard let id = viewOfSession[old] else { return }
         mutateForView(id, persist: false) { $0.renameLeaf(old, to: new) }
         if documentReaders[id]?.context.sourceSession == old { documentReaders[id]?.context.sourceSession = new }
+        for otherID in views.keys where views[otherID]?.documents?.context.sourceSession == old {
+            mutateForView(otherID,persist:false) { $0.documents?.context.sourceSession = new }
+            documentReaders[otherID]?.context.sourceSession = new
+        }
         viewOfSession[old] = nil
         viewOfSession[new] = id
     }

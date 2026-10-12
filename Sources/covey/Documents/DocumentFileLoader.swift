@@ -15,9 +15,7 @@ struct DocumentFileLoader: DocumentFileLoading {
     static func isMarkdown(_ path: String) -> Bool { ["md","markdown"].contains((path as NSString).pathExtension.lowercased()) }
     func load(path: String, context: DocumentContext) async throws -> DocumentFileSnapshot {
         let worker = Task.detached { () throws -> DocumentFileSnapshot in
-            let url = try DocumentLinkResolver.fileURL(path:path,context:context)
-            let fd = Darwin.open(url.path,O_RDONLY | O_NONBLOCK | O_NOFOLLOW)
-            guard fd >= 0 else { throw DocumentAccessError.unavailable }
+            let fd = try DocumentLinkResolver.openRegularFile(path:path,context:context)
             defer { Darwin.close(fd) }
             var info = stat()
             guard fstat(fd,&info) == 0, info.st_mode & S_IFMT == S_IFREG else { throw DocumentAccessError.notRegularFile }

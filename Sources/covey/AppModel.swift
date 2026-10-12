@@ -113,6 +113,12 @@ public final class AppModel {
     /// провайдеры, ключи — единое место настроек.
     public var showDashboardSettings = false {
         didSet {
+            if !showDashboardSettings, oldValue, focus == .terminal {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, !self.showDashboardSettings, self.modal == nil, self.focus == .terminal else { return }
+                    self.sendTerminalCommand(.focus)
+                }
+            }
             guard showDashboardSettings, focus == .terminal else { return }
             sendTerminalCommand(.blur)
         }
@@ -515,6 +521,7 @@ public final class AppModel {
         guard let name else { await clearSelection(); return }
         guard name != selected else { return }
         selected = name
+        if focus == .documents, activeView?.documents == nil { setFocus(.sessions) }
         selectedProjectRoot = nil
         focusedPane = name
         lastFocusedAgent = name
@@ -1043,6 +1050,8 @@ public final class AppModel {
         }
     }
     public func setVimMode(_ on: Bool) { vimMode = on; persist() }
+    func setLinksOnFocus(_ on: Bool) { reviewLinks.linksOnFocus = on; persist() }
+    func setUsagePlacement(_ value: UsagePlacement) { usagePlacement = value; persist() }
 
     var settingsValues: SettingsValues {
         SettingsValues(theme: Theme(raw: themeRaw),
@@ -1058,7 +1067,7 @@ public final class AppModel {
 
     func openSettings() {
         guard modal == nil else { return }
-        modal = .settings
+        showDashboardSettings = true
     }
 
     /// Stores (or clears) a provider key and verifies the final Keychain state
@@ -1187,7 +1196,7 @@ public final class AppModel {
     }
 
     func restoreCommandPaletteTerminalFocus() {
-        guard modal == nil, focus == .terminal else { return }
+        guard modal == nil, !showDashboardSettings, focus == .terminal else { return }
         sendTerminalCommand(.focus)
     }
 
