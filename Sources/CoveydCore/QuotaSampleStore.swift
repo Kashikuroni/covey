@@ -359,6 +359,18 @@ public final class QuotaSampleStore {
             .map { GLMSeriesPoint(t: $0.key, used: $0.value) }
     }
 
+    /// Живые метки часов (спека §3.2): час без записи получает 0 — «наблюдали,
+    /// расхода не было». Отличает простой от выключенного демона. Реальная
+    /// точка из вёдер приедет позже и затрёт метку штатным upsertHourTotals.
+    public func markAliveHours(_ hours: [Int64], now: Date) {
+        var byHour = Dictionary(uniqueKeysWithValues: hourTotals.map { ($0.t, $0.used) })
+        for h in hours where byHour[h] == nil { byHour[h] = 0 }
+        let cutoff = Int64(now.addingTimeInterval(-90 * 86_400).timeIntervalSince1970 * 1000)
+        file.hourTotals = byHour.filter { $0.key >= cutoff }
+            .sorted { $0.key < $1.key }
+            .map { GLMSeriesPoint(t: $0.key, used: $0.value) }
+    }
+
     /// Час × модель × компоненты (§spend): свежий снапшот часа перезаписывает,
     /// история — 8 дней (вёдра живут столько же).
     public var hourUsage: [GLMHourUsage] { file.hourUsage ?? [] }

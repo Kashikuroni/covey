@@ -140,6 +140,9 @@ public actor ForecastAnalyticsMonitor {
         store.upsertModelDays(aggregator.perDay(now: now, days: 8), now: now)
         store.upsertSessions(sessionCostRecords(sessions: sessions), now: now)
         store.upsertHourTotals(aggregator.hourTotals(now: now), now: now)
+        // Живая метка текущего часа: «наблюдали, расхода не было» (спека §3.2).
+        let nowMs = Int64(now.timeIntervalSince1970 * 1000)
+        store.markAliveHours([nowMs - nowMs % 3_600_000], now: now)
         store.upsertHourUsage(aggregator.perHour(now: now, days: 8), now: now)
         // Контекст Codex-сессий: две последние точки курсора → lastContext
         // (интерпретация та же, что у claude-сканера).
