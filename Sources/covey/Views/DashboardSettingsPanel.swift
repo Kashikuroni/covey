@@ -21,6 +21,7 @@ struct DashboardSettingsPanel: View {
     @State private var showGLMKeySheet = false
     @State private var editingProfile: ProviderProfile?
     @State private var profileKeyDraft = ""
+    @State private var documentEditor: DocumentExclusionEditor?
 
     private var active: [ModelRecord] {
         settings.records.filter { !$0.archived }
@@ -41,10 +42,12 @@ struct DashboardSettingsPanel: View {
             Divider().overlay(tk.bd3)
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
+                    viewSection
+                    reviewSection
+                    documentsSection
                     providersSection
                     apiKeysSection
                     modelsSection
-                    viewSection
                 }
                 .padding(16)
                 .padding(.bottom, 10)
@@ -65,6 +68,14 @@ struct DashboardSettingsPanel: View {
         .onAppear {
             Task { await model.refreshGLMAPIKeyStatus() }
             Task { await model.refreshProviderKeyStatuses(credentialProfiles) }
+        }
+        .task(id:model.activeView?.documents?.context.root ?? model.focusedAgentPane) {
+            let context: DocumentContext?
+            if let captured = model.activeView?.documents?.context { context = captured }
+            else if let session = model.sessions.first(where: { $0.name == model.focusedAgentPane }) { context = await DocumentRootResolver.resolve(session:session).context }
+            else { context = nil }
+            guard !Task.isCancelled else { return }
+            documentEditor = .init(settings:model.documentExclusionSettings,context:context)
         }
     }
 
@@ -121,6 +132,11 @@ struct DashboardSettingsPanel: View {
         VStack(alignment: .leading, spacing: 6) {
             sectionTitle("Providers", hint: "limits monitoring")
             sectionCard {
+                Picker("Usage position",selection:Binding(get:{ model.usagePlacement },set:{ model.setUsagePlacement($0) })) {
+                    Text("Left").tag(UsagePlacement.left)
+                    Text("Center").tag(UsagePlacement.center)
+                    Text("Right").tag(UsagePlacement.right)
+                }.controlSize(.small)
                 providerToggle("Claude", enabled: model.claudeUsageEnabled,
                                toggle: model.setClaudeUsageEnabled, divider: true)
                 providerToggle("Codex", enabled: model.codexUsageEnabled,
@@ -579,6 +595,7 @@ struct DashboardSettingsPanel: View {
         VStack(alignment: .leading, spacing: 6) {
             sectionTitle("View", hint: "panels · theme")
             sectionCard {
+                Toggle("Vim mode",isOn:Binding(get:{ model.vimMode },set:{ model.setVimMode($0) })).toggleStyle(.switch).controlSize(.mini)
                 performToggle("Sessions panel", command: .toggleSessionsPanel,
                               isOn: model.showSessions, divider: true)
                 performToggle("Top bar", command: .toggleTopBar,
@@ -612,6 +629,25 @@ struct DashboardSettingsPanel: View {
                 .overlay(Capsule().stroke(tk.bd2))
         }
         .buttonStyle(.plain)
+    }
+
+    private var reviewSection: some View {
+        VStack(alignment:.leading,spacing:6) {
+            sectionTitle("Review",hint:"navigation")
+            sectionCard {
+                Toggle("Links on focus",isOn:Binding(get:{ model.reviewLinks.linksOnFocus },set:{ model.setLinksOnFocus($0) }))
+                    .toggleStyle(.switch).controlSize(.mini)
+            }
+        }
+    }
+    private var documentsSection: some View {
+        VStack(alignment:.leading,spacing:6) {
+            sectionTitle("Documents",hint:"file picker exclusions")
+            sectionCard {
+                if let documentEditor { DocumentExclusionsSettingsView(editor:documentEditor,tk:tk) }
+                else { ProgressView("Resolving project…").controlSize(.small) }
+            }
+        }
     }
 
     private func performToggle(_ name: String, command: AppCommand, isOn: Bool,

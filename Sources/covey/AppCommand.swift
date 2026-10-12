@@ -16,6 +16,7 @@ enum AppCommand: String, CaseIterable, Hashable {
     case showProviders, toggleForecast, toggleForecastSource, toggleProjects, focusSessionList, focusAgent, focusIssues, focusTasks
     case focusTerminalSplit, focusTrace, showKeyboardHelp
     case addProject, removeProject, renameProject, settings, searchLogs
+    case openProjectDocument, closeDocumentView, focusDocuments
 }
 
 extension AppCommand {
@@ -178,6 +179,9 @@ enum CommandCatalog {
                     "открыть терминал под агентом"],
                    .init(key: "t", modifiers: commandShift, display: "⌘⇧T")),
 
+        descriptor(.openProjectDocument,"Open Project Document",.view,["document","markdown","spec","plan","документ"]),
+        descriptor(.closeDocumentView,"Close Document View",.view,["close document","закрыть документ"]),
+        descriptor(.focusDocuments,"Focus Documents",.view,["focus document","фокус документ"]),
         descriptor(.toggleReview, "Review", .view,
                    ["review", "code review", "diff review", "toggle review",
                     "ревью", "просмотр изменений", "режим ревью"],

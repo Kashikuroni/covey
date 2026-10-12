@@ -1,0 +1,35 @@
+:root { color-scheme:dark; --bg:#181c26; --text:#cccac2; --muted:#adb1ba; --accent:#ffcc66; --line:#454d5c; --code:#242936; --select:#665537; }
+:root.light { color-scheme:light; --bg:#ebEEF0; --text:#5c6166; --muted:#656b73; --accent:#9b5900; --line:#a8afb8; --code:#fcfcfc; --select:#f2d39d; }
+* { box-sizing:border-box; }
+html { background:var(--bg); color:var(--text); font:14px/1.65 -apple-system,BlinkMacSystemFont,sans-serif; }
+body { margin:0; padding:24px; }
+#document { max-width:72ch; margin:auto; overflow-wrap:anywhere; outline:none; }
+h1,h2,h3,h4,h5,h6 { line-height:1.25; margin:1.8em 0 .7em; scroll-margin-top:24px; }
+h1 { font-size:1.9em; } h2 { font-size:1.5em; } h3 { font-size:1.2em; }
+p,ul,ol,blockquote,pre,table { margin:0 0 1em; }
+ul,ol { padding-left:1.6em; } li>p { margin-bottom:.4em; }
+a { color:var(--accent); text-underline-offset:3px; }
+a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+code { font: .92em/1.6 ui-monospace,SFMono-Regular,Menlo,monospace; background:var(--code); padding:.15em .3em; border-radius:3px; }
+pre { overflow:auto; padding:14px; background:var(--code); border-radius:6px; overflow-wrap:normal; }
+pre code { padding:0; background:none; }
+pre.source { white-space:pre; font-size:13px; min-width:100%; }
+table { display:block; overflow:auto; max-width:100%; border-collapse:collapse; }
+th,td { padding:7px 12px; border:1px solid var(--line); text-align:left; white-space:nowrap; }
+th { font-weight:600; background:var(--code); }
+blockquote { margin-left:0; padding-left:16px; border-left:1px solid var(--line); color:var(--muted); }
+hr { border:0; border-top:1px solid var(--line); margin:24px 0; }
+img { max-width:100%; height:auto; }
+input[type=checkbox] { margin-right:.35em; accent-color:var(--accent); }
+::selection { background:var(--select); color:var(--text); }
+::highlight(document-find) { background:var(--select); color:var(--text); }
+::highlight(document-find-current) { background:var(--accent); color:var(--bg); }
+.token.comment,.token.prolog { color:var(--muted); }
+.token.keyword,.token.operator { color:#f59a67; }
+.token.string,.token.attr-value { color:#b8cc87; }
+.token.function,.token.class-name { color:#ffcd77; }
+.token.number,.token.boolean { color:#d4bfff; }
+.light .token.keyword,.light .token.operator { color:#a5481c; }
+.light .token.string,.light .token.attr-value { color:#476d14; }
+.light .token.function,.light .token.class-name { color:#935200; }
+.light .token.number,.light .token.boolean { color:#7550a6; }

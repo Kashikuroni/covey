@@ -27,6 +27,7 @@ struct CommandContext: Equatable {
     var reviewOpen = false
     /// A review is alive, so Review can come back without a selected session.
     var hasActiveReview = false
+    var hasDocumentZone = false
 }
 
 enum CommandRules {
@@ -55,6 +56,10 @@ enum CommandRules {
         context: CommandContext
     ) -> CommandAvailability {
         switch command {
+        case .openProjectDocument:
+            return context.hasSelectedSession ? .enabled : .disabled(reason:"No session selected")
+        case .closeDocumentView, .focusDocuments:
+            return context.hasDocumentZone ? .enabled : .disabled(reason:"No document view")
         case .newSession, .recentSessions, .filterSessions,
              .toggleSessionsPanel, .toggleInspector, .toggleAgentTrace,
              .toggleStatusBar, .toggleTopBar, .toggleTheme,

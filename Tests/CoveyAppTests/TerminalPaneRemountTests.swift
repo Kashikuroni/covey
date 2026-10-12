@@ -11,6 +11,44 @@ import CoveyKit
 /// the agent pane keeps one structural position for every shape of the View.
 @MainActor
 final class TerminalPaneRemountTests: XCTestCase {
+    func testDocumentOpenResizeAndCloseKeepAgentEmulatorAndInput() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+        defer { try? FileManager.default.removeItem(at:root) }
+        try Data("# Spec\n\nReading beside the agent.".utf8).write(to:root.appendingPathComponent("spec.md"))
+        let daemon = try TestDaemon(); defer { daemon.stop() }
+        let (model,client) = try makeModel(daemon); defer { client.close() }
+        await model.start()
+        _ = try daemon.registry.create(dir:root.path,agent:"claude",argv:["/bin/sh","-c","printf '\\033[?1049h\\033[>1u'; exec cat"],name:"agent")
+        _ = await eventually { model.sessions.contains { $0.name == "agent" } }
+        await model.select("agent")
+        let window = NSWindow(contentRect:NSRect(x:0,y:0,width:1000,height:600),styleMask:[.titled],backing:.buffered,defer:false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView:TerminalPaneView(model:model))
+        defer { window.close() }
+        let mounted = await eventually { window.contentView.flatMap { self.restoredAgentView(in:$0) } != nil }; XCTAssertTrue(mounted)
+        let original = try XCTUnwrap(window.contentView.flatMap { coordinator(named:"agent",in:$0) })
+        let viewID = try XCTUnwrap(model.activeViewID)
+        await model.openDocumentPicker()
+        await model.openDocument(path:"spec.md",viewID:viewID)
+        model.setDocumentWidth(420,viewID:viewID)
+        window.setContentSize(NSSize(width:520,height:600))
+        let stable = await eventually {
+            window.contentView.flatMap { self.coordinator(named:"agent",in:$0) }?.lease == original.lease && model.documentReaders[viewID]?.snapshot != nil
+        }; XCTAssertTrue(stable)
+        XCTAssertTrue(model.isTerminalViewLeaseCurrent(original.lease))
+        let term = try XCTUnwrap(window.contentView.flatMap { view(named:"agent",in:$0) })
+        XCTAssertTrue(term.getTerminal().isCurrentBufferAlternate)
+        XCTAssertEqual(term.getTerminal().keyboardEnhancementFlags.rawValue,1)
+        let findBefore = model.documentFindRequest
+        model.perform(.filterSessions)
+        XCTAssertNotEqual(model.documentFindRequest,findBefore)
+        XCTAssertFalse(model.filterActive)
+        model.perform(.closeDocumentView)
+        XCTAssertNil(model.views[viewID]?.documents)
+        let closed = await eventually { window.contentView.flatMap { self.coordinator(named:"agent",in:$0) }?.lease == original.lease }; XCTAssertTrue(closed)
+        assertShiftEnterIsKittyEncoded(by:term,in:window)
+    }
     private func terminalViews(in root: NSView) -> [CoveyTerminalView] {
         var found: [CoveyTerminalView] = []
         func walk(_ view: NSView) {

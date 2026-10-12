@@ -5,7 +5,7 @@ import CoveyKit
 
 /// ⌃1-5 zone targets (menu key equivalents — reachable from any focus).
 public enum FocusZone: Equatable {
-    case session, agent, issues, terminalSplit, trace
+    case session, agent, issues, terminalSplit, trace, documents
 }
 
 struct ProviderLaunch: Equatable {
@@ -46,9 +46,10 @@ public final class AppModel {
         case addProject
         case logSearch
         case splitPicker(PaneAxis)
+        case documentPicker
     }
 
-    public enum Focus { case sessions, terminal, inspector }
+    public enum Focus { case sessions, terminal, inspector, documents }
 
     public enum TerminalCommand: Equatable {
         case focus, blur, scrollPage(up: Bool), scrollToBottom
@@ -68,6 +69,15 @@ public final class AppModel {
     /// `selected` (`WorkspaceViewStore`).
     var views: [ViewID: WorkspaceView] = [:]
     var viewOfSession: [String: ViewID] = [:]
+    var documentReaders: [ViewID: DocumentReaderModel] = [:]
+    var documentPicker: DocumentPickerModel?
+    var documentRecents: [PersistedDocumentRecents] = []
+    var documentFindRequest = UUID()
+    @ObservationIgnored var documentCatalog: any DocumentCatalogScanning = ProjectDocumentCatalog()
+    @ObservationIgnored var resolveDocumentContext: (Session) async -> DocumentRootResolution = { await DocumentRootResolver.resolve(session:$0) }
+    @ObservationIgnored var documentScanTask: Task<Void, Never>?
+    @ObservationIgnored var documentCatalogToken: DocumentCatalogWatchToken?
+    @ObservationIgnored var documentPersistTasks: [ViewID: Task<Void, Never>] = [:]
     /// Test seam for deterministic view ids.
     @ObservationIgnored var newViewID: () -> ViewID = { UUID().uuidString }
     /// Последняя фокусная agent-панель: цель замены кликом по сайдбару, пока
@@ -103,6 +113,12 @@ public final class AppModel {
     /// провайдеры, ключи — единое место настроек.
     public var showDashboardSettings = false {
         didSet {
+            if !showDashboardSettings, oldValue, focus == .terminal {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, !self.showDashboardSettings, self.modal == nil, self.focus == .terminal else { return }
+                    self.sendTerminalCommand(.focus)
+                }
+            }
             guard showDashboardSettings, focus == .terminal else { return }
             sendTerminalCommand(.blur)
         }
@@ -111,6 +127,7 @@ public final class AppModel {
     let dashboardSettings = DashboardSettings()
     public var modal: Modal? {
         didSet {
+            if oldValue == .documentPicker, modal != .documentPicker { dismissDocumentPickerState() }
             // A sheet lives in its own key window; its dismissal reshuffles
             // the main window's first responder. If the terminal zone owns
             // the keyboard, hand it back — after the dismissal settles.
@@ -173,6 +190,7 @@ public final class AppModel {
     @ObservationIgnored var reviewModelFactory: ((ReviewOpening) -> ReviewModel)?
     /// The Review graph's link settings (persisted), shared with the live review.
     let reviewLinks = ReviewLinkSettings()
+    let documentExclusionSettings = DocumentExclusionSettings()
     public private(set) var connected = false
     public private(set) var themeRaw: String = "dark"
     public private(set) var splitPct: Int = 38
@@ -355,7 +373,7 @@ public final class AppModel {
     }
 
     /// Route a view command to the focused pane's terminal (fallback: selected).
-    private func sendTerminalCommand(_ cmd: TerminalCommand) {
+    func sendTerminalCommand(_ cmd: TerminalCommand) {
         let target = focusedPane ?? selected
         if let target { deliverTerminalCommand(cmd, to: target) }
     }
@@ -412,6 +430,10 @@ public final class AppModel {
             glmForecastConfig: CoveyConfig.load().glmForecast ?? GLMForecastConfigSection())
         issueBrowser.toast = { [weak self] msg in self?.showToast(msg) }
         reviewLinks.changed = { [weak self] in self?.persist() }
+        documentExclusionSettings.changed = { [weak self] keys in
+            self?.persist()
+            self?.documentExclusionsDidChange(keys)
+        }
         issueBrowser.fetchBranches = { [weak self] dir in
             await self?.gitInfo(dir).branches ?? []
         }
@@ -419,6 +441,8 @@ public final class AppModel {
 
     public func start() async {
         persisted = store.load()
+        documentExclusionSettings.apply(persisted.documentExclusions ?? .init(),notify:false)
+        documentRecents = persisted.documentRecents ?? []
         themeRaw = persisted.theme ?? "dark"
         splitPct = persisted.splitPct ?? 38
         usagePlacement = persisted.usagePlacement.flatMap(UsagePlacement.init(rawValue:)) ?? .right
@@ -509,11 +533,13 @@ public final class AppModel {
         guard let name else { await clearSelection(); return }
         guard name != selected else { return }
         selected = name
+        if focus == .documents, activeView?.documents == nil { setFocus(.sessions) }
         selectedProjectRoot = nil
         focusedPane = name
         lastFocusedAgent = name
         historyMode = false
         await syncPaneAttachments()
+        await syncDocumentActivity()
         if inspectorMode == .trace { await subscribeTrace() }
     }
 
@@ -523,6 +549,7 @@ public final class AppModel {
         attachedNames = []
         outputBuffers = [:]
         selected = nil
+        for reader in documentReaders.values { reader.stop() }
         focusedPane = nil
         lastFocusedAgent = nil
         historyMode = false
@@ -618,6 +645,7 @@ public final class AppModel {
     }
 
     public func focusPane(_ name: String) {
+        let previousView = activeViewID
         focusedPane = name
         if name == activeShell {
             // Инвариант: фокус на колонке не меняет selected.
@@ -629,6 +657,7 @@ public final class AppModel {
             setFocus(.terminal)
         }
         deliverTerminalCommand(.focus, to: name)
+        if previousView != activeViewID { Task { await syncDocumentActivity() } }
     }
 
     public func create(dir: String, agent: String) async {
@@ -1043,6 +1072,8 @@ public final class AppModel {
         }
     }
     public func setVimMode(_ on: Bool) { vimMode = on; persist() }
+    func setLinksOnFocus(_ on: Bool) { reviewLinks.linksOnFocus = on; persist() }
+    func setUsagePlacement(_ value: UsagePlacement) { usagePlacement = value; persist() }
 
     var settingsValues: SettingsValues {
         SettingsValues(theme: Theme(raw: themeRaw),
@@ -1052,12 +1083,13 @@ public final class AppModel {
                        claudeUsageEnabled: claudeUsageEnabled,
                        codexUsageEnabled: codexUsageEnabled,
                        glmUsageEnabled: glmUsageEnabled,
-                       linksOnFocus: reviewLinks.linksOnFocus)
+                       linksOnFocus: reviewLinks.linksOnFocus,
+                       documentExclusions: documentExclusionSettings.configuration)
     }
 
     func openSettings() {
         guard modal == nil else { return }
-        modal = .settings
+        showDashboardSettings = true
     }
 
     /// Stores (or clears) a provider key and verifies the final Keychain state
@@ -1186,7 +1218,7 @@ public final class AppModel {
     }
 
     func restoreCommandPaletteTerminalFocus() {
-        guard modal == nil, focus == .terminal else { return }
+        guard modal == nil, !showDashboardSettings, focus == .terminal else { return }
         sendTerminalCommand(.focus)
     }
 
@@ -1236,7 +1268,8 @@ public final class AppModel {
             canCloseFocusedPane: focusedPane == activeShell
                 || (visibleSplitTree?.contains(session: focusedPane ?? "") ?? false),
             reviewOpen: windowMode == .review,
-            hasActiveReview: review != nil)
+            hasActiveReview: review != nil,
+            hasDocumentZone: activeView?.documents != nil)
     }
 
     func perform(_ command: AppCommand) {
@@ -1245,6 +1278,9 @@ public final class AppModel {
         inputMode = .normal
 
         switch command {
+        case .openProjectDocument: Task { await openDocumentPicker() }
+        case .closeDocumentView: if let id = activeViewID { closeDocuments(viewID:id) }
+        case .focusDocuments: sendTerminalCommand(.blur); setFocus(.documents)
         case .newSession:
             newSessionPrefillDir = nil
             modal = .newSession
@@ -1254,7 +1290,8 @@ public final class AppModel {
         case .recentSessions:
             modal = .recent
         case .filterSessions:
-            filterActive = true
+            if focus == .documents { documentFindRequest = UUID() }
+            else { filterActive = true }
         case .selectPreviousSession:
             cycleSession(by: -1)
         case .selectNextSession:
@@ -1391,6 +1428,7 @@ public final class AppModel {
     }
 
     func applySettings(_ values: SettingsValues) {
+        guard DocumentExclusionDraft(configuration:values.documentExclusions,projectKey:nil).validate(detected:[]).isEmpty else { return }
         let old = settingsValues
         guard values != old else {
             modal = nil
@@ -1404,6 +1442,7 @@ public final class AppModel {
         showFooter = values.showFooter
         usagePlacement = values.usagePlacement
         reviewLinks.linksOnFocus = values.linksOnFocus
+        documentExclusionSettings.apply(values.documentExclusions)
         if values.claudeUsageEnabled != old.claudeUsageEnabled { setClaudeUsageEnabled(values.claudeUsageEnabled) }
         if values.codexUsageEnabled != old.codexUsageEnabled { setCodexUsageEnabled(values.codexUsageEnabled) }
         if values.glmUsageEnabled != old.glmUsageEnabled { setGlmUsageEnabled(values.glmUsageEnabled) }
@@ -1626,6 +1665,9 @@ public final class AppModel {
     /// of mutating anything (spec: no auto-show inspector, no auto-split).
     public func focusZone(_ zone: FocusZone) {
         switch zone {
+        case .documents:
+            guard activeView?.documents != nil else { return }
+            sendTerminalCommand(.blur); setFocus(.documents)
         case .session:
             sendTerminalCommand(.blur)
             setFocus(.sessions)
@@ -1671,6 +1713,9 @@ public final class AppModel {
         if let shell = activeShell {
             zones.append(("pane:\(shell)", { self.focusPane(shell) }))
         }
+        if activeView?.documents != nil {
+            zones.append(("documents", { self.sendTerminalCommand(.blur); self.setFocus(.documents) }))
+        }
         if showInspector {
             zones.append(("inspector", {
                 self.sendTerminalCommand(.blur)
@@ -1680,6 +1725,7 @@ public final class AppModel {
         }
         let currentID: String
         switch focus {
+        case .documents: currentID = "documents"
         case .sessions: currentID = "sessions"
         case .inspector: currentID = "inspector"
         case .terminal: currentID = "pane:\(focusedPane ?? selected ?? "")"
@@ -1738,6 +1784,7 @@ public final class AppModel {
     /// agent-панель сплита — вернуть сессию в свою отдельную View; единственная
     /// панель — no-op (спека «Разбор сплита»).
     func closeFocusedPane() {
+        if focus == .documents, let id = activeViewID { closeDocuments(viewID:id); return }
         if let shell = activeShell, focusedPane == shell {
             closeActiveTerminal()
             return
@@ -1989,6 +2036,8 @@ public final class AppModel {
         persisted.vimMode = vimMode
         persisted.showLinks = reviewLinks.showLinks
         persisted.linksOnFocus = reviewLinks.linksOnFocus
+        persisted.documentExclusions = documentExclusionSettings.configuration
+        persisted.documentRecents = documentRecents
         persisted.projectNames = projectNames
         persisted.projects = projects
         Self.pmSanitize(&persisted)

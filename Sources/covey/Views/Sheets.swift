@@ -6,6 +6,7 @@ extension AppModel.Modal: Identifiable {
     public var id: String {
         switch self {
         case .settings: return "settings"
+        case .documentPicker: return "document-picker"
         case .newSession: return "new"
         case .recent: return "recent"
         case .kill(let name): return "kill-\(name)"
