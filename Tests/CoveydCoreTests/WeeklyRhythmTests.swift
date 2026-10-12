@@ -76,4 +76,75 @@ final class WeeklyRhythmTests: XCTestCase {
         XCTAssertGreaterThan(ratio, 1.3)
         XCTAssertLessThan(ratio, 1.8)
     }
+
+    // MARK: - Симуляция горизонта (Task 3)
+
+    private let rate = 100.0
+    private let reset: Date = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "Asia/Almaty")!
+        return c.date(from: DateComponents(year: 2026, month: 10, day: 19, hour: 12))!
+    }()
+
+    private func simulate(rate: Double = 100.0, used: Double = 0, total: Double = 10_000,
+                          five: (remaining: Double, total: Double, resetAt: Date)? = nil,
+                          share: [Double]? = nil) -> WeeklyHorizon {
+        WeeklyRhythm.projectHorizon(from: now, to: reset, rate: rate,
+                                    share: share ?? [Double](repeating: 1, count: 168),
+                                    calendar: cal, used: used, total: total, five: five)
+    }
+
+    func testNoGateMatchesRateTimesHours() {
+        let hours = reset.timeIntervalSince(now) / 3600   // 168
+        let h = simulate()
+        XCTAssertEqual(h.burned, rate * hours, accuracy: 1)
+        XCTAssertEqual(h.trajectory.first?.used, 0)
+        XCTAssertEqual(h.trajectory.last?.t, Int64(reset.timeIntervalSince1970 * 1000))
+    }
+
+    func testShapeRedistributesBurn() {
+        var share = [Double](repeating: 0, count: 168)
+        share[(2 - 1) * 24 + 13] = 1   // весь расход во вторник 13:00
+        let h = simulate(share: share)
+        // Ровно один час из 168 сжигает всё: burned = rate × 1 (± часовой шаг).
+        XCTAssertEqual(h.burned, rate, accuracy: 1.5)
+    }
+
+    func testPlateauWhenFiveHoursExhausted() {
+        // Окно почти исчерпано: остатка хватает на полчаса ставок 100/ч.
+        let fiveReset = cal.date(from: DateComponents(year: 2026, month: 10, day: 12, hour: 18))!
+        let h = simulate(five: (remaining: 50, total: 500, resetAt: fiveReset))
+        let flats = zip(h.trajectory, h.trajectory.dropFirst())
+            .filter { $0.used == $1.used && $0.t != $1.t }
+        XCTAssertFalse(flats.isEmpty, "ожидается плато при исчерпанном 5h")
+        XCTAssertLessThan(h.burned, 100 * 168, "ворота обязаны срезать расход")
+    }
+
+    func testLiveOverflowPlatesFromNow() {
+        let fiveReset = cal.date(from: DateComponents(year: 2026, month: 10, day: 12, hour: 17))!
+        let h = simulate(five: (remaining: 0, total: 500, resetAt: fiveReset))
+        XCTAssertEqual(h.trajectory[1].used, 0, "пока 5h исчерпан — линия плоская сразу")
+    }
+
+    func testStaleFiveResetRefillsImmediately() {
+        let stale = now.addingTimeInterval(-3_600)
+        let h = simulate(five: (remaining: 0, total: 500, resetAt: stale))
+        XCTAssertGreaterThan(h.burned, 0, "протухший resetAt не запирает проекцию")
+    }
+
+    func testZeroRateYieldsFlatTrajectory() {
+        let h = simulate(rate: 0)
+        XCTAssertEqual(h.burned, 0)
+        XCTAssertTrue(h.trajectory.allSatisfy { $0.used == 0 })
+        XCTAssertNil(h.exhaustionAt)
+    }
+
+    func testExhaustionCrossesTotalAfterPlateau() {
+        // total − used = 300: без ворот кончилось бы через 3 часа, с воротами позже.
+        let fiveReset = cal.date(from: DateComponents(year: 2026, month: 10, day: 12, hour: 18))!
+        let gated = simulate(used: 0, total: 300,
+                             five: (remaining: 100, total: 500, resetAt: fiveReset))
+        let free = simulate(used: 0, total: 300)
+        XCTAssertLessThan(free.exhaustionAt!, gated.exhaustionAt!)
+    }
 }

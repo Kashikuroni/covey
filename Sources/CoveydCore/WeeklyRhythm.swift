@@ -90,3 +90,66 @@ public struct WeeklyRhythm: Equatable, Sendable {
         sampledAt = now
     }
 }
+
+/// Результат симуляции остатка недели: сжигание, траектория для карточки,
+/// момент исчерпания (спека §4).
+public struct WeeklyHorizon: Equatable, Sendable {
+    public var burned: Double
+    public var trajectory: [GLMSeriesPoint]
+    public var exhaustionAt: Int64?
+}
+
+extension WeeklyRhythm {
+    /// Почасовая симуляция (now, resetAt]: inc(h) = rate·share[h]; при
+    /// исчерпанном 5h-остатке — плато до ближайшего сброса, затем окно
+    /// заполняется `five.total` (окна идут подряд — приближение спеки §4).
+    /// Часовое разрешение: плато внутри часа округляется (спека §8, <1ч).
+    public static func projectHorizon(from now: Date, to resetAt: Date,
+                                      rate: Double, share: [Double],
+                                      calendar: Calendar,
+                                      used: Double, total: Double,
+                                      five: (remaining: Double, total: Double, resetAt: Date)?) -> WeeklyHorizon {
+        func ms(_ d: Date) -> Int64 { Int64(d.timeIntervalSince1970 * 1000) }
+        var burned = 0.0
+        var points: [GLMSeriesPoint] = [GLMSeriesPoint(t: ms(now), used: used)]
+        var exhaustion: Int64?
+        func emit(_ at: Date) {
+            points.append(GLMSeriesPoint(t: ms(at), used: used + burned))
+            if exhaustion == nil, used + burned >= total { exhaustion = ms(at) }
+        }
+        var fiveRemain = five?.remaining ?? .infinity
+        let fiveTotal = five?.total ?? .infinity
+        var fiveReset = five?.resetAt ?? .distantFuture
+        let end = resetAt
+        guard rate >= 0, share.count == slotsPerWeek, end > now else {
+            return WeeklyHorizon(burned: 0, trajectory: points, exhaustionAt: nil)
+        }
+
+        var hour = calendar.dateInterval(of: .hour, for: now)!.start
+        if hour < now { hour = hour.addingTimeInterval(3600) }
+        while hour < end {
+            if fiveRemain <= 0 {
+                if fiveReset > hour {
+                    emit(min(fiveReset, end))             // плато
+                    if fiveReset >= end { break }
+                    hour = fiveReset                      // пауза съела часть горизонта
+                }
+                fiveRemain = fiveTotal                    // протухший reset — сразу refill
+                fiveReset = fiveReset.addingTimeInterval(5 * 3600)
+            }
+            let slot = Self.slot(of: hour, calendar: calendar)
+            let stepEnd = min(hour.addingTimeInterval(3600), end)
+            let frac = stepEnd.timeIntervalSince(max(hour, now)) / 3600
+            var inc = rate * share[slot] * max(0, frac)
+            if inc > fiveRemain { inc = max(0, fiveRemain) }
+            fiveRemain -= inc
+            burned += inc
+            emit(stepEnd)
+            hour = hour.addingTimeInterval(3600)
+        }
+        if exhaustion == nil, used + burned >= total, let last = points.last {
+            exhaustion = last.t
+        }
+        return WeeklyHorizon(burned: burned, trajectory: points, exhaustionAt: exhaustion)
+    }
+}
