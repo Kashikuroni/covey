@@ -674,23 +674,26 @@ struct ForecastModeView: View {
                         }
                         let projected = window.projected
                         let crosses = projected > total
-                        // Доля пути до пересечения — по времени от последней
-                        // точки факта (плоская ставка от неё до сброса).
-                        let splitT: Double = crosses
-                            ? Double(last.t) + (endT - Double(last.t))
-                                * (total - last.used) / max(1e-9, projected - last.used)
-                            : endT
-                        var head = Path()
-                        head.move(to: CGPoint(x: x(last.t), y: y(last.used)))
-                        head.addLine(to: CGPoint(x: x(Int64(splitT)), y: y(crosses ? total : projected)))
-                        context.stroke(head, with: .color(tk.t1.opacity(0.8)),
-                                       style: StrokeStyle(lineWidth: 2, dash: [5, 4]))
-                        if crosses {
-                            var tail = Path()
-                            tail.move(to: CGPoint(x: x(Int64(splitT)), y: y(total)))
-                            tail.addLine(to: CGPoint(x: x(Int64(endT)), y: y(projected)))
-                            context.stroke(tail, with: .color(tk.err),
+                        // Ритм-траектория §7d: рост по часам с долей share,
+                        // плато на исчерпанных 5h-окнах. nil → прежняя прямая.
+                        if let rhythmPath = ForecastWindow.clampPath(window.projectedPath,
+                                                                     resetAt: window.resetAt,
+                                                                     now: now, hours: hours),
+                           rhythmPath.count >= 2 {
+                            var line = Path()
+                            line.move(to: CGPoint(x: x(rhythmPath[0].t), y: y(rhythmPath[0].used)))
+                            for p in rhythmPath.dropFirst() {
+                                line.addLine(to: CGPoint(x: x(p.t), y: y(p.used)))
+                            }
+                            context.stroke(line, with: .color(tk.t1.opacity(0.8)),
                                            style: StrokeStyle(lineWidth: 2, dash: [5, 4]))
+                            if let crossing = rhythmPath.first(where: { $0.used > total }) {
+                                var tail = Path()
+                                tail.move(to: CGPoint(x: x(crossing.t), y: y(total)))
+                                tail.addLine(to: CGPoint(x: x(Int64(endT)), y: y(rhythmPath.last!.used)))
+                                context.stroke(tail, with: .color(tk.err),
+                                               style: StrokeStyle(lineWidth: 2, dash: [5, 4]))
+                            }
                             if let eta = window.exhaustionAt {
                                 let etaDate = Date(timeIntervalSince1970: Double(eta) / 1000)
                                 let tick = Path { p in
@@ -698,14 +701,47 @@ struct ForecastModeView: View {
                                     p.addLine(to: CGPoint(x: x(eta), y: y(total) + 4))
                                 }
                                 context.stroke(tick, with: .color(tk.err), lineWidth: 2)
-                                // У недели ETA уезжает в другие дни — показываем дату;
-                                // у 5h хватает времени.
                                 let etaText = hours >= 24
                                     ? ForecastText.dateTime.string(from: etaDate)
                                     : ForecastText.time.string(from: etaDate)
                                 label("exhausts \(etaText)",
                                       at: CGPoint(x: x(eta) - 3, y: y(total) - 9),
                                       anchor: .trailing, color: tk.err)
+                            }
+                        } else {
+                            // Доля пути до пересечения — по времени от последней
+                            // точки факта (плоская ставка от неё до сброса).
+                            let splitT: Double = crosses
+                                ? Double(last.t) + (endT - Double(last.t))
+                                    * (total - last.used) / max(1e-9, projected - last.used)
+                                : endT
+                            var head = Path()
+                            head.move(to: CGPoint(x: x(last.t), y: y(last.used)))
+                            head.addLine(to: CGPoint(x: x(Int64(splitT)), y: y(crosses ? total : projected)))
+                            context.stroke(head, with: .color(tk.t1.opacity(0.8)),
+                                           style: StrokeStyle(lineWidth: 2, dash: [5, 4]))
+                            if crosses {
+                                var tail = Path()
+                                tail.move(to: CGPoint(x: x(Int64(splitT)), y: y(total)))
+                                tail.addLine(to: CGPoint(x: x(Int64(endT)), y: y(projected)))
+                                context.stroke(tail, with: .color(tk.err),
+                                               style: StrokeStyle(lineWidth: 2, dash: [5, 4]))
+                                if let eta = window.exhaustionAt {
+                                    let etaDate = Date(timeIntervalSince1970: Double(eta) / 1000)
+                                    let tick = Path { p in
+                                        p.move(to: CGPoint(x: x(eta), y: y(total) - 4))
+                                        p.addLine(to: CGPoint(x: x(eta), y: y(total) + 4))
+                                    }
+                                    context.stroke(tick, with: .color(tk.err), lineWidth: 2)
+                                    // У недели ETA уезжает в другие дни — показываем дату;
+                                    // у 5h хватает времени.
+                                    let etaText = hours >= 24
+                                        ? ForecastText.dateTime.string(from: etaDate)
+                                        : ForecastText.time.string(from: etaDate)
+                                    label("exhausts \(etaText)",
+                                          at: CGPoint(x: x(eta) - 3, y: y(total) - 9),
+                                          anchor: .trailing, color: tk.err)
+                                }
                             }
                         }
                         // Reset marker on the time axis.

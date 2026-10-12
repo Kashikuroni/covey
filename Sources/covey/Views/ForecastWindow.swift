@@ -121,6 +121,17 @@ enum ForecastWindow {
         return series.filter { $0.t >= end - Int64(hours * 3600 * 1000) }
     }
 
+    /// Траектория ритма (спека §5), обрезанная в домен графика [end − hours, end].
+    /// nil/пусто → вызывающий рисует прежнюю прямую.
+    static func clampPath(_ path: [GLMSeriesPoint]?, resetAt: Int64?,
+                          now: Date, hours: Double) -> [GLMSeriesPoint]? {
+        guard var points = path, !points.isEmpty else { return nil }
+        let endMs = Double(max(resetAt ?? points.last?.t ?? 0, points.last?.t ?? 0))
+        let startMs = endMs - hours * 3_600_000
+        points.removeAll { Double($0.t) < startMs || Double($0.t) > endMs }
+        return points.isEmpty ? nil : points
+    }
+
     /// «980» / «12.3k» / «1.2M» — компактные токены в колонках.
     static func compactTokens(_ value: Double) -> String {
         switch abs(value) {

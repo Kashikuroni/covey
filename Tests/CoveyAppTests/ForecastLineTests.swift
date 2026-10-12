@@ -36,4 +36,18 @@ final class ForecastLineTests: XCTestCase {
         XCTAssertNil(ForecastText.glmWindowForecast("S 7d", forecast: forecast))
         XCTAssertNil(ForecastText.glmWindowForecast("5h", forecast: nil))
     }
+
+    /// Траектория ритма обрезается в домен графика; nil → пусто (старая
+    /// прямая ветка рендера, спека §5).
+    func testClampPathTrimsToDomain() throws {
+        let now = Date(timeIntervalSince1970: 1_792_000_000)
+        let reset = now + 7 * 3600
+        let path = [GLMSeriesPoint(t: Int64((now - 3600).timeIntervalSince1970 * 1000), used: 1),
+                    GLMSeriesPoint(t: Int64(now.timeIntervalSince1970 * 1000), used: 2),
+                    GLMSeriesPoint(t: Int64(reset.timeIntervalSince1970 * 1000), used: 9)]
+        let clamped = ForecastWindow.clampPath(path, resetAt: Int64(reset.timeIntervalSince1970 * 1000),
+                                               now: now, hours: 7.5)
+        XCTAssertEqual(clamped?.map(\.used), [2, 9])
+        XCTAssertNil(ForecastWindow.clampPath(nil, resetAt: nil, now: now, hours: 168))
+    }
 }
