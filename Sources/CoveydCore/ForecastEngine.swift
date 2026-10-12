@@ -370,7 +370,10 @@ extension ForecastEngine {
                     let main = horizon(rate.creditsPerHour)
                     fc.projected = max(w.used, w.used + main.burned)
                     fc.projectedPath = main.trajectory
-                    fc.exhaustionAt = main.exhaustionAt ?? fc.exhaustionAt
+                    // ETA — только пересечение total траекторией (спека §4);
+                    // плоский exhaustionAt (effectiveRate > 0 без пересечения)
+                    // сюда утекать не должен.
+                    fc.exhaustionAt = main.exhaustionAt
                     if let q = weeklyQuantiles(samples: week, gaps: store.gapRanges) {
                         fc.projectedP50 = w.used + horizon(q.p50).burned
                         fc.projectedP90 = w.used + horizon(q.p90).burned
@@ -385,11 +388,13 @@ extension ForecastEngine {
                                          flatCreditsPerHour: rate.creditsPerHour,
                                          marginPercent: config.marginPercent,
                                          underusePercent: 30)
-                    if effective > 0, fc.exhaustionAt == nil, fc.verdict == .overflow {
-                        fc.exhaustionAt = Int64(now.addingTimeInterval(
-                            w.remaining / effective * 3600).timeIntervalSince1970 * 1000)
-                    }
                     weeklyRhythmShares = rhythm!.share
+                } else if let band = weeklyBand(samples: week, gaps: store.gapRanges,
+                                                resetAt: resetDate, used: w.used, now: now) {
+                    // Fallback (спека §4): ритм невалиден/выключен — плоское
+                    // поведение целиком, включая полосу неопределённости.
+                    fc.projectedP50 = band.p50
+                    fc.projectedP90 = band.p90
                 }
                 out.weekly = fc
             }

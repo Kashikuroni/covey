@@ -87,6 +87,10 @@ final class WeeklyRhythmIntegrationTests: XCTestCase {
             config: GLMForecastConfig())
         XCTAssertNil(forecast.weekly?.projectedPath)
         XCTAssertNil(forecast.weeklyRhythm)
+        // Полоса живёт и без ритма (спека §4: fallback = плоское поведение,
+        // включая weeklyBand при ≥24 дельтах).
+        XCTAssertNotNil(forecast.weekly?.projectedP50, "полоса не должна исчезать при невалидном ритме")
+        XCTAssertNotNil(forecast.weekly?.projectedP90)
     }
 
     func testConfigFlagDisablesRhythm() {
@@ -117,6 +121,24 @@ final class WeeklyRhythmIntegrationTests: XCTestCase {
             store: store, factors: CalibrationFactors(), now: now,
             config: GLMForecastConfig()).forecast.weekly!.projected
         XCTAssertLessThan(gated, free)
+    }
+
+    /// Траектория не пересекает total → ETA нет: плоский exhaustionAt
+    /// (ставится при любом effectiveRate > 0) не должен утекать в ритм-ветку,
+    /// иначе UI рисует «exhausts» вопреки линии и вердикту (спека §4).
+    func testGatedTrajectoryWithoutCrossingHasNoExhaustion() {
+        let store = storeWithHistory()
+        storeWithSamples(store)
+        let big = window(total: 500_000, used: 300, remaining: 499_700,
+                         reset: cal.date(from: DateComponents(year: 2026, month: 10, day: 15, hour: 12))!)
+        let (forecast, _) = ForecastEngine.build(
+            fiveHours: window(total: 1_000_000, used: 0, remaining: 1_000_000,
+                              reset: now.addingTimeInterval(2 * 3600)),
+            weekly: big, aggregator: TokenAggregator(buckets: []),
+            store: store, factors: CalibrationFactors(), now: now,
+            config: GLMForecastConfig())
+        XCTAssertNotNil(forecast.weekly?.projectedPath)
+        XCTAssertNil(forecast.weekly?.exhaustionAt)
     }
 
     func testDecodesOldSnapshot() throws {
