@@ -30,12 +30,14 @@ public struct GLMWindowForecast: Codable, Equatable, Sendable {
     public init(verdict: GLMForecastVerdict, projected: Double, remaining: Double, total: Double,
                 resetAt: Int64?, exhaustionAt: Int64?, headroomPercent: Double,
                 rateCreditsPerHour: Double, agentMinutes: Double?,
-                projectedP50: Double? = nil, projectedP90: Double? = nil) {
+                projectedP50: Double? = nil, projectedP90: Double? = nil,
+                projectedPath: [GLMSeriesPoint]? = nil) {
         self.verdict = verdict; self.projected = projected; self.remaining = remaining
         self.total = total; self.resetAt = resetAt; self.exhaustionAt = exhaustionAt
         self.headroomPercent = headroomPercent
         self.rateCreditsPerHour = rateCreditsPerHour; self.agentMinutes = agentMinutes
         self.projectedP50 = projectedP50; self.projectedP90 = projectedP90
+        self.projectedPath = projectedPath
     }
     public var verdict: GLMForecastVerdict
     public var projected: Double          // кредиты к resetAt при текущем темпе
@@ -48,6 +50,8 @@ public struct GLMWindowForecast: Codable, Equatable, Sendable {
     public var agentMinutes: Double?      // общий запас в агент-минутах
     public var projectedP50: Double? = nil // полоса p50 недельной проекции (§7d)
     public var projectedP90: Double? = nil // полоса p90 недельной проекции (§7d)
+    /// Ритм-траектория с плато 5h-ворот (спека §5); nil — рисуется прямой пунктир.
+    public var projectedPath: [GLMSeriesPoint]? = nil
 }
 
 public struct GLMAgentForecast: Codable, Equatable, Sendable {
@@ -167,6 +171,7 @@ public struct GLMForecast: Codable, Equatable, Sendable {
     public var sessionCosts: [GLMSessionCostEntry]? // журнал стоимости сессий (этап 2)
     public var hourly: [GLMSeriesPoint]?  // токены по часам, 90 дней (этап 2)
     public var modelHourly: [GLMHourUsage]? // час × модель × компоненты (§spend, 8 дней)
+    public var weeklyRhythm: [Double]?    // 168 долей часа недели (спека §3); nil — ритма нет
 }
 
 /// Запись журнала стоимости для UI (этап 2): стор-рекорд + резолвнутое имя

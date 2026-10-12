@@ -196,6 +196,26 @@ extension ForecastEngine {
         return (used + q(0.5) * hours, used + q(0.9) * hours)
     }
 
+    /// Квантили p50/p90 ставок валидных дельт — вход полосы и ритм-симуляций (§7d).
+    static func weeklyQuantiles(samples: [QuotaSample], gaps: [Range<Double>])
+        -> (p50: Double, p90: Double)? {
+        let rates = validDeltas(samples, gaps: gaps).map(\.rate)
+        guard rates.count >= 24 else { return nil }
+        let sorted = rates.sorted()
+        let q = { (p: Double) in sorted[min(sorted.count - 1, Int(p * Double(sorted.count)))] }
+        return (q(0.5), q(0.9))
+    }
+
+    /// Вес «токен → кредиты» для профиля ритма: фактор режима часа, если
+    /// свежи оба фактора; иначе равномерный (форма в токенах) — спека §3.4.
+    static func factorWeighting(_ factors: CalibrationFactors, now: Date)
+        -> ((Date) -> Double)? {
+        guard isFresh(factors, peak: true, now: now),
+              isFresh(factors, peak: false, now: now),
+              let peak = factors.peak, let offPeak = factors.offPeak else { return nil }
+        return { PeakSchedule.isPeak(at: $0) ? peak : offPeak }
+    }
+
     /// Покрытие мониторинга (этап 1): доля времени окна без разрывов опроса —
     /// доверие к средним и индикатор «демона не было».
     static func dataCoverage(gaps: [Range<Double>], windowStart: Date, now: Date) -> Double? {
@@ -216,13 +236,27 @@ public struct GLMForecastConfig: Equatable, Sendable {
     public var includeExternal: Bool
     public var marginPercent: Double
     public var imminentMinutes: Double
-    public init(includeExternal: Bool = true, marginPercent: Double = 15, imminentMinutes: Double = 20) {
+    public var useWeeklyRhythm: Bool
+    public init(includeExternal: Bool = true, marginPercent: Double = 15,
+                imminentMinutes: Double = 20, useWeeklyRhythm: Bool = true) {
         self.includeExternal = includeExternal; self.marginPercent = marginPercent
         self.imminentMinutes = imminentMinutes
+        self.useWeeklyRhythm = useWeeklyRhythm
     }
 }
 
 extension ForecastEngine {
+    /// Пороги вердикта (спека §4): едины для плоской и ритм-проекций.
+    static func verdict(projected: Double, remaining: Double, total: Double,
+                        tokensPerHour: Double, flatCreditsPerHour: Double,
+                        marginPercent: Double, underusePercent: Double) -> GLMForecastVerdict {
+        if tokensPerHour <= 0, flatCreditsPerHour <= 0 { return .idle }
+        if projected >= remaining { return .overflow }
+        if remaining - projected < total * marginPercent / 100 { return .tight }
+        if remaining - projected > total * underusePercent / 100 { return .underuse }
+        return .fits
+    }
+
     /// Проекция одного квота-окна к resetAt. Агенты жгут токены независимо от
     /// времени суток, поэтому при свежих факторах обоих режимов горизонт
     /// [now, resetAt) режется на сегменты режима и каждый переводится в кредиты
@@ -252,16 +286,11 @@ extension ForecastEngine {
         projected = max(projected, used)
         let delta = projected - used
         let effectiveRate = hours > 0 ? delta / hours : 0     // кредиты/ч по горизонту
-        var verdict = GLMForecastVerdict.fits
-        if tokensPerHour <= 0, flatCreditsPerHour <= 0 {
-            verdict = .idle
-        } else if projected >= remaining {
-            verdict = .overflow
-        } else if remaining - projected < total * marginPercent / 100 {
-            verdict = .tight
-        } else if remaining - projected > total * underusePercent / 100 {
-            verdict = .underuse
-        }
+        let verdict = Self.verdict(projected: projected, remaining: remaining,
+                                   total: total, tokensPerHour: tokensPerHour,
+                                   flatCreditsPerHour: flatCreditsPerHour,
+                                   marginPercent: marginPercent,
+                                   underusePercent: underusePercent)
         let headroom = total > 0 ? 100 - projected / total * 100 : 0
         return GLMWindowForecast(
             verdict: verdict, projected: projected, remaining: remaining, total: total,
@@ -294,6 +323,7 @@ extension ForecastEngine {
         out.factorPeak = factors.peak; out.factorOffPeak = factors.offPeak
         out.factorPeakAt = factors.peakAt.map { Int64($0.timeIntervalSince1970 * 1000) }
         out.factorOffPeakAt = factors.offPeakAt.map { Int64($0.timeIntervalSince1970 * 1000) }
+        var weeklyRhythmShares: [Double]? = nil
         for (window, key) in [(fiveHours, "five"), (weekly, "week")] {
             guard let w = window else { continue }
             let duration: TimeInterval = key == "five" ? 5 * 3600 : 7 * 24 * 3600
@@ -311,25 +341,60 @@ extension ForecastEngine {
                                         marginPercent: config.marginPercent, underusePercent: 30)
             } else {
                 // §7d: горизонт недели — не мгновенный темп. EMA(τ=24ч) дельт
-                // weekUsed + полоса p50/p90; instant/recent остаются у 5h.
+                // weekUsed; форма горизонта — из WeeklyRhythm (если валиден),
+                // ворота — по текущему 5h-остатку (спека §4).
                 let week = store.weekSeries(now: now, days: 7)
                 let rate = weeklyRate(samples: week, gaps: store.gapRanges,
                                       windowStart: start, usedSoFar: w.used, now: now)
+                let resetDate = Date(timeIntervalSince1970: Double(w.resetAt) / 1000)
                 var fc = project(used: w.used, total: w.total, remaining: w.remaining,
-                                 resetAt: Date(timeIntervalSince1970: Double(w.resetAt) / 1000),
+                                 resetAt: resetDate,
                                  tokensPerHour: 0,
                                  flatCreditsPerHour: rate.creditsPerHour,
                                  factors: CalibrationFactors(), now: now,
                                  marginPercent: config.marginPercent, underusePercent: 30)
-                if let band = weeklyBand(samples: week, gaps: store.gapRanges,
-                                         resetAt: Date(timeIntervalSince1970: Double(w.resetAt) / 1000),
-                                         used: w.used, now: now) {
-                    fc.projectedP50 = band.p50
-                    fc.projectedP90 = band.p90
+                let rhythm = config.useWeeklyRhythm
+                    ? WeeklyRhythm(hourTotals: store.hourTotals, now: now,
+                                   factor: factorWeighting(factors, now: now))
+                    : nil
+                if rhythm?.valid == true, rate.creditsPerHour > 0 {
+                    let five = fiveHours.map { w5 in
+                        (remaining: max(0, w5.remaining), total: w5.total > 0 ? w5.total : 1,
+                         resetAt: Date(timeIntervalSince1970: Double(w5.resetAt) / 1000))
+                    }
+                    func horizon(_ r: Double) -> WeeklyHorizon {
+                        WeeklyRhythm.projectHorizon(from: now, to: resetDate, rate: r,
+                                                    share: rhythm!.share, calendar: .current,
+                                                    used: w.used, total: w.total, five: five)
+                    }
+                    let main = horizon(rate.creditsPerHour)
+                    fc.projected = max(w.used, w.used + main.burned)
+                    fc.projectedPath = main.trajectory
+                    fc.exhaustionAt = main.exhaustionAt ?? fc.exhaustionAt
+                    if let q = weeklyQuantiles(samples: week, gaps: store.gapRanges) {
+                        fc.projectedP50 = w.used + horizon(q.p50).burned
+                        fc.projectedP90 = w.used + horizon(q.p90).burned
+                    }
+                    // Вердикт/запас/ставка — от нового projected, пороги прежние.
+                    let hours = max(0, resetDate.timeIntervalSince(now) / 3600)
+                    let effective = hours > 0 ? (fc.projected - w.used) / hours : 0
+                    fc.rateCreditsPerHour = effective
+                    fc.headroomPercent = w.total > 0 ? 100 - fc.projected / w.total * 100 : 0
+                    fc.verdict = verdict(projected: fc.projected, remaining: w.remaining,
+                                         total: w.total, tokensPerHour: 0,
+                                         flatCreditsPerHour: rate.creditsPerHour,
+                                         marginPercent: config.marginPercent,
+                                         underusePercent: 30)
+                    if effective > 0, fc.exhaustionAt == nil, fc.verdict == .overflow {
+                        fc.exhaustionAt = Int64(now.addingTimeInterval(
+                            w.remaining / effective * 3600).timeIntervalSince1970 * 1000)
+                    }
+                    weeklyRhythmShares = rhythm!.share
                 }
                 out.weekly = fc
             }
         }
+        out.weeklyRhythm = weeklyRhythmShares
         // Агенты: имена/external/budgetMinutes резолвит вызывающий (задача 9) — здесь ключи.
         // id = ключ сессии: после декорирования имена могут совпасть (общий проект).
         out.agents = rates.map { r in
