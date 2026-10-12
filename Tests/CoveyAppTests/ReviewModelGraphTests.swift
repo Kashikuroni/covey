@@ -175,7 +175,7 @@ final class ReviewModelGraphTests: XCTestCase {
         XCTAssertNil(model.hoveredPath)
     }
 
-    func testSelectingAFileAddsItsNeighbourRowAndCentersIt() async throws {
+    func testSelectingAFileAddsItsNeighbourRowAndFramesTheRelatedBlocks() async throws {
         let (model, _) = await started(FakeReviewGraphs(linked))
         _ = await eventually { model.linkGraph != nil }
         model.setCanvasViewport(CGSize(width: 1200, height: 800))
@@ -183,8 +183,11 @@ final class ReviewModelGraphTests: XCTestCase {
         let layout = model.graphLayout
         XCTAssertEqual(layout.cards.filter { $0.kind == .user }.map(\.path), ["x.swift"])
         XCTAssertEqual(layout.cards.filter { $0.kind == .used }.map(\.path), ["lib/z.swift"])
-        let rect = try XCTUnwrap(layout.rects["a.swift"])
-        XCTAssertEqual(model.canvas.toScreen(CGPoint(x: rect.midX, y: rect.midY)), CGPoint(x: 600, y: 400))
+        let bounds = try XCTUnwrap(layout.bounds)
+        let min = model.canvas.toScreen(bounds.origin)
+        let max = model.canvas.toScreen(CGPoint(x: bounds.maxX, y: bounds.maxY))
+        XCTAssertTrue(min.x >= 0 && min.y >= 0 && max.x <= 1200 && max.y <= 800,
+                      "the related blocks, the selection's row included, fit the viewport")
 
         model.hover("x.swift", inside: true)
         await model.select("b.swift")
@@ -228,4 +231,110 @@ final class ReviewModelGraphTests: XCTestCase {
         let landed = await eventually { second.linkGraph != nil }
         XCTAssertTrue(landed)
     }
+
+    // MARK: Graph scope
+
+    private var threeFiles: [ChangedFile] {
+        [changed("a.swift"), changed("b.swift"), changed("z.swift")]
+    }
+
+    func testSelectingAFileNarrowsTheLayoutToItsRelatedBlocks() async {
+        let (model, _) = await started(FakeReviewGraphs(linked), files: threeFiles)
+        _ = await eventually { model.linkGraph != nil }
+        XCTAssertEqual(model.graphLayout.cards.filter { $0.kind == .changed }.count, 3)
+        await model.select("a.swift")
+        let layout = model.graphLayout
+        XCTAssertEqual(layout.cards.filter { $0.kind == .changed }.map(\.path).sorted(), ["a.swift", "b.swift"],
+                       "z.swift has no link to the selection and is not laid out")
+        XCTAssertEqual(layout.cards.filter { $0.kind == .user }.map(\.path), ["x.swift"],
+                       "the unchanged neighbour row stays")
+        XCTAssertEqual(layout.cards.filter { $0.kind == .used }.map(\.path), ["lib/z.swift"])
+    }
+
+    func testWithoutLinksTheLayoutKeepsEveryFile() async {
+        let (model, _) = await started(FakeReviewGraphs(), visible: false, files: threeFiles)
+        await model.select("a.swift")
+        XCTAssertEqual(model.graphLayout.cards.filter { $0.kind == .changed }.count, 3,
+                       "no graph yet: nothing is filtered out")
+    }
+
+    func testTheTransitiveToggleExtendsTheSelectionClosure() async {
+        let chain = graph([link("a.swift", "b.swift"), link("b.swift", "c.swift")])
+        let files = [changed("a.swift"), changed("b.swift"), changed("c.swift")]
+        let (model, _) = await started(FakeReviewGraphs(chain), files: files)
+        _ = await eventually { model.linkGraph != nil }
+        await model.select("a.swift")
+        func paths() -> [String] {
+            model.graphLayout.cards.filter { $0.kind == .changed }.map(\.path).sorted()
+        }
+        XCTAssertEqual(paths(), ["a.swift", "b.swift"])
+        model.toggleScopeTransitive()
+        XCTAssertEqual(paths(), ["a.swift", "b.swift", "c.swift"], "the closure walks one more hop")
+        model.toggleScopeTransitive()
+        XCTAssertEqual(paths(), ["a.swift", "b.swift"])
+    }
+
+    func testSelectingADirectoryScopesTheGraphAndSelectingItAgainRestoresEverything() async {
+        let files = [changed("d/1.py"), changed("d/2.py"), changed("e/2.py"), changed("f/3.py")]
+        let (model, _) = await started(FakeReviewGraphs(graph([link("d/1.py", "e/2.py")])), files: files)
+        _ = await eventually { model.linkGraph != nil }
+        model.selectDirectory("d")
+        XCTAssertEqual(model.graphLayout.cards.filter { $0.kind == .changed }.map(\.path).sorted(),
+                       ["d/1.py", "d/2.py", "e/2.py"], "the folder plus its direct changed neighbour")
+        XCTAssertEqual(model.graphScope, .directory("d"))
+        model.selectDirectory("d")
+        XCTAssertEqual(model.graphScope, .all, "tapping the selected directory again shows everything")
+        XCTAssertEqual(model.graphLayout.cards.filter { $0.kind == .changed }.count, 4)
+        model.selectDirectory("f")
+        XCTAssertEqual(model.graphLayout.cards.filter { $0.kind == .changed }.map(\.path), ["f/3.py"])
+    }
+
+    func testClearGraphScopeReturnsTheFullGraph() async {
+        let (model, _) = await started(FakeReviewGraphs(linked), files: threeFiles)
+        _ = await eventually { model.linkGraph != nil }
+        await model.select("a.swift")
+        XCTAssertEqual(model.graphLayout.cards.filter { $0.kind == .changed }.count, 2)
+        model.clearGraphScope()
+        XCTAssertEqual(model.graphScope, .all)
+        XCTAssertEqual(model.graphLayout.cards.filter { $0.kind == .changed }.count, 3)
+        XCTAssertEqual(model.selectedPath, "a.swift", "the selection itself survives")
+    }
+
+    func testSelectingAFitFramesEveryRelatedBlock() async throws {
+        let (model, _) = await started(FakeReviewGraphs(linked))
+        _ = await eventually { model.linkGraph != nil }
+        model.setCanvasViewport(CGSize(width: 1200, height: 800))
+        await model.select("a.swift")
+        let bounds = try XCTUnwrap(model.graphLayout.bounds)
+        let min = model.canvas.toScreen(bounds.origin)
+        let max = model.canvas.toScreen(CGPoint(x: bounds.maxX, y: bounds.maxY))
+        XCTAssertTrue(min.x >= 0 && min.y >= 0 && max.x <= 1200 && max.y <= 800,
+                      "every related block is inside the viewport: \(min)…\(max)")
+    }
+
+    func testTheScopeFallsBackToAllWhenTheSelectedFileLeavesTheChange() async {
+        let (model, git) = await started(FakeReviewGraphs(linked), files: threeFiles)
+        _ = await eventually { model.linkGraph != nil }
+        await model.select("z.swift")
+        XCTAssertEqual(model.graphScope, .file("z.swift"))
+        git.state = comparisonState([changed("a.swift"), changed("b.swift")], fingerprint: "fp-2")
+        git.fingerprintValue = "fp-2"
+        await model.checkFreshness()
+        XCTAssertEqual(model.graphScope, .all, "z.swift is gone: the graph shows everything again")
+        XCTAssertEqual(model.graphLayout.cards.filter { $0.kind == .changed }.count, 2)
+    }
+
+    func testAFilteredScopeFillsTheViewportWhileTheFullGraphStaysUnderHundredPercent() async throws {
+        let (model, _) = await started(FakeReviewGraphs(linked), files: threeFiles)
+        _ = await eventually { model.linkGraph != nil }
+        model.setCanvasViewport(CGSize(width: 2000, height: 2000))
+        await model.select("a.swift")
+        XCTAssertGreaterThan(model.canvas.zoom, 1, "a small related set spreads over the space")
+        model.clearGraphScope()
+        XCTAssertLessThanOrEqual(model.canvas.zoom, 1, "the full graph never zooms past 100%")
+        let bounds = try XCTUnwrap(model.graphLayout.bounds)
+        let max = model.canvas.toScreen(CGPoint(x: bounds.maxX, y: bounds.maxY))
+        XCTAssertLessThanOrEqual(max.x, 2000)
+    }
 }
+

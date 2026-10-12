@@ -46,15 +46,16 @@ struct CanvasTransform: Equatable {
     }
 
     /// Fits `content` inside the viewport minus `insets`: centered
-    /// horizontally, top-aligned under the title, never above 100%.
-    static func fit(_ content: CGRect?, in viewport: CGSize,
-                    insets: CanvasInsets = .canvas) -> CanvasTransform {
+    /// horizontally, top-aligned under the title, never above `maxZoom`
+    /// (100% unless a scope passes more, to fill the space with few blocks).
+    static func fit(_ content: CGRect?, in viewport: CGSize, insets: CanvasInsets = .canvas,
+                    maxZoom: CGFloat = 1) -> CanvasTransform {
         let width = viewport.width - insets.left - insets.right
         let height = viewport.height - insets.top - insets.bottom
         guard let content, content.width > 0, content.height > 0, width > 0, height > 0 else {
             return CanvasTransform()
         }
-        let z = clamp(min(width / content.width, height / content.height, 1))
+        let z = clamp(min(width / content.width, height / content.height, maxZoom))
         return CanvasTransform(zoom: z, pan: CGSize(
             width: insets.left + (width - content.width * z) / 2 - content.minX * z,
             height: insets.top - content.minY * z))

@@ -17,10 +17,23 @@ struct ReviewCanvas: View {
                     .offset(x: model.canvas.pan.width, y: model.canvas.pan.height)
                 title
                 if model.phase == .ready && model.files.isEmpty {
-                    Text("No changes in this comparison.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(tk.t3)
+                    if let offer = model.committedReviewOffer {
+                        VStack(spacing: 12) {
+                            Text("Working tree is clean — \(offer.ahead) commit\(offer.ahead == 1 ? "" : "s") ahead of \(offer.base).")
+                                .font(.system(size: 13))
+                                .foregroundStyle(tk.t3)
+                            ReviewButton(title: "Review committed work (\(offer.base)…\(offer.branch))",
+                                         prominent: true, tk: tk) {
+                                Task { await model.openCommittedReview() }
+                            }
+                        }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        Text("No changes in this comparison.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(tk.t3)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 }
                 VStack(alignment: .leading, spacing: 10) {
                     Spacer()
@@ -308,6 +321,11 @@ struct CanvasToolbar: View {
             divider
             label("Show links", hint: "L", on: model.linkSettings.showLinks) {
                 model.linkSettings.toggleShowLinks()
+            }
+            if model.graphScope != .all {
+                divider
+                label("All files", hint: "") { model.clearGraphScope() }
+                label("Transitive", hint: "", on: model.scopeTransitive) { model.toggleScopeTransitive() }
             }
             divider
             icon("questionmark", help: "Keyboard") { model.keysOverlayOpen = true }

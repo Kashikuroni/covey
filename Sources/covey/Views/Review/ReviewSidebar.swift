@@ -105,11 +105,18 @@ private struct ReviewTreeRowView: View {
     var body: some View {
         HStack(spacing: 6) {
             switch row.kind {
-            case .directory(_, let expanded):
-                Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 9))
-                    .foregroundStyle(tk.t3)
-                    .frame(width: 10)
+            case .directory(let path, let expanded):
+                Button {
+                    model.toggleDirectory(path)
+                } label: {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9))
+                        .foregroundStyle(tk.t3)
+                        .frame(width: 10)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(expanded ? "Collapse" : "Expand")
                 Text(row.name).font(.system(size: 12.5)).foregroundStyle(tk.t2)
                 Spacer()
             case .file(let file):
@@ -149,15 +156,17 @@ private struct ReviewTreeRowView: View {
         .onTapGesture {
             resignReviewTextFocus()
             switch row.kind {
-            case .directory(let path, _): model.toggleDirectory(path)
+            case .directory(let path, _): model.selectDirectory(path)
             case .file(let file): Task { await model.select(file.path) }
             }
         }
     }
 
     private var isSelected: Bool {
-        if case .file(let file) = row.kind { return model.selectedPath == file.path }
-        return false
+        switch row.kind {
+        case .file(let file): return model.selectedPath == file.path
+        case .directory(let path, _): return model.graphScope == .directory(path)
+        }
     }
 }
 

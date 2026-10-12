@@ -51,6 +51,14 @@ struct SendDraft: Equatable {
     var commentIDs: Set<UUID>
 }
 
+/// The empty working tree's pointer to the committed work: the branch is
+/// `ahead` commits past `base`, so the review continues as `base…branch`.
+struct CommittedReviewOffer: Equatable {
+    let base: String
+    let branch: String
+    let ahead: Int
+}
+
 /// State and behavior of one review. Stored state is internal (not
 /// private(set)) because the +Annotations/+Send/+Freshness extensions live
 /// in their own files; views change it only through methods, except for
@@ -77,6 +85,9 @@ final class ReviewModel {
     var suggestedBase: String?
     var banner: String?
     var toasts: [ReviewToast] = []
+    /// Non-nil when the working-tree comparison went empty while the branch
+    /// has commits the base has not seen: the canvas offers to review those.
+    var committedReviewOffer: CommittedReviewOffer?
 
     // Git ops state (ReviewModel+Ops); git is the source of truth, this is a
     // re-read mirror refreshed by open/reload — never persisted to the store.
@@ -140,6 +151,11 @@ final class ReviewModel {
     /// A build is running or waiting its turn: "Updating links…".
     var graphUpdating = false
     var hoveredPath: String?
+    /// What the canvas lays out: everything, or only the blocks related to
+    /// the selected file or directory.
+    var graphScope: GraphScope = .all
+    /// The scope takes direct links, or the whole changed-file closure.
+    var scopeTransitive = false
     /// "+N more" was pressed on the selected card.
     var neighboursExpanded = false
     @ObservationIgnored let graphs: any ReviewGraphBuilding
@@ -207,10 +223,14 @@ final class ReviewModel {
         store.flush()
         let loaded = store.load(worktree: worktree, comparison: comparison)
         record = loaded.record
+        if !loaded.exists, case .ref = comparison.head {
+            record = Self.inheritWorkingTreeReview(store: store, record: record)
+        }
         if record.targetSession == nil { record.targetSession = originSession }
         if loaded.recovered { toast("Saved review data was unreadable — started fresh") }
         state = nil
         selectedPath = nil
+        graphScope = .all
         closeFileView()
         diff = .idle
         diffOpen = false
@@ -242,6 +262,7 @@ final class ReviewModel {
             // refreshes guard on it.
             await refreshIndex()
             await refreshUpstream()
+            await refreshCommittedOffer()
             comparisonPopoverOpen = false
             store.setLastComparison(comparison, worktree: worktree)
             persist()
@@ -264,6 +285,24 @@ final class ReviewModel {
         } else {
             await open(record.comparison)
         }
+    }
+
+    /// First open of `base…<ref>` with no saved review of its own: a review
+    /// of the same base against the working tree continues here — with a
+    /// clean tree its diff is exactly what landed on the branch. Marks whose
+    /// diff no longer hashes the same demote themselves on load. The ref
+    /// comparison's own record, once it exists, is never overwritten.
+    static func inheritWorkingTreeReview(store: ReviewStore, record: ReviewRecord) -> ReviewRecord {
+        let sibling = store.load(worktree: record.worktree,
+                                 comparison: GitComparison(base: record.comparison.base))
+        guard sibling.exists else { return record }
+        var inherited = record
+        inherited.files = sibling.record.files
+        inherited.comments = sibling.record.comments
+        inherited.issues = sibling.record.issues
+        inherited.nextIssueId = sibling.record.nextIssueId
+        if let target = sibling.record.targetSession { inherited.targetSession = target }
+        return inherited
     }
 
     /// Adopts a fresh read; files seen for the first time start unread.
@@ -339,12 +378,20 @@ final class ReviewModel {
         if collapsedDirs.contains(dir) { collapsedDirs.remove(dir) } else { collapsedDirs.insert(dir) }
     }
 
+    /// The layout keeps only the scope's blocks while the links exist:
+    /// without them nothing can be told related.
+    var scopeFiltersLayout: Bool { graphScope != .all && graphLinks != nil }
+
     /// What `GraphLayout` places: the changed files by every link, and the
     /// selected file's neighbours while its row shows.
     var graphLayoutInput: GraphLayoutInput {
         let links = graphLinks
         var input = GraphLayoutInput(files: files.map(\.path), links: links, selected: selectedPath)
-        if let selected = selectedPath, let links, showsNeighbourRow {
+        if graphScope != .all, let links {
+            input.files = graphScope.related(files: input.files, links: links,
+                                             transitive: scopeTransitive).sorted()
+        }
+        if graphScope.showsNeighbourRow, let selected = selectedPath, let links, showsNeighbourRow {
             let changed = Set(input.files)
             input.users = links.filter { $0.to == selected && !changed.contains($0.from) }.map(\.from)
             input.used = links.filter { $0.from == selected && !changed.contains($0.to) }.map(\.to)
@@ -376,13 +423,14 @@ final class ReviewModel {
             if composer?.anchor.path != path { composer = nil }
         }
         selectedPath = path
+        if let path { graphScope = .file(path) }
         guard let path, let file = file(path) else {
             diff = .idle
             return
         }
-        // The graph follows the tree and J/K: the selected card, with its
-        // neighbour row now laid out, comes to the middle.
-        focusCard()
+        // The graph follows the tree and J/K: a filtered layout is framed
+        // whole, an unfiltered one centers the selected card.
+        frameSelection()
         diffOpen = true
         if review(for: path).state == .unread {
             record.files[path, default: FileReview()].state = .reviewing
@@ -545,9 +593,11 @@ final class ReviewModel {
     }
 
     /// Fitting nothing only resets the transform; the canvas counts as fitted
-    /// once a fit had at least one file to frame.
+    /// once a fit had at least one file to frame. A filtered scope lets the
+    /// fit zoom past 100%: few related blocks should still fill the window.
     func fitCanvas() {
-        canvas = CanvasTransform.fit(graphLayout.bounds, in: canvasViewport)
+        canvas = CanvasTransform.fit(graphLayout.bounds, in: canvasViewport,
+                                     maxZoom: scopeFiltersLayout ? CanvasTransform.zoomRange.upperBound : 1)
         canvasFitted = !files.isEmpty
     }
 

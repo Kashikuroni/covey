@@ -131,6 +131,36 @@ extension ReviewModel {
 
     /// "+N more" on the selected card.
     func expandNeighbours() { neighboursExpanded = true }
+
+    // MARK: Graph scope
+
+    /// The graph follows the tree and J/K: a filtered layout is framed whole,
+    /// an unfiltered one centers the selected card.
+    func frameSelection() {
+        if scopeFiltersLayout { fitCanvas() } else { focusCard() }
+    }
+
+    /// A directory row in the tree: tapping it scopes the graph to the
+    /// directory, tapping it again shows everything.
+    func selectDirectory(_ path: String) {
+        guard graphScope != .directory(path) else { return clearGraphScope() }
+        graphScope = .directory(path)
+        frameSelection()
+    }
+
+    /// The canvas toolbar's "All files": the full graph back, framed.
+    func clearGraphScope() {
+        guard graphScope != .all else { return }
+        graphScope = .all
+        fitCanvas()
+    }
+
+    /// The canvas toolbar's transitive toggle: direct links, or the whole
+    /// changed-file closure.
+    func toggleScopeTransitive() {
+        scopeTransitive.toggle()
+        frameSelection()
+    }
 }
 
 private extension GraphNotice {

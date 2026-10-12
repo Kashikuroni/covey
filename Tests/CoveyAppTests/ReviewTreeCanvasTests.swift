@@ -70,6 +70,15 @@ final class ReviewTreeCanvasTests: XCTestCase {
         XCTAssertEqual(small.zoom, 1, "never zooms past 100% to fit")
     }
 
+    func testFitCanZoomPastHundredPercentUpToTheGivenCap() {
+        let fit = CanvasTransform.fit(CGRect(x: 0, y: 0, width: 100, height: 100),
+                                      in: CGSize(width: 2000, height: 2000), maxZoom: 2)
+        XCTAssertEqual(fit.zoom, 2, accuracy: 0.0001, "a focused scope fills the space")
+        let capped = CanvasTransform.fit(CGRect(x: 0, y: 0, width: 1000, height: 500),
+                                         in: CGSize(width: 600, height: 700), maxZoom: 2)
+        XCTAssertEqual(capped.zoom, 0.52, accuracy: 0.0001, "too big to fit: it shrinks as before")
+    }
+
     func testFitOfNothingIsIdentity() {
         XCTAssertEqual(CanvasTransform.fit(nil, in: CGSize(width: 800, height: 600)), CanvasTransform())
         XCTAssertEqual(CanvasTransform.fit(CGRect(x: 0, y: 0, width: 10, height: 10), in: .zero), CanvasTransform())

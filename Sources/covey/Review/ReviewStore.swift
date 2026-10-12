@@ -11,6 +11,8 @@ final class ReviewStore: @unchecked Sendable {
 
     struct Loaded {
         var record: ReviewRecord
+        /// The record was already there — on disk or pending — not brand new.
+        var exists: Bool
         /// The file on disk was unreadable and was set aside.
         var recovered: Bool
     }
@@ -41,18 +43,19 @@ final class ReviewStore: @unchecked Sendable {
     func load(worktree: String, comparison: GitComparison) -> Loaded {
         let id = Self.recordID(worktree: worktree, comparison: comparison)
         if let queued = queue.sync(execute: { pending[id] }) {
-            return Loaded(record: queued, recovered: false)
+            return Loaded(record: queued, exists: true, recovered: false)
         }
         let fresh = ReviewRecord(worktree: worktree, comparison: comparison)
         let url = URL(fileURLWithPath: recordPath(id: id))
-        guard let data = try? Data(contentsOf: url) else { return Loaded(record: fresh, recovered: false) }
+        guard let data = try? Data(contentsOf: url) else { return Loaded(record: fresh, exists: false, recovered: false) }
         do {
-            return Loaded(record: try JSONDecoder().decode(ReviewRecord.self, from: data), recovered: false)
+            return Loaded(record: try JSONDecoder().decode(ReviewRecord.self, from: data),
+                          exists: true, recovered: false)
         } catch {
             let stamp = Int(Date().timeIntervalSince1970)
             try? FileManager.default.moveItem(
                 at: url, to: root.appendingPathComponent("\(id).corrupt-\(stamp).json"))
-            return Loaded(record: fresh, recovered: true)
+            return Loaded(record: fresh, exists: false, recovered: true)
         }
     }
 

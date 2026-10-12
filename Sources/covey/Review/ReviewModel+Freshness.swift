@@ -75,6 +75,7 @@ extension ReviewModel {
                     await loadDiff(for: file, showLoading: false)
                 } else {
                     selectedPath = nil
+                    graphScope = .all
                     diff = .idle
                     diffOpen = false
                 }
@@ -84,6 +85,7 @@ extension ReviewModel {
             guard generation == loadGeneration else { return }
             await refreshIndex()
             await refreshUpstream()
+            await refreshCommittedOffer()
             failureStreak = 0
             banner = nil
             persist()
@@ -93,6 +95,32 @@ extension ReviewModel {
             banner = Self.describeLoad(error)
             EventLog.note("error", banner ?? "")
         }
+    }
+
+    /// The empty-state offer (Review Focus — committed work): only a working
+    /// tree comparison with nothing left in it, over a branch ahead of its
+    /// base, offers the branch for review. Anything else clears it.
+    func refreshCommittedOffer() async {
+        let comparison = record.comparison
+        guard phase == .ready, comparison.head == .workingTree,
+              !comparison.base.isEmpty, !branchLabel.isEmpty, branchLabel != comparison.base,
+              files.isEmpty else {
+            committedReviewOffer = nil
+            return
+        }
+        let generation = loadGeneration
+        let base = comparison.base
+        let branch = branchLabel
+        let counts = await git.aheadBehind(root: worktree, branch: branch, base: base)
+        guard generation == loadGeneration, record.comparison == comparison else { return }
+        committedReviewOffer = counts.ahead > 0
+            ? CommittedReviewOffer(base: base, branch: branch, ahead: counts.ahead) : nil
+    }
+
+    /// The empty-state button: review the branch's committed work.
+    func openCommittedReview() async {
+        guard let offer = committedReviewOffer else { return }
+        await open(GitComparison(base: offer.base, head: .ref(offer.branch)))
     }
 
     /// A reviewed file whose diff no longer hashes to what the reviewer saw

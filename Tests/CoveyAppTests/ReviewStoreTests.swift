@@ -43,6 +43,14 @@ final class ReviewStoreTests: XCTestCase {
         XCTAssertFalse(loaded.recovered)
     }
 
+    func testLoadReportsWhetherTheRecordWasAlreadyThere() {
+        let store = ReviewStore(root: root, debounce: 0)
+        XCTAssertFalse(store.load(worktree: worktree, comparison: comparison).exists)
+        store.save(sampleRecord())
+        store.flush()
+        XCTAssertTrue(store.load(worktree: worktree, comparison: comparison).exists)
+    }
+
     func testSavesCoalesceIntoOneWrite() {
         let store = ReviewStore(root: root, debounce: 0.2)
         var record = sampleRecord()
